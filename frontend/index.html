@@ -3,15 +3,21 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>StudyLift Year 7 Portal</title>
+    <title>PaperPanda Year 7 Portal</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <div class="page-shell">
       <section class="landing-panel" id="landing-panel">
         <div class="landing-copy">
-          <p class="eyebrow">Year 7 learning support</p>
-          <h1>StudyLift helps students read, organise, and understand schoolwork.</h1>
+          <div class="brand-lockup">
+            <img src="/paperpanda-logo.png" alt="PaperPanda logo" class="brand-lockup__logo" />
+            <div class="brand-lockup__copy">
+              <span class="brand-lockup__name">PaperPanda</span>
+              <span class="brand-lockup__tag">Year 7 learning support</span>
+            </div>
+          </div>
+          <h1>PaperPanda helps students read, organise, and understand schoolwork.</h1>
           <p class="landing-summary">
             Upload class documents, listen to instructions, ask for guidance, and keep every
             assessment linked to the notes that matter.
@@ -56,8 +62,14 @@
 
       <main class="app-shell hidden" id="app-shell">
         <header class="topbar">
-          <div>
-            <p class="eyebrow">StudyLift</p>
+          <div class="topbar__brand-block">
+            <div class="brand-lockup brand-lockup--topbar">
+              <img src="/paperpanda-logo.png" alt="PaperPanda logo" class="brand-lockup__logo brand-lockup__logo--small" />
+              <div class="brand-lockup__copy">
+                <span class="brand-lockup__name brand-lockup__name--topbar">PaperPanda</span>
+                <span class="brand-lockup__tag">Student learning dashboard</span>
+              </div>
+            </div>
             <h2 id="welcome-heading">Welcome back</h2>
           </div>
           <div class="topbar__actions">
@@ -293,8 +305,14 @@
 
       <section class="task-view hidden" id="task-view">
         <header class="topbar">
-          <div>
-            <p class="eyebrow">Workspace</p>
+          <div class="topbar__brand-block">
+            <div class="brand-lockup brand-lockup--topbar">
+              <img src="/paperpanda-logo.png" alt="PaperPanda logo" class="brand-lockup__logo brand-lockup__logo--small" />
+              <div class="brand-lockup__copy">
+                <span class="brand-lockup__name brand-lockup__name--topbar">PaperPanda</span>
+                <span class="brand-lockup__tag">Task workspace</span>
+              </div>
+            </div>
             <h2 id="task-view-title">Task workspace</h2>
           </div>
           <div class="topbar__actions">
@@ -414,6 +432,7 @@
           </label>
 
           <div class="upload-submit-row">
+            <button type="button" class="ghost-button" id="load-assessment-schedule-button">Load assessment schedule</button>
             <button type="button" class="primary-button" id="process-upload-button">Submit</button>
             <button type="button" class="ghost-button" id="clear-upload-button">Clear</button>
           </div>

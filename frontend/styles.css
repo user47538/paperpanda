@@ -1,27 +1,27 @@
 :root {
-  --bg: #ffffff;
-  --bg-strong: #ffffff;
-  --surface: #ffffff;
-  --surface-strong: #f8f4ef;
+  --bg: #fffaf4;
+  --bg-strong: #fffdf8;
+  --surface: rgba(255, 255, 255, 0.9);
+  --surface-strong: #fff7e9;
   --ink: #111111;
-  --muted: #5e584f;
-  --line: rgba(17, 17, 17, 0.14);
-  --accent: #c76035;
-  --accent-soft: #efe8df;
-  --accent-strong: #c76035;
-  --warm: #f8f4ef;
+  --muted: #625d53;
+  --line: rgba(86, 70, 51, 0.16);
+  --accent: #e98967;
+  --accent-soft: #fff1dc;
+  --accent-strong: #dc7b5c;
+  --warm: #fff7e9;
   --danger: #a44035;
-  --shadow: none;
+  --shadow: 0 22px 50px rgba(232, 196, 157, 0.15);
   --radius-xl: 28px;
   --radius-lg: 24px;
   --radius-md: 16px;
   --font-display: "Helvetica Neue", Helvetica, Arial, sans-serif;
   --font-body: "Helvetica Neue", Helvetica, Arial, sans-serif;
-  --box-1: #f8f4ef;
-  --box-2: #f8f4ef;
-  --box-3: #f8f4ef;
-  --box-4: #f8f4ef;
-  --box-5: #f8f4ef;
+  --box-1: #fff0cb;
+  --box-2: #e7f6ff;
+  --box-3: #f7e9ff;
+  --box-4: #e8f8ef;
+  --box-5: #ffe8ef;
 }
 
 * {
@@ -36,7 +36,10 @@ body {
 
 body {
   min-width: 320px;
-  background: #ffffff;
+  background:
+    radial-gradient(circle at top left, rgba(255, 236, 185, 0.55), transparent 32%),
+    radial-gradient(circle at top right, rgba(230, 244, 255, 0.8), transparent 28%),
+    linear-gradient(180deg, #fffdf8 0%, #fff7ef 100%);
   color: var(--ink);
   font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
@@ -135,11 +138,53 @@ button {
   box-shadow: var(--shadow);
 }
 
+.brand-lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.brand-lockup__logo {
+  width: 68px;
+  height: 68px;
+  object-fit: contain;
+}
+
+.brand-lockup__logo--small {
+  width: 40px;
+  height: 40px;
+}
+
+.brand-lockup__copy {
+  display: grid;
+  gap: 4px;
+}
+
+.brand-lockup__name {
+  font-family: var(--font-display);
+  font-size: 1.4rem;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  text-transform: none;
+}
+
+.brand-lockup__name--topbar {
+  font-size: 1rem;
+}
+
+.brand-lockup__tag {
+  color: #8b826f;
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .landing-copy {
   border-radius: 28px;
   padding: 34px;
   overflow: hidden;
-  background: #ffffff;
+  background: linear-gradient(160deg, rgba(255, 247, 233, 0.95), rgba(255, 255, 255, 0.88));
 }
 
 .landing-copy::after {
@@ -151,7 +196,7 @@ button {
   padding: 34px;
   display: grid;
   gap: 18px;
-  background: #f8f4ef;
+  background: linear-gradient(180deg, rgba(255, 240, 203, 0.76), rgba(255, 255, 255, 0.92));
 }
 
 .signin-mode-row {
@@ -231,9 +276,9 @@ button {
   align-items: center;
   border-radius: 999px;
   padding: 9px 14px;
-  background: #ffffff;
+  background: rgba(255, 255, 255, 0.9);
   color: #675f56;
-  border: 1px solid rgba(17, 17, 17, 0.08);
+  border: 1px solid rgba(233, 137, 103, 0.18);
 }
 
 .signin-card label {
@@ -484,8 +529,13 @@ button {
   margin-bottom: 32px;
   padding: 22px 40px 14px;
   border-bottom: 1px solid #1f1c20;
-  background: rgba(255, 255, 255, 0.96);
+  background: rgba(255, 252, 247, 0.92);
   backdrop-filter: blur(10px);
+}
+
+.topbar__brand-block {
+  display: grid;
+  gap: 12px;
 }
 
 .topbar__actions {
@@ -533,7 +583,7 @@ button {
   padding: 28px;
   display: grid;
   gap: 12px;
-  background: #f8f4ef;
+  background: linear-gradient(135deg, rgba(255, 244, 213, 0.9), rgba(255, 255, 255, 0.92));
 }
 
 .overview-card--upcoming {
@@ -602,7 +652,7 @@ button {
 .content-panel {
   border-radius: var(--radius-xl);
   padding: 28px;
-  background: #ffffff;
+  background: rgba(255, 255, 255, 0.88);
 }
 
 .content-panel {
@@ -674,8 +724,8 @@ button {
 }
 
 .subject-tile--active {
-  border-color: #111111;
-  background: #ffffff;
+  border-color: rgba(233, 137, 103, 0.48);
+  background: rgba(255, 255, 255, 0.96);
 }
 
 .subject-tile__title {
@@ -697,7 +747,7 @@ button {
   position: sticky;
   top: 88px;
   z-index: 16;
-  background: rgba(255, 255, 255, 0.96);
+  background: rgba(255, 252, 247, 0.94);
   backdrop-filter: blur(8px);
 }
 
@@ -725,13 +775,18 @@ button {
   padding: 0;
   border: 0;
   background: transparent;
-  color: #6c655d;
+  color: #7c7569;
   font-family: var(--font-display);
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   cursor: pointer;
+}
+
+.subject-nav-button:hover,
+.topbar-link-button:hover {
+  color: var(--accent-strong);
 }
 
 .subject-nav-button:hover {

@@ -10,9 +10,9 @@ window.dispatchEvent(new Event("studylift:pdf-ready"));
 
 const accountsStorageKey = "studylift-accounts";
 const sessionStorageKey = "studylift-session";
-const subjectsStorageKey = "studylift-subjects";
+const subjectsStorageKey = "paperpanda-subjects-by-account";
 const settingsStorageKey = "studylift-settings";
-const previewDatabaseName = "studylift-assets";
+const previewDatabaseName = "paperpanda-assets";
 const previewStoreName = "document-previews";
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://localhost:3001").replace(/\/$/, "");
 let pdfjsLibPromise = null;
@@ -313,6 +313,30 @@ const subjectSeed = [
   }
 ];
 
+const subjectTemplateSeed = subjectSeed.map(({ documents, assessments, watch, askHistory, ...subject }) => ({
+  ...subject,
+  documents: [],
+  assessments: [],
+  watch: [],
+  askHistory: []
+}));
+
+const assessmentScheduleSeed = Object.fromEntries(
+  subjectSeed.map((subject) => [
+    subject.id,
+    structuredClone(subject.assessments || []).map((assessment) => ({
+      ...assessment,
+      linkedDocumentIds: [],
+      completed: false,
+      workNotes: ""
+    }))
+  ])
+);
+
+const maddieDocumentSeed = Object.fromEntries(
+  subjectSeed.map((subject) => [subject.id, structuredClone(subject.documents || [])])
+);
+
 const state = {
   studentName: "",
   currentUserEmail: "",
@@ -351,7 +375,7 @@ const state = {
     homeBackground: "",
     subjectsBackground: ""
   },
-  subjects: structuredClone(subjectSeed)
+  subjects: createBaseSubjects()
 };
 
 const elements = {
@@ -411,6 +435,7 @@ const elements = {
   uploadWatchUrl: document.getElementById("upload-watch-url"),
   uploadWatchTitleWrap: document.getElementById("upload-watch-title-wrap"),
   uploadWatchTitle: document.getElementById("upload-watch-title"),
+  loadAssessmentScheduleButton: document.getElementById("load-assessment-schedule-button"),
   processUploadButton: document.getElementById("process-upload-button"),
   clearUploadButton: document.getElementById("clear-upload-button"),
   uploadStatus: document.getElementById("upload-status"),
@@ -473,6 +498,71 @@ const elements = {
   saveTaskFilesButton: document.getElementById("save-task-files-button"),
   closeTaskViewButton: document.getElementById("close-task-view-button")
 };
+
+function normaliseAccountKey(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function isMaddieAccount(accountOrName) {
+  const name =
+    typeof accountOrName === "string" ? accountOrName : accountOrName?.name || "";
+  return normaliseAccountKey(name) === "maddie woolley";
+}
+
+function buildAssessmentTemplateKey(assessment) {
+  return [
+    String(assessment.taskNumber || "").trim().toLowerCase(),
+    String(assessment.componentTask || assessment.title || "").trim().toLowerCase()
+  ].join("::");
+}
+
+function createBaseSubjects() {
+  return structuredClone(subjectTemplateSeed).map((subject) => ({
+    ...subject,
+    documents: [],
+    assessments: [],
+    watch: [],
+    askHistory: []
+  }));
+}
+
+function createInitialSubjectsForAccount(account) {
+  const includeMaddieDocuments = isMaddieAccount(account);
+  return createBaseSubjects().map((subject) => ({
+    ...subject,
+    documents: includeMaddieDocuments ? structuredClone(maddieDocumentSeed[subject.id] || []) : [],
+    assessments: [],
+    watch: [],
+    askHistory: []
+  }));
+}
+
+function buildAssessmentScheduleForSubject(subjectId, existingAssessments = []) {
+  const scheduleTemplates = structuredClone(assessmentScheduleSeed[subjectId] || []);
+  const existingByKey = new Map(
+    existingAssessments.map((assessment) => [buildAssessmentTemplateKey(assessment), assessment])
+  );
+  const scheduleKeys = new Set(scheduleTemplates.map(buildAssessmentTemplateKey));
+
+  const importedSchedule = scheduleTemplates.map((assessment) => {
+    const existingAssessment = existingByKey.get(buildAssessmentTemplateKey(assessment));
+    return {
+      ...assessment,
+      id: existingAssessment?.id || createId(),
+      linkedDocumentIds: Array.isArray(existingAssessment?.linkedDocumentIds)
+        ? [...existingAssessment.linkedDocumentIds]
+        : [],
+      completed: Boolean(existingAssessment?.completed),
+      workNotes: existingAssessment?.workNotes || ""
+    };
+  });
+
+  const customAssessments = existingAssessments.filter(
+    (assessment) => !scheduleKeys.has(buildAssessmentTemplateKey(assessment))
+  );
+
+  return [...importedSchedule, ...customAssessments];
+}
 
 function getSelectedSubject() {
   return state.subjects.find((subject) => subject.id === state.selectedSubjectId);
@@ -870,25 +960,73 @@ function createQuotaFallbackDocument(documentRecord) {
   };
 }
 
-function persistSubjects() {
-  const persistableSubjects = state.subjects.map((subject) => ({
+function createPersistableSubjects(subjects) {
+  return subjects.map((subject) => ({
     ...subject,
     documents: Array.isArray(subject.documents)
       ? subject.documents.map(createPersistableDocument)
       : []
   }));
+}
+
+function createQuotaFallbackSubjects(subjects) {
+  return subjects.map((subject) => ({
+    ...subject,
+    askHistory: Array.isArray(subject.askHistory) ? subject.askHistory.slice(-5) : [],
+    documents: Array.isArray(subject.documents)
+      ? subject.documents.map(createQuotaFallbackDocument)
+      : []
+  }));
+}
+
+function loadStoredSubjectsMap() {
+  const raw = window.localStorage.getItem(subjectsStorageKey);
+  if (!raw) {
+    return {};
+  }
 
   try {
-    window.localStorage.setItem(subjectsStorageKey, JSON.stringify(persistableSubjects));
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
   } catch (error) {
-    const fallbackSubjects = state.subjects.map((subject) => ({
-      ...subject,
-      askHistory: Array.isArray(subject.askHistory) ? subject.askHistory.slice(-5) : [],
-      documents: Array.isArray(subject.documents)
-        ? subject.documents.map(createQuotaFallbackDocument)
-        : []
-    }));
-    window.localStorage.setItem(subjectsStorageKey, JSON.stringify(fallbackSubjects));
+    console.error("Subject store could not be restored.", error);
+    return {};
+  }
+}
+
+function saveStoredSubjectsMap(subjectsByAccount) {
+  window.localStorage.setItem(subjectsStorageKey, JSON.stringify(subjectsByAccount));
+}
+
+function hydrateStoredSubject(subject, index) {
+  return {
+    ...structuredClone(subjectTemplateSeed[index] || {}),
+    ...subject,
+    documents: Array.isArray(subject.documents) ? subject.documents.map(normaliseDocument) : [],
+    assessments: Array.isArray(subject.assessments) ? subject.assessments.map(normaliseAssessment) : [],
+    watch: Array.isArray(subject.watch) ? subject.watch : [],
+    askHistory: Array.isArray(subject.askHistory) ? subject.askHistory : [],
+    practice: Array.isArray(subject.practice)
+      ? subject.practice
+      : structuredClone(subjectTemplateSeed[index]?.practice || [])
+  };
+}
+
+function persistSubjects() {
+  if (!state.currentUserEmail) {
+    return;
+  }
+
+  const accountKey = normaliseAccountKey(state.currentUserEmail);
+  const storedSubjectsMap = loadStoredSubjectsMap();
+  const persistableSubjects = createPersistableSubjects(state.subjects);
+
+  try {
+    storedSubjectsMap[accountKey] = persistableSubjects;
+    saveStoredSubjectsMap(storedSubjectsMap);
+  } catch (error) {
+    storedSubjectsMap[accountKey] = createQuotaFallbackSubjects(state.subjects);
+    saveStoredSubjectsMap(storedSubjectsMap);
     if (elements?.uploadStatus) {
       elements.uploadStatus.textContent =
         "Large document previews will stay available in this session, but only a lighter saved version will persist after refresh.";
@@ -932,29 +1070,37 @@ function normaliseDocument(documentRecord) {
 }
 
 function restoreSubjects() {
-  const raw = window.localStorage.getItem(subjectsStorageKey);
-  if (!raw) {
+  state.subjects = createBaseSubjects();
+}
+
+function restoreSubjectsForAccount(account) {
+  const accountKey = normaliseAccountKey(account?.email);
+  if (!accountKey) {
+    state.subjects = createBaseSubjects();
     return;
   }
 
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return;
-    }
-
-    state.subjects = parsed.map((subject, index) => ({
-      ...structuredClone(subjectSeed[index] || {}),
-      ...subject,
-      documents: Array.isArray(subject.documents) ? subject.documents.map(normaliseDocument) : [],
-      assessments: Array.isArray(subject.assessments) ? subject.assessments.map(normaliseAssessment) : [],
-      watch: Array.isArray(subject.watch) ? subject.watch : [],
-      askHistory: Array.isArray(subject.askHistory) ? subject.askHistory : [],
-      practice: Array.isArray(subject.practice) ? subject.practice : structuredClone(subjectSeed[index]?.practice || [])
-    }));
-  } catch (error) {
-    console.error("Failed to restore subjects.", error);
+  const storedSubjectsMap = loadStoredSubjectsMap();
+  const storedSubjects = storedSubjectsMap[accountKey];
+  if (Array.isArray(storedSubjects)) {
+    state.subjects = storedSubjects.map(hydrateStoredSubject);
+  } else {
+    state.subjects = createInitialSubjectsForAccount(account);
+    storedSubjectsMap[accountKey] = createPersistableSubjects(state.subjects);
+    saveStoredSubjectsMap(storedSubjectsMap);
   }
+
+  if (!state.subjects.some((subject) => subject.id === state.selectedSubjectId)) {
+    state.selectedSubjectId = state.subjects[0]?.id || "";
+  }
+  const selectedSubject = state.subjects.find((subject) => subject.id === state.selectedSubjectId);
+  const firstDocumentId = getSortedDocuments(selectedSubject || { documents: [] })[0]?.id || null;
+  state.selectedDocumentId = firstDocumentId;
+  state.askDocumentId = firstDocumentId;
+  state.selectedDocumentIds = [];
+  state.expandedDocumentGroups = {};
+  state.watchExpanded = false;
+  state.documentsExpanded = false;
 
   hydratePreviewImages();
 }
@@ -973,6 +1119,7 @@ function restoreSessionUser() {
 
   state.currentUserEmail = account.email;
   state.studentName = account.name;
+  restoreSubjectsForAccount(account);
   openDashboard("home");
 }
 
@@ -3300,6 +3447,34 @@ function handleSetTermDates() {
   render();
 }
 
+function loadAssessmentSchedule() {
+  const hasOfficialSchedule = state.subjects.some(
+    (subject) => Array.isArray(assessmentScheduleSeed[subject.id]) && assessmentScheduleSeed[subject.id].length
+  );
+  if (!hasOfficialSchedule) {
+    elements.uploadStatus.textContent = "No assessment schedule is available to load.";
+    return;
+  }
+
+  const hasExistingAssessments = state.subjects.some((subject) => subject.assessments.length);
+  if (hasExistingAssessments) {
+    const confirmed = window.confirm(
+      "Load the assessment schedule for every subject? Existing schedule items will be refreshed, and any custom assessments will be kept."
+    );
+    if (!confirmed) {
+      return;
+    }
+  }
+
+  state.subjects = state.subjects.map((subject) => ({
+    ...subject,
+    assessments: buildAssessmentScheduleForSubject(subject.id, subject.assessments || [])
+  }));
+  persistSubjects();
+  render();
+  elements.uploadStatus.textContent = "Assessment schedule loaded for all subjects.";
+}
+
 function saveAccountSettings() {
   const currentAccount = findAccountByEmail(state.currentUserEmail);
   if (!currentAccount) {
@@ -3328,6 +3503,16 @@ function saveAccountSettings() {
       ? { ...account, name: nextName, email: nextEmail }
       : account
   );
+  if (nextEmail !== currentAccount.email.toLowerCase()) {
+    const storedSubjectsMap = loadStoredSubjectsMap();
+    const currentKey = normaliseAccountKey(currentAccount.email);
+    const nextKey = normaliseAccountKey(nextEmail);
+    if (storedSubjectsMap[currentKey]) {
+      storedSubjectsMap[nextKey] = storedSubjectsMap[currentKey];
+      delete storedSubjectsMap[currentKey];
+      saveStoredSubjectsMap(storedSubjectsMap);
+    }
+  }
   saveAccounts(updatedAccounts);
   state.studentName = nextName;
   state.currentUserEmail = nextEmail;
@@ -3436,6 +3621,7 @@ function handleDashboardOpen() {
     state.studentName = studentName;
     state.currentUserEmail = studentEmail;
     persistSession(studentEmail);
+    restoreSubjectsForAccount({ name: studentName, email: studentEmail });
     openDashboard("home");
     return;
   }
@@ -3449,6 +3635,7 @@ function handleDashboardOpen() {
   state.studentName = account.name;
   state.currentUserEmail = account.email;
   persistSession(account.email);
+  restoreSubjectsForAccount(account);
   openDashboard("home");
 }
 
@@ -3576,6 +3763,7 @@ elements.clearUploadButton.addEventListener("click", () => {
   clearPendingUpload();
   resetUploadStatus();
 });
+elements.loadAssessmentScheduleButton.addEventListener("click", loadAssessmentSchedule);
 [
   elements.uploadClassNotes,
   elements.uploadAssessment,
@@ -3604,6 +3792,7 @@ elements.signoutButton.addEventListener("click", () => {
   clearSession();
   state.studentName = "";
   state.currentUserEmail = "";
+  state.subjects = createBaseSubjects();
   showLanding();
 });
 document.addEventListener("keydown", (event) => {
