@@ -1979,7 +1979,7 @@ function renderTaskView() {
     }
     const linkedDocuments = subject.documents.filter((document) => assessment.linkedDocumentIds.includes(document.id));
     elements.taskViewTitle.textContent = assessment.componentTask || assessment.title;
-    elements.taskSourceTitle.textContent = "Assessment document";
+    elements.taskSourceTitle.textContent = assessment.componentTask || assessment.title;
     elements.taskSourceContent.innerHTML = `
       <article class="assessment-item assessment-item--current task-assessment-card">
         <div class="assessment-item__header">
@@ -2009,20 +2009,23 @@ function renderTaskView() {
           </div>
         </div>
         <div class="task-assessment-card__summary">${escapeHtml(assessment.description || `${assessment.componentTask || assessment.title}.`)}</div>
-        <div class="reader-actions" style="margin-top:22px;display:flex;flex-wrap:wrap;gap:10px;">
-          ${
-            linkedDocuments.length
-              ? linkedDocuments
-                  .map(
-                    (document) => `
-                      <button type="button" class="ghost-button" data-task-document-id="${document.id}">
-                        ${escapeHtml(document.title)}
-                      </button>
-                    `
-                  )
-                  .join("")
-              : '<span class="document-empty">No supporting documents linked yet.</span>'
-          }
+        <div class="task-relevant-notes">
+          <p class="eyebrow task-relevant-notes__heading">Relevant Notes</p>
+          <div class="task-relevant-notes__list">
+            ${
+              linkedDocuments.length
+                ? linkedDocuments
+                    .map(
+                      (document) => `
+                        <button type="button" class="ghost-button task-note-chip" data-task-document-id="${document.id}">
+                          ${escapeHtml(document.title)}
+                        </button>
+                      `
+                    )
+                    .join("")
+                : '<span class="document-empty">No supporting documents linked yet.</span>'
+            }
+          </div>
         </div>
       </article>
     `;

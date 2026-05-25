@@ -1345,10 +1345,51 @@ button {
   border: 1px solid rgba(17, 17, 17, 0.1);
 }
 
+.task-assessment-card .assessment-grid {
+  gap: 8px;
+}
+
+.task-assessment-card .assessment-fact {
+  padding: 8px 10px;
+  border-radius: 12px;
+}
+
+.task-assessment-card .assessment-fact strong {
+  margin-bottom: 3px;
+  font-size: 0.6rem;
+}
+
+.task-assessment-card .assessment-fact span {
+  display: block;
+  font-size: 0.84rem;
+  text-align: left;
+}
+
 .task-assessment-card__summary {
   margin-top: 14px;
   color: var(--muted);
   line-height: 1.65;
+}
+
+.task-relevant-notes {
+  margin-top: 18px;
+}
+
+.task-relevant-notes__heading {
+  margin: 0 0 8px;
+}
+
+.task-relevant-notes__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-start;
+}
+
+.task-note-chip {
+  padding: 7px 10px;
+  font-size: 10px;
+  letter-spacing: 0.1em;
 }
 
 @media (max-width: 1180px) {
