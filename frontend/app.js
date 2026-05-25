@@ -11,10 +11,13 @@ window.dispatchEvent(new Event("studylift:pdf-ready"));
 const storageKey = "studylift-student";
 const subjectsStorageKey = "studylift-subjects";
 const settingsStorageKey = "studylift-settings";
+const previewDatabaseName = "studylift-assets";
+const previewStoreName = "document-previews";
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://localhost:3001").replace(/\/$/, "");
 let pdfjsLibPromise = null;
 let currentAudioPlayback = null;
 let currentAudioObjectUrl = "";
+let previewDatabasePromise = null;
 
 const subjectSeed = [
   {
@@ -610,6 +613,124 @@ function persistStudent(name) {
   window.localStorage.setItem(storageKey, name);
 }
 
+function openPreviewDatabase() {
+  if (!("indexedDB" in window)) {
+    return Promise.resolve(null);
+  }
+
+  if (!previewDatabasePromise) {
+    previewDatabasePromise = new Promise((resolve, reject) => {
+      const request = window.indexedDB.open(previewDatabaseName, 1);
+      request.onerror = () => reject(request.error || new Error("Preview storage could not be opened."));
+      request.onupgradeneeded = () => {
+        const database = request.result;
+        if (!database.objectStoreNames.contains(previewStoreName)) {
+          database.createObjectStore(previewStoreName, { keyPath: "id" });
+        }
+      };
+      request.onsuccess = () => resolve(request.result);
+    }).catch((error) => {
+      console.error("Preview database failed to open.", error);
+      previewDatabasePromise = null;
+      return null;
+    });
+  }
+
+  return previewDatabasePromise;
+}
+
+async function putPreviewRecord(documentId, previewImageUrl) {
+  const database = await openPreviewDatabase();
+  if (!database || !previewImageUrl) {
+    return;
+  }
+
+  await new Promise((resolve, reject) => {
+    const transaction = database.transaction(previewStoreName, "readwrite");
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error || new Error("Preview image could not be saved."));
+    transaction.objectStore(previewStoreName).put({ id: documentId, previewImageUrl });
+  });
+}
+
+async function getPreviewRecord(documentId) {
+  const database = await openPreviewDatabase();
+  if (!database) {
+    return null;
+  }
+
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(previewStoreName, "readonly");
+    const request = transaction.objectStore(previewStoreName).get(documentId);
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => reject(request.error || new Error("Preview image could not be loaded."));
+  });
+}
+
+async function deletePreviewRecords(documentIds) {
+  const database = await openPreviewDatabase();
+  if (!database || !documentIds.length) {
+    return;
+  }
+
+  await new Promise((resolve, reject) => {
+    const transaction = database.transaction(previewStoreName, "readwrite");
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error || new Error("Preview images could not be removed."));
+    const store = transaction.objectStore(previewStoreName);
+    documentIds.forEach((documentId) => {
+      store.delete(documentId);
+    });
+  });
+}
+
+function syncPreviewPersistence() {
+  const previewEntries = state.subjects.flatMap((subject) =>
+    (subject.documents || [])
+      .filter((documentRecord) => documentRecord.previewImageUrl)
+      .map((documentRecord) => ({
+        id: documentRecord.id,
+        previewImageUrl: documentRecord.previewImageUrl
+      }))
+  );
+
+  if (!previewEntries.length) {
+    return;
+  }
+
+  Promise.all(previewEntries.map((entry) => putPreviewRecord(entry.id, entry.previewImageUrl))).catch((error) => {
+    console.error("Preview images could not be synced.", error);
+  });
+}
+
+async function hydratePreviewImages() {
+  const documentsMissingPreview = state.subjects.flatMap((subject) =>
+    (subject.documents || []).filter((documentRecord) => !documentRecord.previewImageUrl)
+  );
+
+  if (!documentsMissingPreview.length) {
+    return;
+  }
+
+  let hydratedAnyPreview = false;
+
+  for (const documentRecord of documentsMissingPreview) {
+    try {
+      const previewRecord = await getPreviewRecord(documentRecord.id);
+      if (previewRecord?.previewImageUrl) {
+        documentRecord.previewImageUrl = previewRecord.previewImageUrl;
+        hydratedAnyPreview = true;
+      }
+    } catch (error) {
+      console.error(`Preview image failed to load for ${documentRecord.id}.`, error);
+    }
+  }
+
+  if (hydratedAnyPreview) {
+    render();
+  }
+}
+
 function createPersistableDocument(documentRecord) {
   return {
     ...documentRecord,
@@ -664,6 +785,8 @@ function persistSubjects() {
         "Large document previews will stay available in this session, but only a lighter saved version will persist after refresh.";
     }
   }
+
+  syncPreviewPersistence();
 }
 
 function persistSettings() {
@@ -727,6 +850,8 @@ function restoreSubjects() {
   } catch (error) {
     console.error("Failed to restore subjects.", error);
   }
+
+  hydratePreviewImages();
 }
 
 function restoreStudent() {
@@ -1505,6 +1630,9 @@ function deleteDocuments(documentIds) {
     state.askDocumentId = getSortedDocuments(subject)[0]?.id || null;
   }
   persistSubjects();
+  deletePreviewRecords(uniqueDocumentIds).catch((error) => {
+    console.error("Preview images could not be removed.", error);
+  });
   render();
 }
 
