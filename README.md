@@ -1,25 +1,79 @@
-# StudyLift School Portal Prototype
+# PaperPanda Render Deployment
 
-Standalone frontend prototype for a Year 7 student support portal.
+This repo is structured for a Render deployment with a separate frontend and backend.
 
-## What it includes
+## Structure
 
-- landing page with student sign-in shell
-- Year 7 subject dashboard
-- document table with upload support
-- `Read` and `Listen` actions for documents
-- AI-style guidance box for subject questions
-- assessments with multiple attached documents
-- practice activity cards for each subject
-- weekly text documents split into separate rows when upload content contains multiple `Week X` sections
+```text
+frontend/   Vite-based student dashboard
+backend/    Express API for PDF parsing, Ask AI, and Listen AI voice
+render.yaml Render blueprint for both services
+```
 
-## Run locally
+## What moved to the backend
 
-Because this prototype is plain HTML, CSS, and JavaScript, you can open [index.html](/Users/amywoolley/art_project/school-portal/index.html) directly in a browser or serve the folder with any static file server.
+- `POST /api/upload/pdf`
+  - parses uploaded PDFs
+  - extracts page text
+  - renders each page as an image data URL
+
+- `POST /api/ask`
+  - sends subject/document context to OpenAI Responses API
+  - returns a real AI answer
+
+- `POST /api/speak`
+  - sends text to OpenAI text-to-speech
+  - returns natural female voice audio
+
+## Local development
+
+Frontend:
+
+```bash
+cd frontend
+npm install
+cp .env.example .env
+npm run dev
+```
+
+Backend:
+
+```bash
+cd backend
+npm install
+cp .env.example .env
+npm start
+```
+
+Set these values locally before starting:
+
+- `frontend/.env`
+  - `VITE_API_BASE_URL=http://localhost:3001`
+
+- `backend/.env`
+  - `OPENAI_API_KEY=...`
+  - `FRONTEND_ORIGIN=http://localhost:5173`
+
+## Render deployment
+
+This repo includes `render.yaml`.
+
+Expected services:
+
+1. `paperpanda-frontend`
+   - Render Static Site
+   - root directory: `frontend`
+
+2. `paperpanda-api`
+   - Render Web Service
+   - root directory: `backend`
+
+You can either:
+
+- create both services manually in Render, or
+- use `render.yaml` as a Blueprint
 
 ## Notes
 
-- sign-in is mocked for prototype use
-- browser speech synthesis is used for the listen feature
-- text-based uploads (`.txt`, `.md`, `.csv`) can be previewed and split by week
-- other uploaded files are tracked and attachable to assessments, but not yet parsed for preview audio
+- The old `file://` prototype hit browser restrictions for PDF.js workers and direct OpenAI browser requests.
+- This structure moves those sensitive and restricted operations to the backend where they belong.
