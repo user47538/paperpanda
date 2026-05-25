@@ -107,79 +107,85 @@
         </section>
 
         <section class="workspace-grid hidden" id="subjects-view">
-          <aside class="subject-panel">
-            <div class="section-heading">
-              <div>
-                <p class="eyebrow">Dashboard</p>
-                <h3>Subjects</h3>
+          <aside class="workspace-sidebar">
+            <section class="subject-panel">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Dashboard</p>
+                  <h3>Subjects</h3>
+                </div>
               </div>
-            </div>
-            <div class="subject-list" id="subject-list"></div>
+              <div class="subject-list" id="subject-list"></div>
+            </section>
+
+            <aside class="ask-card">
+              <div class="section-heading section-heading--stacked">
+                <div>
+                  <p class="eyebrow">Support</p>
+                  <h3>AI Ask</h3>
+                </div>
+              </div>
+              <p class="helper-text">
+                Ask for explanations, revision steps, or how to start a task. Guidance is kept
+                focused on the selected subject.
+              </p>
+              <p class="helper-text helper-text--tiny" id="ai-connection-status">
+                AI answers and natural voice are provided by the backend service when deployed.
+              </p>
+              <div class="ask-context" id="ask-context">No document selected for Ask yet.</div>
+              <textarea
+                id="ask-input"
+                rows="7"
+                placeholder="Example: Can you explain what I should focus on for this history source analysis?"
+              ></textarea>
+              <button type="button" class="primary-button primary-button--full" id="ask-button">
+                Get guidance
+              </button>
+              <div class="ask-response" id="ask-response">
+                Pick a subject and ask a question to see guided support here.
+              </div>
+            </aside>
           </aside>
 
           <section class="content-panel">
             <div class="subject-header" id="subject-header"></div>
 
-            <div class="document-workspace">
-              <section class="documents-card">
-                <div class="section-heading section-heading--stacked">
-                  <div>
-                    <p class="eyebrow">Resources</p>
-                    <h3>Documents</h3>
-                  </div>
+            <section class="documents-card">
+              <div class="section-heading section-heading--stacked">
+                <div>
+                  <p class="eyebrow">Resources</p>
+                  <h3>Documents</h3>
                 </div>
-                <div class="documents-table-wrap">
-                  <table class="documents-table">
-                    <thead>
-                      <tr>
-                        <th>Title</th>
-                        <th>Type</th>
-                        <th>Added</th>
-                        <th>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody id="documents-body"></tbody>
-                  </table>
-                </div>
-                <div class="documents-footer">
-                  <button type="button" class="ghost-button hidden" id="documents-toggle-button">Show all documents</button>
-                </div>
-              </section>
+              </div>
+              <div class="documents-table-wrap">
+                <table class="documents-table">
+                  <thead>
+                    <tr>
+                      <th>Title</th>
+                      <th>Type</th>
+                      <th>Added</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="documents-body"></tbody>
+                </table>
+              </div>
+              <div class="documents-footer">
+                <button type="button" class="ghost-button hidden" id="documents-toggle-button">Show all documents</button>
+              </div>
+            </section>
 
-              <aside class="ask-card">
-                <div class="section-heading section-heading--stacked">
-                  <div>
-                    <p class="eyebrow">Support</p>
-                    <h3>AI Ask</h3>
-                  </div>
-                </div>
-                <p class="helper-text">
-                  Ask for explanations, revision steps, or how to start a task. Guidance is kept
-                  focused on the selected subject.
-                </p>
-                <p class="helper-text helper-text--tiny" id="ai-connection-status">
-                  AI answers and natural voice are provided by the backend service when deployed.
-                </p>
-                <div class="ask-context" id="ask-context">No document selected for Ask yet.</div>
-                <textarea
-                  id="ask-input"
-                  rows="7"
-                  placeholder="Example: Can you explain what I should focus on for this history source analysis?"
-                ></textarea>
-                <button type="button" class="primary-button primary-button--full" id="ask-button">
-                  Get guidance
-                </button>
-                <div class="ask-response" id="ask-response">
-                  Pick a subject and ask a question to see guided support here.
-                </div>
-              </aside>
-            </div>
-
-            <section class="reader-card">
-              <div class="section-heading">
+            <section class="reader-card" id="reader-card">
+              <div class="section-heading section-heading--reader">
                 <div>
                   <p class="eyebrow">Read and listen</p>
                   <h3 id="reader-title">Document reader</h3>
+                </div>
+                <div class="reader-toolbar" id="reader-toolbar">
+                  <button type="button" class="table-action" id="reader-read-button">Read</button>
+                  <button type="button" class="table-action" id="reader-listen-button">Listen</button>
+                  <button type="button" class="table-action" id="reader-ask-button">Ask</button>
+                  <button type="button" class="table-action table-action--danger" id="reader-delete-button">Delete</button>
                 </div>
               </div>
               <div class="reader-content" id="reader-content">

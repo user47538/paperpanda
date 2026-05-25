@@ -556,6 +556,7 @@ button {
   grid-template-columns: 310px minmax(0, 1fr);
   gap: 24px;
   padding: 0 40px;
+  align-items: start;
 }
 
 .home-view,
@@ -567,11 +568,23 @@ button {
   border-radius: 28px;
 }
 
+.workspace-sidebar {
+  display: grid;
+  gap: 24px;
+  align-self: start;
+}
+
 .subject-panel,
 .content-panel {
   border-radius: var(--radius-xl);
   padding: 28px;
   background: #ffffff;
+}
+
+.content-panel {
+  display: grid;
+  align-content: start;
+  gap: 24px;
 }
 
 .section-heading {
@@ -650,7 +663,7 @@ button {
 }
 
 .subject-header {
-  margin-bottom: 24px;
+  margin-bottom: 0;
   padding-bottom: 18px;
   border-bottom: 1px solid #d9d6d2;
 }
@@ -660,12 +673,6 @@ button {
   flex-wrap: wrap;
   gap: 10px;
   margin-top: 14px;
-}
-
-.document-workspace {
-  display: grid;
-  grid-template-columns: minmax(0, 1.65fr) minmax(290px, 0.9fr);
-  gap: 24px;
 }
 
 .documents-card,
@@ -700,7 +707,7 @@ button {
 .documents-table-wrap {
   overflow-x: auto;
   overflow-y: auto;
-  max-height: 460px;
+  max-height: 380px;
 }
 
 .documents-footer {
@@ -730,6 +737,10 @@ button {
   font-weight: 500;
 }
 
+.documents-table tbody tr.is-selected td {
+  background: #f8f4ef;
+}
+
 .table-actions {
   display: flex;
   flex-wrap: wrap;
@@ -753,6 +764,11 @@ button {
 .table-action--danger {
   border-color: rgba(164, 64, 53, 0.3);
   color: var(--danger);
+}
+
+.table-action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .ask-card textarea {
@@ -855,17 +871,24 @@ button {
   display: none;
 }
 
-.reader-card {
-  margin-top: 18px;
+.section-heading--reader {
+  align-items: center;
+}
+
+.reader-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 .reader-content {
-  margin-top: 16px;
-  padding: 18px;
+  margin-top: 0;
+  padding: 14px 18px 18px;
   border-radius: 20px;
   background: #f8f4ef;
   border: 1px solid rgba(17, 17, 17, 0.08);
-  min-height: 170px;
+  min-height: 120px;
   line-height: 1.7;
   white-space: pre-wrap;
 }
@@ -885,7 +908,7 @@ button {
 }
 
 .reader-preview {
-  margin-top: 18px;
+  margin-top: 10px;
 }
 
 .reader-preview-image {
@@ -1116,12 +1139,12 @@ button {
   .landing-panel,
   .home-grid,
   .workspace-grid,
-  .document-workspace,
+  .workspace-sidebar,
   .lower-grid {
     grid-template-columns: 1fr;
   }
 
-  .subject-panel {
+  .workspace-sidebar {
     order: 2;
   }
 

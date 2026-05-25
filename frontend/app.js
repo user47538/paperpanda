@@ -391,8 +391,13 @@ const elements = {
   askButton: document.getElementById("ask-button"),
   askContext: document.getElementById("ask-context"),
   askResponse: document.getElementById("ask-response"),
+  readerCard: document.getElementById("reader-card"),
   readerTitle: document.getElementById("reader-title"),
   readerContent: document.getElementById("reader-content"),
+  readerReadButton: document.getElementById("reader-read-button"),
+  readerListenButton: document.getElementById("reader-listen-button"),
+  readerAskButton: document.getElementById("reader-ask-button"),
+  readerDeleteButton: document.getElementById("reader-delete-button"),
   assessmentList: document.getElementById("assessment-list"),
   practiceList: document.getElementById("practice-list"),
   watchList: document.getElementById("watch-list"),
@@ -431,6 +436,15 @@ function getAskDocument() {
 
 function getUploadSubject() {
   return state.subjects.find((subject) => subject.id === elements.uploadSubjectSelect.value) || null;
+}
+
+function scrollReaderIntoView() {
+  elements.readerCard?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function focusAskComposer() {
+  elements.askInput.focus();
+  elements.askInput.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 function seededAssessment(taskNumber, componentTask, distributionDate, dueDate, weighting) {
@@ -996,6 +1010,18 @@ function renderAskContext() {
     historyMarkup || "Ask a question about the selected subject or document.";
 }
 
+function renderReaderToolbar() {
+  const selectedDocument = getSelectedDocument();
+  const hasDocument = Boolean(selectedDocument);
+
+  elements.readerReadButton.disabled = !hasDocument;
+  elements.readerListenButton.disabled = !hasDocument;
+  elements.readerAskButton.disabled = !hasDocument;
+  elements.readerDeleteButton.disabled = !hasDocument;
+  elements.readerListenButton.textContent =
+    selectedDocument && state.listeningDocumentId === selectedDocument.id ? "Stop" : "Listen";
+}
+
 function renderDocuments() {
   const subject = getSelectedSubject();
   if (!subject) {
@@ -1015,6 +1041,7 @@ function renderDocuments() {
     elements.readerTitle.textContent = "Document reader";
     elements.readerContent.textContent = "Upload or select a document to read it here.";
     elements.documentsToggleButton.classList.add("hidden");
+    renderReaderToolbar();
     return;
   }
 
@@ -1033,7 +1060,7 @@ function renderDocuments() {
   elements.documentsBody.innerHTML = visibleDocuments
     .map(
       (document) => `
-        <tr>
+        <tr class="${document.id === state.selectedDocumentId ? "is-selected" : ""}">
           <td><strong>${escapeHtml(document.title)}</strong></td>
           <td>${escapeHtml(document.type)}</td>
           <td>${escapeHtml(document.added)}</td>
@@ -1060,20 +1087,24 @@ function renderDocuments() {
       }
 
       state.selectedDocumentId = documentRecord.id;
-      renderReader();
+
+      if (button.dataset.action === "read") {
+        renderDocuments();
+        scrollReaderIntoView();
+      }
 
       if (button.dataset.action === "listen") {
+        renderDocuments();
         toggleListen(documentRecord);
       }
 
       if (button.dataset.action === "ask") {
         state.askDocumentId = documentRecord.id;
-        state.selectedDocumentId = documentRecord.id;
         elements.askInput.value = "";
-        elements.askResponse.textContent = "Ask a question about the selected document.";
-        renderReader();
+        renderDocuments();
         renderAskContext();
-        elements.askInput.focus();
+        elements.askResponse.textContent = "Ask a question about the selected document.";
+        focusAskComposer();
       }
 
       if (button.dataset.action === "delete") {
@@ -1144,6 +1175,7 @@ function renderReader() {
   if (!selectedDocument) {
     elements.readerTitle.textContent = "Document reader";
     elements.readerContent.textContent = "Choose a document from the table to read it here.";
+    renderReaderToolbar();
     return;
   }
 
@@ -1169,12 +1201,12 @@ function renderReader() {
 
   if (selectedDocument.flags?.homework) {
     elements.readerContent.innerHTML = `
-      ${openOriginalMarkup}
+      ${previewImageMarkup}
       <textarea class="reader-editor" id="reader-editor">${escapeHtml(readableContent)}</textarea>
       <div class="reader-actions">
         <button type="button" class="primary-button" id="save-homework-button">Save homework edits</button>
       </div>
-      ${previewImageMarkup}
+      ${openOriginalMarkup}
     `;
 
     const editor = document.getElementById("reader-editor");
@@ -1193,13 +1225,14 @@ function renderReader() {
         window.open(selectedDocument.originalFile.objectUrl, "_blank", "noopener");
       });
     }
+    renderReaderToolbar();
     return;
   }
 
   elements.readerContent.innerHTML = `
-    ${openOriginalMarkup}
     ${previewImageMarkup}
     <div class="reader-content__text">${escapeHtml(readableContent).replaceAll("\n", "<br />")}</div>
+    ${openOriginalMarkup}
   `;
   const openOriginalButton = document.getElementById("open-original-button");
   if (openOriginalButton && selectedDocument.originalFile?.objectUrl) {
@@ -1207,6 +1240,7 @@ function renderReader() {
       window.open(selectedDocument.originalFile.objectUrl, "_blank", "noopener");
     });
   }
+  renderReaderToolbar();
 }
 
 function speakDocument(document) {
@@ -2712,6 +2746,38 @@ function handleDashboardOpen() {
 }
 
 elements.askButton.addEventListener("click", handleAsk);
+elements.readerReadButton.addEventListener("click", () => {
+  if (!getSelectedDocument()) {
+    return;
+  }
+  renderReader();
+  scrollReaderIntoView();
+});
+elements.readerListenButton.addEventListener("click", () => {
+  const selectedDocument = getSelectedDocument();
+  if (!selectedDocument) {
+    return;
+  }
+  toggleListen(selectedDocument);
+});
+elements.readerAskButton.addEventListener("click", () => {
+  const selectedDocument = getSelectedDocument();
+  if (!selectedDocument) {
+    return;
+  }
+  state.askDocumentId = selectedDocument.id;
+  elements.askInput.value = "";
+  renderAskContext();
+  elements.askResponse.textContent = "Ask a question about the selected document.";
+  focusAskComposer();
+});
+elements.readerDeleteButton.addEventListener("click", () => {
+  const selectedDocument = getSelectedDocument();
+  if (!selectedDocument) {
+    return;
+  }
+  deleteDocument(selectedDocument.id);
+});
 elements.openDashboardButton.addEventListener("click", handleDashboardOpen);
 elements.navHomeButton.addEventListener("click", () => {
   state.currentView = "home";
