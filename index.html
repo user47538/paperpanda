@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>StudyLift Year 7 Portal</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <section class="landing-panel" id="landing-panel">
+        <div class="landing-copy">
+          <p class="eyebrow">Year 7 learning support</p>
+          <h1>StudyLift helps students read, organise, and understand schoolwork.</h1>
+          <p class="landing-summary">
+            Upload class documents, listen to instructions, ask for guidance, and keep every
+            assessment linked to the notes that matter.
+          </p>
+          <div class="feature-marquee">
+            <span>Read or listen to documents</span>
+            <span>Track assessment dates</span>
+            <span>Get subject-specific guidance</span>
+          </div>
+        </div>
+
+        <div class="signin-card" id="signin-form">
+          <p class="signin-card__eyebrow">Student Sign In</p>
+          <h2>Enter the Year 7 dashboard</h2>
+          <label>
+            Student name
+            <input type="text" id="student-name" placeholder="e.g. Mia Chen" />
+          </label>
+          <label>
+            School email
+            <input type="text" id="student-email" placeholder="name@school.edu.au" />
+          </label>
+          <label>
+            Password
+            <input type="password" id="student-password" placeholder="Enter password" />
+          </label>
+          <button type="button" class="primary-button" id="open-dashboard-button">Open dashboard</button>
+          <p class="signin-note">
+            Prototype mode: any name, school email, and password will open the dashboard.
+          </p>
+        </div>
+      </section>
+
+      <main class="app-shell hidden" id="app-shell">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">StudyLift</p>
+            <h2 id="welcome-heading">Welcome back</h2>
+          </div>
+          <div class="topbar__actions">
+            <button type="button" class="ghost-button" id="nav-home-button">Home</button>
+            <button type="button" class="ghost-button" id="nav-subjects-button">Subjects</button>
+            <div class="topbar__year-pill">Year 7</div>
+            <button type="button" class="ghost-button" id="signout-button">Sign out</button>
+          </div>
+        </header>
+
+        <section class="home-view" id="home-view">
+          <section class="overview-band overview-band--single">
+            <button type="button" class="overview-card overview-card--upcoming" id="upcoming-assessments-button">
+              <div class="overview-card__body">
+                <p class="overview-card__label">Upcoming Assessments</p>
+                <strong id="upcoming-assessment-count">0 due in the next fortnight</strong>
+                <span id="upcoming-assessment-summary">Open a due-date summary for the next 14 days.</span>
+              </div>
+              <span class="overview-card__chip" id="upcoming-next-due">No due dates available yet</span>
+            </button>
+          </section>
+
+          <section class="home-grid">
+            <section class="home-card home-card--welcome">
+              <p class="eyebrow">Home</p>
+              <h3>Welcome</h3>
+              <p class="helper-text">Upload this week&apos;s documents, check what is due next, then enter the subjects area to work from the selected class.</p>
+              <div class="background-controls">
+                <input type="file" id="background-upload" class="upload-panel__input upload-panel__input--hidden" accept="image/*" />
+                <button type="button" class="ghost-button" id="change-background-button">Change Background</button>
+                <label class="upload-option">
+                  <input type="checkbox" id="background-home-checkbox" checked />
+                  <span>Home</span>
+                </label>
+                <label class="upload-option">
+                  <input type="checkbox" id="background-subjects-checkbox" />
+                  <span>Subjects</span>
+                </label>
+              </div>
+              <div class="home-actions">
+                <button type="button" class="ghost-button" id="enter-subjects-button">Enter</button>
+              </div>
+            </section>
+
+            <section class="home-card">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">This week</p>
+                  <h3>Upload documents</h3>
+                </div>
+              </div>
+              <p class="helper-text">Send class notes, homework, assessments, PDFs, and WATCH links to the correct subject from one popup.</p>
+              <button type="button" class="ghost-button" id="open-upload-modal-secondary">Open upload</button>
+            </section>
+          </section>
+        </section>
+
+        <section class="workspace-grid hidden" id="subjects-view">
+          <aside class="subject-panel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Dashboard</p>
+                <h3>Subjects</h3>
+              </div>
+            </div>
+            <div class="subject-list" id="subject-list"></div>
+          </aside>
+
+          <section class="content-panel">
+            <div class="subject-header" id="subject-header"></div>
+
+            <div class="document-workspace">
+              <section class="documents-card">
+                <div class="section-heading section-heading--stacked">
+                  <div>
+                    <p class="eyebrow">Resources</p>
+                    <h3>Documents</h3>
+                  </div>
+                </div>
+                <div class="documents-table-wrap">
+                  <table class="documents-table">
+                    <thead>
+                      <tr>
+                        <th>Title</th>
+                        <th>Type</th>
+                        <th>Added</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="documents-body"></tbody>
+                  </table>
+                </div>
+                <div class="documents-footer">
+                  <button type="button" class="ghost-button hidden" id="documents-toggle-button">Show all documents</button>
+                </div>
+              </section>
+
+              <aside class="ask-card">
+                <div class="section-heading section-heading--stacked">
+                  <div>
+                    <p class="eyebrow">Support</p>
+                    <h3>AI Ask</h3>
+                  </div>
+                </div>
+                <p class="helper-text">
+                  Ask for explanations, revision steps, or how to start a task. Guidance is kept
+                  focused on the selected subject.
+                </p>
+                <div class="ask-toolbar">
+                  <button type="button" class="ghost-button" id="connect-ai-button">Connect ChatGPT</button>
+                  <span class="helper-text helper-text--tiny" id="ai-connection-status">
+                    ChatGPT not connected. AI answers and voice are generated by OpenAI after connection.
+                  </span>
+                </div>
+                <div class="ask-context" id="ask-context">No document selected for Ask yet.</div>
+                <textarea
+                  id="ask-input"
+                  rows="7"
+                  placeholder="Example: Can you explain what I should focus on for this history source analysis?"
+                ></textarea>
+                <button type="button" class="primary-button primary-button--full" id="ask-button">
+                  Get guidance
+                </button>
+                <div class="ask-response" id="ask-response">
+                  Pick a subject and ask a question to see guided support here.
+                </div>
+              </aside>
+            </div>
+
+            <section class="reader-card">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Read and listen</p>
+                  <h3 id="reader-title">Document reader</h3>
+                </div>
+              </div>
+              <div class="reader-content" id="reader-content">
+                Choose a document from the table to read it here.
+              </div>
+            </section>
+
+            <section class="practice-card">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Homework</p>
+                  <h3>Homework</h3>
+                </div>
+              </div>
+              <div id="practice-list" class="practice-list"></div>
+            </section>
+
+            <div class="lower-grid">
+              <section class="practice-card">
+                <div class="section-heading">
+                  <div>
+                    <p class="eyebrow">Watch</p>
+                    <h3>Watch</h3>
+                  </div>
+                </div>
+                <div id="watch-list" class="practice-list"></div>
+              </section>
+
+              <section class="assessment-card">
+                <div class="section-heading">
+                  <div>
+                    <p class="eyebrow">Deadlines</p>
+                    <h3>Assessment Schedule</h3>
+                  </div>
+                </div>
+                <div id="assessment-list" class="assessment-list"></div>
+              </section>
+            </div>
+          </section>
+        </section>
+      </main>
+
+      <section class="task-view hidden" id="task-view">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Workspace</p>
+            <h2 id="task-view-title">Task workspace</h2>
+          </div>
+          <div class="topbar__actions">
+            <button type="button" class="ghost-button" id="close-task-view-button">Back to subjects</button>
+          </div>
+        </header>
+        <div class="task-view__shell">
+          <section class="reader-card">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Task document</p>
+                <h3 id="task-source-title">Assessment document</h3>
+              </div>
+            </div>
+            <div class="reader-content" id="task-source-content">Select a task to work on it here.</div>
+          </section>
+          <section class="practice-card">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Work area</p>
+                <h3>Writing space</h3>
+              </div>
+            </div>
+            <textarea id="task-work-editor" class="reader-editor" placeholder="Start writing here..."></textarea>
+            <div class="reader-actions">
+              <button type="button" class="primary-button" id="save-task-work-button">Save</button>
+            </div>
+            <div class="upload-status" id="task-work-status"></div>
+          </section>
+        </div>
+      </section>
+
+      <div class="modal hidden" id="upcoming-modal" aria-hidden="true">
+        <button type="button" class="modal__scrim" id="close-upcoming-scrim" aria-label="Close upcoming assessments summary"></button>
+        <section class="modal__panel" role="dialog" aria-modal="true" aria-labelledby="upcoming-modal-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Next 14 days</p>
+              <h3 id="upcoming-modal-title">Upcoming assessments</h3>
+            </div>
+            <button type="button" class="ghost-button" id="close-upcoming-button">Close</button>
+          </div>
+          <p class="helper-text" id="upcoming-modal-summary">
+            This summary shows assessments due in the next fortnight.
+          </p>
+          <div class="modal__actions">
+            <button type="button" class="ghost-button" id="set-term-dates-button">Set term dates</button>
+            <button type="button" class="ghost-button" id="toggle-upcoming-mode-button">View all assessments for the year</button>
+          </div>
+          <div id="upcoming-modal-list" class="assessment-list"></div>
+        </section>
+      </div>
+
+      <div class="modal hidden" id="upload-modal" aria-hidden="true">
+        <button type="button" class="modal__scrim" id="close-upload-scrim" aria-label="Close upload documents"></button>
+        <section class="modal__panel" role="dialog" aria-modal="true" aria-labelledby="upload-modal-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Upload</p>
+              <h3 id="upload-modal-title">Upload documents</h3>
+            </div>
+            <button type="button" class="ghost-button" id="close-upload-button">Close</button>
+          </div>
+
+          <label class="upload-field">
+            <span class="upload-field__label">Subject</span>
+            <select id="upload-subject-select" class="upload-select"></select>
+          </label>
+
+          <label class="upload-panel upload-panel--compact" id="upload-panel">
+            <span class="upload-panel__title">Upload</span>
+            <input
+              type="file"
+              id="document-upload"
+              class="upload-panel__input upload-panel__input--hidden"
+              multiple
+              accept=".txt,.md,.csv,.pdf,.docx,.pptx,.gdoc,.gslides"
+            />
+          </label>
+          <p class="helper-text helper-text--tiny">Supports txt, pdf, docx, pptx, gdoc and gslides.</p>
+
+          <div class="pending-upload" id="pending-upload"></div>
+
+          <div class="upload-options upload-options--types">
+            <label class="upload-option">
+              <input type="checkbox" id="upload-class-notes" />
+              <span>Class Notes</span>
+            </label>
+            <label class="upload-option">
+              <input type="checkbox" id="upload-assessment" />
+              <span>Assessment</span>
+            </label>
+            <label class="upload-option">
+              <input type="checkbox" id="upload-homework" />
+              <span>Homework</span>
+            </label>
+            <label class="upload-option">
+              <input type="checkbox" id="upload-watch" />
+              <span>Watch</span>
+            </label>
+          </div>
+
+          <label class="upload-field upload-field--hidden" id="upload-due-date-wrap">
+            <span class="upload-field__label">Assessment due date</span>
+            <input type="date" id="upload-due-date" />
+          </label>
+
+          <label class="upload-field upload-field--hidden" id="upload-watch-url-wrap">
+            <span class="upload-field__label">YouTube link</span>
+            <input type="url" id="upload-watch-url" placeholder="https://www.youtube.com/watch?v=..." />
+          </label>
+
+          <label class="upload-field upload-field--hidden" id="upload-watch-title-wrap">
+            <span class="upload-field__label">Watch title</span>
+            <input type="text" id="upload-watch-title" placeholder="Video title" />
+          </label>
+
+          <div class="upload-submit-row">
+            <button type="button" class="primary-button" id="process-upload-button">Submit</button>
+            <button type="button" class="ghost-button" id="clear-upload-button">Clear</button>
+          </div>
+          <div class="upload-status" id="upload-status"></div>
+        </section>
+      </div>
+    </div>
+
+    <script src="./vendor/jszip.min.js"></script>
+    <script type="module">
+      import * as pdfjsLib from "./vendor/pdf.mjs";
+
+      pdfjsLib.GlobalWorkerOptions.workerSrc = new URL("./vendor/pdf.worker.mjs", import.meta.url).href;
+      window.__pdfjsLib = pdfjsLib;
+      window.__pdfjsLibPromise = Promise.resolve(pdfjsLib);
+      window.__pdfjsLibError = "";
+      window.dispatchEvent(new Event("studylift:pdf-ready"));
+    </script>
+    <script src="./app.js"></script>
+  </body>
+  </html>
