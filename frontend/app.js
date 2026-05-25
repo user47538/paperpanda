@@ -2260,32 +2260,6 @@ function detectOriginalKind(file) {
   return "file";
 }
 
-async function uploadPdfToApi(file) {
-  const formData = new FormData();
-  formData.append("file", file);
-
-  const response = await window.fetch(`${API_BASE_URL}/api/upload/pdf`, {
-    method: "POST",
-    body: formData
-  });
-
-  if (!response.ok) {
-    let message = "PDF upload failed.";
-    const responseText = await response.text();
-    if (responseText) {
-      try {
-        const errorPayload = JSON.parse(responseText);
-        message = errorPayload?.error || errorPayload?.message || message;
-      } catch (error) {
-        message = responseText;
-      }
-    }
-    throw new Error(message);
-  }
-
-  return response.json();
-}
-
 async function readUploadedDocument(file, flags) {
   const lowerName = file.name.toLowerCase();
   const originalFile = buildOriginalFile(file);
@@ -2308,7 +2282,7 @@ async function readUploadedDocument(file, flags) {
   }
 
   if (lowerName.endsWith(".pdf")) {
-    const pdfData = await uploadPdfToApi(file);
+    const pdfData = await extractPdfData(file);
     const content = pdfData.fullText || "No readable text was detected in this PDF.";
     let records = [];
     if (flags.classNotes) {
