@@ -315,6 +315,8 @@ const state = {
   selectedDocumentId: null,
   askDocumentId: null,
   listeningDocumentId: null,
+  selectedDocumentIds: [],
+  expandedDocumentGroups: {},
   documentsExpanded: false,
   currentView: "home",
   activeTask: null,
@@ -369,6 +371,8 @@ const elements = {
   subjectHeader: document.getElementById("subject-header"),
   documentsBody: document.getElementById("documents-body"),
   documentsToggleButton: document.getElementById("documents-toggle-button"),
+  documentsSelectAllButton: document.getElementById("documents-select-all-button"),
+  documentsDeleteSelectedButton: document.getElementById("documents-delete-selected-button"),
   documentUpload: document.getElementById("document-upload"),
   uploadPanel: document.getElementById("upload-panel"),
   pendingUpload: document.getElementById("pending-upload"),
@@ -940,6 +944,8 @@ function renderSubjectList() {
       }
 
       state.selectedSubjectId = subject.id;
+      state.selectedDocumentIds = [];
+      state.expandedDocumentGroups = {};
       state.documentsExpanded = false;
       state.selectedDocumentId = getSortedDocuments(subject)[0]?.id || null;
       state.askDocumentId = getSortedDocuments(subject)[0]?.id || null;
@@ -956,9 +962,15 @@ function renderSubjectHeader() {
   }
 
   elements.subjectHeader.innerHTML = `
-    <p class="eyebrow">Current subject</p>
-    <h3>${escapeHtml(subject.name)}</h3>
+    <div class="subject-header__actions">
+      <button type="button" class="ghost-button" id="subject-upload-button">Upload</button>
+    </div>
+    <div class="subject-header__title">
+      <p class="eyebrow">Current subject</p>
+      <h3>${escapeHtml(subject.name)}</h3>
+    </div>
   `;
+  document.getElementById("subject-upload-button")?.addEventListener("click", openUploadModal);
 }
 
 function renderPendingUpload() {
@@ -987,8 +999,71 @@ function getDocumentSortValue(documentRecord) {
   return Number.isNaN(fallbackTimestamp) ? 0 : fallbackTimestamp;
 }
 
+function getDocumentPageNumber(documentRecord) {
+  if (Number.isFinite(documentRecord.pageNumber)) {
+    return documentRecord.pageNumber;
+  }
+  const match = documentRecord.title?.match(/page\s+(\d+)/i);
+  return match ? Number.parseInt(match[1], 10) : null;
+}
+
+function getDocumentGroupId(documentRecord) {
+  return documentRecord.uploadGroupId || documentRecord.id;
+}
+
 function getSortedDocuments(subject) {
-  return [...subject.documents].sort((left, right) => getDocumentSortValue(right) - getDocumentSortValue(left));
+  return [...subject.documents].sort((left, right) => {
+    const leftGroupId = getDocumentGroupId(left);
+    const rightGroupId = getDocumentGroupId(right);
+    if (leftGroupId === rightGroupId) {
+      const leftPage = getDocumentPageNumber(left);
+      const rightPage = getDocumentPageNumber(right);
+      if (leftPage !== null && rightPage !== null && leftPage !== rightPage) {
+        return leftPage - rightPage;
+      }
+      return left.title.localeCompare(right.title, undefined, { numeric: true });
+    }
+    return getDocumentSortValue(right) - getDocumentSortValue(left);
+  });
+}
+
+function getDocumentGroups(subject) {
+  const grouped = new Map();
+  getSortedDocuments(subject).forEach((documentRecord) => {
+    const groupId = getDocumentGroupId(documentRecord);
+    const existing = grouped.get(groupId);
+    if (existing) {
+      existing.documents.push(documentRecord);
+      return;
+    }
+    grouped.set(groupId, {
+      id: groupId,
+      added: documentRecord.added,
+      documents: [documentRecord],
+      isPageGroup: Boolean(documentRecord.uploadGroupId)
+    });
+  });
+
+  return [...grouped.values()].map((group) => ({
+    ...group,
+    documents: group.documents.sort((left, right) => {
+      const leftPage = getDocumentPageNumber(left);
+      const rightPage = getDocumentPageNumber(right);
+      if (leftPage !== null && rightPage !== null && leftPage !== rightPage) {
+        return leftPage - rightPage;
+      }
+      return left.title.localeCompare(right.title, undefined, { numeric: true });
+    })
+  }));
+}
+
+function renderDocumentBulkActions(subject) {
+  const documentIds = subject.documents.map((documentRecord) => documentRecord.id);
+  state.selectedDocumentIds = state.selectedDocumentIds.filter((documentId) => documentIds.includes(documentId));
+  const allSelected = Boolean(documentIds.length) && state.selectedDocumentIds.length === documentIds.length;
+  elements.documentsSelectAllButton.disabled = !documentIds.length;
+  elements.documentsDeleteSelectedButton.disabled = !state.selectedDocumentIds.length;
+  elements.documentsSelectAllButton.textContent = allSelected ? "Clear selection" : "Select all";
 }
 
 function renderAskContext() {
@@ -1041,11 +1116,13 @@ function renderDocuments() {
     elements.readerTitle.textContent = "Document reader";
     elements.readerContent.textContent = "Upload or select a document to read it here.";
     elements.documentsToggleButton.classList.add("hidden");
+    renderDocumentBulkActions(subject);
     renderReaderToolbar();
     return;
   }
 
   const sortedDocuments = getSortedDocuments(subject);
+  const groupedDocuments = getDocumentGroups(subject);
 
   if (!sortedDocuments.find((doc) => doc.id === state.selectedDocumentId)) {
     state.selectedDocumentId = sortedDocuments[0].id;
@@ -1055,29 +1132,61 @@ function renderDocuments() {
     state.askDocumentId = sortedDocuments[0].id;
   }
 
-  const visibleDocuments = state.documentsExpanded ? sortedDocuments : sortedDocuments.slice(0, 6);
+  const visibleGroups = state.documentsExpanded ? groupedDocuments : groupedDocuments.slice(0, 6);
+  const rowsMarkup = visibleGroups
+    .map((group) => {
+      const isExpanded = Boolean(state.expandedDocumentGroups[group.id]);
+      const visibleDocuments =
+        group.isPageGroup && !isExpanded ? [group.documents[0]] : group.documents;
+      const dateCellMarkup = group.isPageGroup
+        ? `
+          <button type="button" class="documents-date-button" data-document-group-toggle="${group.id}">
+            <strong>${escapeHtml(group.added)}</strong>
+            <span>${isExpanded ? "Hide pages" : `${group.documents.length} pages`}</span>
+          </button>
+        `
+        : `<span class="documents-date-button"><strong>${escapeHtml(group.added)}</strong></span>`;
 
-  elements.documentsBody.innerHTML = visibleDocuments
-    .map(
-      (document) => `
-        <tr class="${document.id === state.selectedDocumentId ? "is-selected" : ""}">
-          <td><strong>${escapeHtml(document.title)}</strong></td>
-          <td>${escapeHtml(document.type)}</td>
-          <td>${escapeHtml(document.added)}</td>
-          <td>
-            <div class="table-actions">
-              <button type="button" class="table-action" data-action="read" data-document-id="${document.id}">Read</button>
-              <button type="button" class="table-action" data-action="listen" data-document-id="${document.id}">
-                ${state.listeningDocumentId === document.id ? "Stop" : "Listen"}
-              </button>
-              <button type="button" class="table-action" data-action="ask" data-document-id="${document.id}">Ask</button>
-              <button type="button" class="table-action table-action--danger" data-action="delete" data-document-id="${document.id}">Delete</button>
-            </div>
-          </td>
-        </tr>
-      `
-    )
+      return visibleDocuments
+        .map(
+          (document, index) => `
+            <tr class="${document.id === state.selectedDocumentId ? "is-selected" : ""}${state.selectedDocumentIds.includes(document.id) ? " is-bulk-selected" : ""}">
+              ${
+                index === 0
+                  ? `<td rowspan="${visibleDocuments.length}">${dateCellMarkup}</td>`
+                  : ""
+              }
+              <td><strong>${escapeHtml(document.title)}</strong></td>
+              <td>${escapeHtml(document.type)}</td>
+              <td>
+                <div class="table-actions">
+                  <button type="button" class="table-action" data-action="read" data-document-id="${document.id}">Read</button>
+                  <button type="button" class="table-action" data-action="listen" data-document-id="${document.id}">
+                    ${state.listeningDocumentId === document.id ? "Stop" : "Listen"}
+                  </button>
+                  <button type="button" class="table-action" data-action="ask" data-document-id="${document.id}">Ask</button>
+                  <button type="button" class="table-action table-action--danger" data-action="delete" data-document-id="${document.id}">Delete</button>
+                </div>
+              </td>
+            </tr>
+          `
+        )
+        .join("");
+    })
     .join("");
+
+  elements.documentsBody.innerHTML = rowsMarkup;
+
+  elements.documentsBody.querySelectorAll("[data-document-group-toggle]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const groupId = button.dataset.documentGroupToggle;
+      if (!groupId) {
+        return;
+      }
+      state.expandedDocumentGroups[groupId] = !state.expandedDocumentGroups[groupId];
+      renderDocuments();
+    });
+  });
 
   elements.documentsBody.querySelectorAll("[data-action]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -1113,12 +1222,13 @@ function renderDocuments() {
     });
   });
 
-  const hasExtraDocuments = sortedDocuments.length > 6;
+  const hasExtraDocuments = groupedDocuments.length > 6;
   elements.documentsToggleButton.classList.toggle("hidden", !hasExtraDocuments);
   if (hasExtraDocuments) {
     elements.documentsToggleButton.textContent = state.documentsExpanded ? "Show recent documents" : "Show all documents";
   }
 
+  renderDocumentBulkActions(subject);
   renderReader();
 }
 
@@ -1193,7 +1303,6 @@ function renderReader() {
   const previewImageMarkup = selectedDocument.previewImageUrl
     ? `
       <div class="reader-preview">
-        <p class="helper-text">Original visual</p>
         <img class="reader-preview-image" src="${escapeHtml(selectedDocument.previewImageUrl)}" alt="${escapeHtml(selectedDocument.title)} preview" />
       </div>
     `
@@ -1318,24 +1427,30 @@ function toggleListen(documentRecord) {
 }
 
 function deleteDocument(documentId) {
+  deleteDocuments([documentId]);
+}
+
+function deleteDocuments(documentIds) {
   const subject = getSelectedSubject();
-  if (!subject) {
+  const uniqueDocumentIds = [...new Set(documentIds)];
+  if (!subject || !uniqueDocumentIds.length) {
     return;
   }
 
-  if (state.listeningDocumentId === documentId) {
+  if (uniqueDocumentIds.includes(state.listeningDocumentId)) {
     stopListening();
   }
 
-  subject.documents = subject.documents.filter((doc) => doc.id !== documentId);
+  subject.documents = subject.documents.filter((doc) => !uniqueDocumentIds.includes(doc.id));
   subject.assessments.forEach((assessment) => {
-    assessment.linkedDocumentIds = assessment.linkedDocumentIds.filter((id) => id !== documentId);
+    assessment.linkedDocumentIds = assessment.linkedDocumentIds.filter((id) => !uniqueDocumentIds.includes(id));
   });
   subject.assessments = subject.assessments.filter((assessment) => assessment.linkedDocumentIds.length || !assessment.autoCreated);
-  if (state.selectedDocumentId === documentId) {
+  state.selectedDocumentIds = state.selectedDocumentIds.filter((documentId) => !uniqueDocumentIds.includes(documentId));
+  if (uniqueDocumentIds.includes(state.selectedDocumentId)) {
     state.selectedDocumentId = getSortedDocuments(subject)[0]?.id || null;
   }
-  if (state.askDocumentId === documentId) {
+  if (uniqueDocumentIds.includes(state.askDocumentId)) {
     state.askDocumentId = getSortedDocuments(subject)[0]?.id || null;
   }
   persistSubjects();
@@ -2042,6 +2157,7 @@ function createDocumentRecord({ title, type, content }) {
     added: formatDate(),
     addedAt: new Date().toISOString(),
     content,
+    uploadGroupId: null,
     originalFile: null,
     previewImageUrl: null,
     flags: {
@@ -2332,6 +2448,7 @@ function createDocumentWithFlags(details, flags) {
 
 function createPdfPageRecords(fileName, flags, originalFile, pages) {
   const sanitizedName = fileName.replace(/\.[^.]+$/, "");
+  const uploadGroupId = createId();
   return pages.map((page) => {
     const record = createDocumentWithFlags(
       {
@@ -2350,6 +2467,7 @@ function createPdfPageRecords(fileName, flags, originalFile, pages) {
     record.originalFile = originalFile;
     record.previewImageUrl = page.imageUrl;
     record.pageNumber = page.pageNumber;
+    record.uploadGroupId = uploadGroupId;
     return record;
   });
 }
@@ -2536,7 +2654,7 @@ async function processFiles(fileList) {
     }
 
     persistSubjects();
-    state.selectedDocumentId = subject.documents[0]?.id || null;
+    state.selectedDocumentId = getSortedDocuments(subject)[0]?.id || null;
     elements.documentUpload.value = "";
     clearUploadOptions();
     render();
@@ -2822,6 +2940,27 @@ elements.documentUpload.addEventListener("change", handleUpload);
 elements.documentsToggleButton.addEventListener("click", () => {
   state.documentsExpanded = !state.documentsExpanded;
   renderDocuments();
+});
+elements.documentsSelectAllButton.addEventListener("click", () => {
+  const subject = getSelectedSubject();
+  if (!subject?.documents.length) {
+    return;
+  }
+  const allDocumentIds = subject.documents.map((documentRecord) => documentRecord.id);
+  const allSelected = state.selectedDocumentIds.length === allDocumentIds.length;
+  state.selectedDocumentIds = allSelected ? [] : allDocumentIds;
+  renderDocuments();
+});
+elements.documentsDeleteSelectedButton.addEventListener("click", () => {
+  const subject = getSelectedSubject();
+  if (!subject || !state.selectedDocumentIds.length) {
+    return;
+  }
+  const confirmed = window.confirm(`Delete ${state.selectedDocumentIds.length} selected document${state.selectedDocumentIds.length === 1 ? "" : "s"}?`);
+  if (!confirmed) {
+    return;
+  }
+  deleteDocuments(state.selectedDocumentIds);
 });
 elements.processUploadButton.addEventListener("click", handleProcessUpload);
 elements.clearUploadButton.addEventListener("click", () => {

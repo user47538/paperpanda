@@ -161,9 +161,9 @@
                 <table class="documents-table">
                   <thead>
                     <tr>
+                      <th>Added</th>
                       <th>Title</th>
                       <th>Type</th>
-                      <th>Added</th>
                       <th>Actions</th>
                     </tr>
                   </thead>
@@ -171,6 +171,10 @@
                 </table>
               </div>
               <div class="documents-footer">
+                <div class="documents-bulk-actions">
+                  <button type="button" class="ghost-button" id="documents-select-all-button">Select all</button>
+                  <button type="button" class="ghost-button ghost-button--danger" id="documents-delete-selected-button">Delete selected</button>
+                </div>
                 <button type="button" class="ghost-button hidden" id="documents-toggle-button">Show all documents</button>
               </div>
             </section>
