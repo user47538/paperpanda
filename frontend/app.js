@@ -1,3 +1,13 @@
+import JSZip from "jszip";
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
+import pdfWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.mjs?url";
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+window.__pdfjsLib = pdfjsLib;
+window.__pdfjsLibPromise = Promise.resolve(pdfjsLib);
+window.__pdfjsLibError = "";
+window.dispatchEvent(new Event("studylift:pdf-ready"));
+
 const storageKey = "studylift-student";
 const subjectsStorageKey = "studylift-subjects";
 const settingsStorageKey = "studylift-settings";
@@ -2105,7 +2115,7 @@ async function loadPdfJs() {
 }
 
 async function extractDocxText(file) {
-  const zip = await globalThis.JSZip.loadAsync(await file.arrayBuffer());
+  const zip = await JSZip.loadAsync(await file.arrayBuffer());
   const xmlFiles = Object.keys(zip.files).filter((name) =>
     /^word\/(document|header\d+|footer\d+)\.xml$/i.test(name)
   );
@@ -2123,7 +2133,7 @@ async function extractDocxText(file) {
 }
 
 async function extractPptxText(file) {
-  const zip = await globalThis.JSZip.loadAsync(await file.arrayBuffer());
+  const zip = await JSZip.loadAsync(await file.arrayBuffer());
   const slideNames = Object.keys(zip.files)
     .filter((name) => /^ppt\/slides\/slide\d+\.xml$/i.test(name))
     .sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
