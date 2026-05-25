@@ -378,6 +378,54 @@
           <div id="attach-notes-list" class="attach-notes-list"></div>
         </section>
       </div>
+
+      <div class="modal hidden" id="edit-assessment-modal" aria-hidden="true">
+        <button type="button" class="modal__scrim" id="close-edit-assessment-scrim" aria-label="Close edit assessment"></button>
+        <section class="modal__panel" role="dialog" aria-modal="true" aria-labelledby="edit-assessment-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Assessment</p>
+              <h3 id="edit-assessment-title">Edit assessment</h3>
+            </div>
+            <button type="button" class="ghost-button" id="close-edit-assessment-button">Close</button>
+          </div>
+
+          <label class="upload-field">
+            <span class="upload-field__label">Assessment name</span>
+            <input type="text" id="edit-assessment-name" />
+          </label>
+
+          <div class="edit-assessment-grid">
+            <label class="upload-field">
+              <span class="upload-field__label">Task number</span>
+              <input type="text" id="edit-assessment-task-number" />
+            </label>
+
+            <label class="upload-field">
+              <span class="upload-field__label">Weighting</span>
+              <input type="text" id="edit-assessment-weighting" />
+            </label>
+          </div>
+
+          <div class="edit-assessment-grid">
+            <label class="upload-field">
+              <span class="upload-field__label">Distribution date</span>
+              <input type="text" id="edit-assessment-distribution-date" />
+            </label>
+
+            <label class="upload-field">
+              <span class="upload-field__label">Due date</span>
+              <input type="text" id="edit-assessment-due-date" />
+            </label>
+          </div>
+
+          <div class="upload-submit-row">
+            <button type="button" class="primary-button" id="save-edit-assessment-button">Save</button>
+            <button type="button" class="ghost-button" id="cancel-edit-assessment-button">Cancel</button>
+          </div>
+          <div class="upload-status" id="edit-assessment-status"></div>
+        </section>
+      </div>
     </div>
 
     <script type="module" src="./app.js"></script>

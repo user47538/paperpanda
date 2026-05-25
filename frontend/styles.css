@@ -1248,6 +1248,12 @@ button {
   width: min(1080px, 100%);
 }
 
+.edit-assessment-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
 .attach-notes-list {
   display: grid;
   gap: 18px;
@@ -1492,6 +1498,10 @@ button {
   }
 
   .attach-notes-page {
+    grid-template-columns: 1fr;
+  }
+
+  .edit-assessment-grid {
     grid-template-columns: 1fr;
   }
 

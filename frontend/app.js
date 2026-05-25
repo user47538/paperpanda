@@ -323,6 +323,8 @@ const state = {
   attachmentModalOpen: false,
   activeAttachmentAssessment: null,
   expandedAttachmentGroups: {},
+  editAssessmentModalOpen: false,
+  activeEditAssessment: null,
   watchExpanded: false,
   documentsExpanded: false,
   currentView: "home",
@@ -428,6 +430,17 @@ const elements = {
   closeAttachNotesButton: document.getElementById("close-attach-notes-button"),
   attachNotesSummary: document.getElementById("attach-notes-summary"),
   attachNotesList: document.getElementById("attach-notes-list"),
+  editAssessmentModal: document.getElementById("edit-assessment-modal"),
+  closeEditAssessmentScrim: document.getElementById("close-edit-assessment-scrim"),
+  closeEditAssessmentButton: document.getElementById("close-edit-assessment-button"),
+  editAssessmentName: document.getElementById("edit-assessment-name"),
+  editAssessmentTaskNumber: document.getElementById("edit-assessment-task-number"),
+  editAssessmentWeighting: document.getElementById("edit-assessment-weighting"),
+  editAssessmentDistributionDate: document.getElementById("edit-assessment-distribution-date"),
+  editAssessmentDueDate: document.getElementById("edit-assessment-due-date"),
+  saveEditAssessmentButton: document.getElementById("save-edit-assessment-button"),
+  cancelEditAssessmentButton: document.getElementById("cancel-edit-assessment-button"),
+  editAssessmentStatus: document.getElementById("edit-assessment-status"),
   taskViewTitle: document.getElementById("task-view-title"),
   taskSourceTitle: document.getElementById("task-source-title"),
   taskSourceContent: document.getElementById("task-source-content"),
@@ -1844,46 +1857,64 @@ function attachUpcomingAssessmentHandlers() {
   });
 }
 
-function editAssessment(subjectId, assessmentId) {
+function openEditAssessmentModal(subjectId, assessmentId) {
   const subject = state.subjects.find((item) => item.id === subjectId);
   const assessment = subject?.assessments.find((item) => item.id === assessmentId);
   if (!subject || !assessment) {
     return;
   }
 
-  const updatedTitle = window.prompt("Assessment name", assessment.componentTask || assessment.title);
-  if (updatedTitle === null) {
+  state.activeEditAssessment = { subjectId, assessmentId };
+  state.editAssessmentModalOpen = true;
+  elements.editAssessmentName.value = assessment.componentTask || assessment.title || "";
+  elements.editAssessmentTaskNumber.value = assessment.taskNumber || "";
+  elements.editAssessmentWeighting.value = assessment.weighting || "";
+  elements.editAssessmentDistributionDate.value = assessment.distributionDate || "";
+  elements.editAssessmentDueDate.value = assessment.dueDate || "";
+  elements.editAssessmentStatus.textContent = "";
+  elements.editAssessmentModal.classList.remove("hidden");
+  elements.editAssessmentModal.setAttribute("aria-hidden", "false");
+}
+
+function closeEditAssessmentModal() {
+  state.editAssessmentModalOpen = false;
+  state.activeEditAssessment = null;
+  elements.editAssessmentModal.classList.add("hidden");
+  elements.editAssessmentModal.setAttribute("aria-hidden", "true");
+  elements.editAssessmentStatus.textContent = "";
+}
+
+function editAssessment(subjectId, assessmentId) {
+  openEditAssessmentModal(subjectId, assessmentId);
+}
+
+function saveEditedAssessment() {
+  const activeEditAssessment = state.activeEditAssessment;
+  if (!activeEditAssessment) {
     return;
   }
 
-  const updatedTaskNumber = window.prompt("Task number", assessment.taskNumber || "");
-  if (updatedTaskNumber === null) {
+  const subject = state.subjects.find((item) => item.id === activeEditAssessment.subjectId);
+  const assessment = subject?.assessments.find((item) => item.id === activeEditAssessment.assessmentId);
+  if (!subject || !assessment) {
     return;
   }
 
-  const updatedDistributionDate = window.prompt("Distribution date", assessment.distributionDate || "");
-  if (updatedDistributionDate === null) {
+  const updatedTitle = elements.editAssessmentName.value.trim();
+  if (!updatedTitle) {
+    elements.editAssessmentStatus.textContent = "Enter an assessment name.";
     return;
   }
 
-  const updatedDueDate = window.prompt("Assessment due date", assessment.dueDate || "");
-  if (updatedDueDate === null) {
-    return;
-  }
-
-  const updatedWeighting = window.prompt("Weighting", assessment.weighting || "");
-  if (updatedWeighting === null) {
-    return;
-  }
-
-  assessment.title = updatedTitle.trim() || assessment.title;
-  assessment.componentTask = updatedTitle.trim() || assessment.componentTask || assessment.title;
-  assessment.taskNumber = updatedTaskNumber.trim() || assessment.taskNumber;
-  assessment.distributionDate = updatedDistributionDate.trim() || assessment.distributionDate;
-  assessment.dueDate = updatedDueDate.trim() || assessment.dueDate;
-  assessment.weighting = updatedWeighting.trim() || assessment.weighting;
+  assessment.title = updatedTitle;
+  assessment.componentTask = updatedTitle;
+  assessment.taskNumber = elements.editAssessmentTaskNumber.value.trim();
+  assessment.distributionDate = elements.editAssessmentDistributionDate.value.trim();
+  assessment.dueDate = elements.editAssessmentDueDate.value.trim();
+  assessment.weighting = elements.editAssessmentWeighting.value.trim();
   assessment.description = `${assessment.componentTask || assessment.title}.`;
   persistSubjects();
+  closeEditAssessmentModal();
   render();
 }
 
@@ -3199,6 +3230,10 @@ elements.closeUploadScrim.addEventListener("click", closeUploadModal);
 elements.closeUploadButton.addEventListener("click", closeUploadModal);
 elements.closeAttachNotesScrim.addEventListener("click", closeAttachNotesModal);
 elements.closeAttachNotesButton.addEventListener("click", closeAttachNotesModal);
+elements.closeEditAssessmentScrim.addEventListener("click", closeEditAssessmentModal);
+elements.closeEditAssessmentButton.addEventListener("click", closeEditAssessmentModal);
+elements.cancelEditAssessmentButton.addEventListener("click", closeEditAssessmentModal);
+elements.saveEditAssessmentButton.addEventListener("click", saveEditedAssessment);
 elements.closeTaskViewButton.addEventListener("click", () => {
   state.currentView = "subjects";
   render();
@@ -3287,6 +3322,9 @@ document.addEventListener("keydown", (event) => {
   }
   if (event.key === "Escape" && state.attachmentModalOpen) {
     closeAttachNotesModal();
+  }
+  if (event.key === "Escape" && state.editAssessmentModalOpen) {
+    closeEditAssessmentModal();
   }
 });
 
