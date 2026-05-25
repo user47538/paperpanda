@@ -432,7 +432,13 @@
           </label>
 
           <div class="upload-submit-row">
-            <button type="button" class="ghost-button" id="load-assessment-schedule-button">Load assessment schedule</button>
+            <input
+              type="file"
+              id="assessment-schedule-upload"
+              class="upload-panel__input upload-panel__input--hidden"
+              accept=".pdf,application/pdf"
+            />
+            <button type="button" class="ghost-button" id="upload-assessment-schedule-button">Upload assessment schedule</button>
             <button type="button" class="primary-button" id="process-upload-button">Submit</button>
             <button type="button" class="ghost-button" id="clear-upload-button">Clear</button>
           </div>

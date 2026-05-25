@@ -12,6 +12,8 @@ const accountsStorageKey = "studylift-accounts";
 const sessionStorageKey = "studylift-session";
 const subjectsStorageKey = "paperpanda-subjects-by-account";
 const settingsStorageKey = "studylift-settings";
+const uiVersionStorageKey = "paperpanda-ui-version";
+const currentUiVersion = "2026-05-25-white-background";
 const previewDatabaseName = "paperpanda-assets";
 const previewStoreName = "document-previews";
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://localhost:3001").replace(/\/$/, "");
@@ -321,21 +323,32 @@ const subjectTemplateSeed = subjectSeed.map(({ documents, assessments, watch, as
   askHistory: []
 }));
 
-const assessmentScheduleSeed = Object.fromEntries(
+const legacyAssessmentTemplateKeysBySubject = Object.fromEntries(
   subjectSeed.map((subject) => [
     subject.id,
-    structuredClone(subject.assessments || []).map((assessment) => ({
-      ...assessment,
-      linkedDocumentIds: [],
-      completed: false,
-      workNotes: ""
-    }))
+    new Set(
+      structuredClone(subject.assessments || []).map((assessment) =>
+        [String(assessment.taskNumber || "").trim().toLowerCase(), String(assessment.componentTask || assessment.title || "").trim().toLowerCase()].join("::")
+      )
+    )
   ])
 );
 
 const maddieDocumentSeed = Object.fromEntries(
   subjectSeed.map((subject) => [subject.id, structuredClone(subject.documents || [])])
 );
+
+const subjectAliasMap = {
+  maths: ["Maths and Numeracy", "Maths", "Mathematics", "Numeracy"],
+  english: ["English"],
+  science: ["Science"],
+  history: ["History"],
+  music: ["Music"],
+  pdhpe: ["PDHPE", "PDHPE/PE", "PE", "Personal Development Health and Physical Education"],
+  wellbeing: ["Wellbeing", "Well Being"],
+  "design-tech": ["Design & Technology", "Design and Technology", "Design Technology", "D&T", "Design Tech"],
+  art: ["Art", "Visual Arts"]
+};
 
 const state = {
   studentName: "",
@@ -435,7 +448,8 @@ const elements = {
   uploadWatchUrl: document.getElementById("upload-watch-url"),
   uploadWatchTitleWrap: document.getElementById("upload-watch-title-wrap"),
   uploadWatchTitle: document.getElementById("upload-watch-title"),
-  loadAssessmentScheduleButton: document.getElementById("load-assessment-schedule-button"),
+  assessmentScheduleUpload: document.getElementById("assessment-schedule-upload"),
+  uploadAssessmentScheduleButton: document.getElementById("upload-assessment-schedule-button"),
   processUploadButton: document.getElementById("process-upload-button"),
   clearUploadButton: document.getElementById("clear-upload-button"),
   uploadStatus: document.getElementById("upload-status"),
@@ -516,6 +530,35 @@ function buildAssessmentTemplateKey(assessment) {
   ].join("::");
 }
 
+function escapeRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function findSubjectIdFromText(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "";
+  }
+
+  const lowerText = text.toLowerCase();
+  for (const [subjectId, aliases] of Object.entries(subjectAliasMap)) {
+    if (aliases.some((alias) => lowerText.includes(alias.toLowerCase()))) {
+      return subjectId;
+    }
+  }
+
+  return "";
+}
+
+function stripSubjectAliasFromText(value, subjectId) {
+  const aliases = subjectAliasMap[subjectId] || [];
+  let nextValue = String(value || "");
+  aliases.forEach((alias) => {
+    nextValue = nextValue.replace(new RegExp(`\\b${escapeRegex(alias)}\\b`, "ig"), " ");
+  });
+  return nextValue.replace(/\s{2,}/g, " ").trim();
+}
+
 function createBaseSubjects() {
   return structuredClone(subjectTemplateSeed).map((subject) => ({
     ...subject,
@@ -537,14 +580,13 @@ function createInitialSubjectsForAccount(account) {
   }));
 }
 
-function buildAssessmentScheduleForSubject(subjectId, existingAssessments = []) {
-  const scheduleTemplates = structuredClone(assessmentScheduleSeed[subjectId] || []);
+function buildScheduleMergedAssessments(parsedAssessments = [], existingAssessments = []) {
   const existingByKey = new Map(
     existingAssessments.map((assessment) => [buildAssessmentTemplateKey(assessment), assessment])
   );
-  const scheduleKeys = new Set(scheduleTemplates.map(buildAssessmentTemplateKey));
+  const parsedKeys = new Set(parsedAssessments.map(buildAssessmentTemplateKey));
 
-  const importedSchedule = scheduleTemplates.map((assessment) => {
+  const uploadedScheduleAssessments = parsedAssessments.map((assessment) => {
     const existingAssessment = existingByKey.get(buildAssessmentTemplateKey(assessment));
     return {
       ...assessment,
@@ -553,15 +595,37 @@ function buildAssessmentScheduleForSubject(subjectId, existingAssessments = []) 
         ? [...existingAssessment.linkedDocumentIds]
         : [],
       completed: Boolean(existingAssessment?.completed),
-      workNotes: existingAssessment?.workNotes || ""
+      workNotes: existingAssessment?.workNotes || "",
+      source: "schedule-upload"
     };
   });
 
-  const customAssessments = existingAssessments.filter(
-    (assessment) => !scheduleKeys.has(buildAssessmentTemplateKey(assessment))
-  );
+  const customAssessments = existingAssessments.filter((assessment) => {
+    const isUploadedSchedule = assessment.source === "schedule-upload";
+    if (isUploadedSchedule) {
+      return false;
+    }
 
-  return [...importedSchedule, ...customAssessments];
+    if (!assessment.source && parsedKeys.has(buildAssessmentTemplateKey(assessment))) {
+      return false;
+    }
+
+    return true;
+  });
+
+  return [...uploadedScheduleAssessments, ...customAssessments];
+}
+
+function removeLegacySeededAssessments(subjects) {
+  return subjects.map((subject) => ({
+    ...subject,
+    assessments: (subject.assessments || []).filter((assessment) => {
+      if (assessment.source) {
+        return true;
+      }
+      return !legacyAssessmentTemplateKeysBySubject[subject.id]?.has(buildAssessmentTemplateKey(assessment));
+    })
+  }));
 }
 
 function getSelectedSubject() {
@@ -1083,7 +1147,9 @@ function restoreSubjectsForAccount(account) {
   const storedSubjectsMap = loadStoredSubjectsMap();
   const storedSubjects = storedSubjectsMap[accountKey];
   if (Array.isArray(storedSubjects)) {
-    state.subjects = storedSubjects.map(hydrateStoredSubject);
+    state.subjects = removeLegacySeededAssessments(storedSubjects.map(hydrateStoredSubject));
+    storedSubjectsMap[accountKey] = createPersistableSubjects(state.subjects);
+    saveStoredSubjectsMap(storedSubjectsMap);
   } else {
     state.subjects = createInitialSubjectsForAccount(account);
     storedSubjectsMap[accountKey] = createPersistableSubjects(state.subjects);
@@ -1126,6 +1192,7 @@ function restoreSessionUser() {
 function restoreSettings() {
   const raw = window.localStorage.getItem(settingsStorageKey);
   if (!raw) {
+    window.localStorage.setItem(uiVersionStorageKey, currentUiVersion);
     return;
   }
 
@@ -1147,6 +1214,13 @@ function restoreSettings() {
   } catch (error) {
     console.error("Failed to restore settings.", error);
   }
+
+  if (window.localStorage.getItem(uiVersionStorageKey) !== currentUiVersion) {
+    state.settings.homeBackground = "";
+    state.settings.subjectsBackground = "";
+    persistSettings();
+    window.localStorage.setItem(uiVersionStorageKey, currentUiVersion);
+  }
 }
 
 function applyBackgrounds() {
@@ -1156,6 +1230,8 @@ function applyBackgrounds() {
   elements.subjectsView.style.backgroundImage = state.settings.subjectsBackground
     ? `url("${state.settings.subjectsBackground}")`
     : "";
+  elements.homeView.style.backgroundColor = "#ffffff";
+  elements.subjectsView.style.backgroundColor = "#ffffff";
 }
 
 function renderAiConnectionState() {
@@ -3206,6 +3282,208 @@ async function handleUpload(event) {
   renderPendingUpload();
 }
 
+function normalizeScheduleLine(value) {
+  return String(value || "")
+    .replace(/^Page\s+\d+\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isAssessmentScheduleNoiseLine(value) {
+  const compactValue = String(value || "").trim().toLowerCase();
+  if (!compactValue) {
+    return true;
+  }
+
+  return [
+    "assessment schedule",
+    "task number",
+    "component/task",
+    "component task",
+    "distribution date",
+    "due date",
+    "weighting percentage",
+    "weighting",
+    "year 7",
+    "semester 1",
+    "semester 2"
+  ].includes(compactValue);
+}
+
+function parseAssessmentScheduleLine(line, fallbackSubjectId) {
+  const normalizedLine = normalizeScheduleLine(line);
+  if (!normalizedLine || !/\d{1,3}\s*%/.test(normalizedLine)) {
+    return null;
+  }
+
+  const subjectId = findSubjectIdFromText(normalizedLine) || fallbackSubjectId;
+  if (!subjectId) {
+    return null;
+  }
+
+  let workingLine = stripSubjectAliasFromText(normalizedLine, subjectId)
+    .replace(/\b(?:assessment schedule|task number|component\/task|component task|distribution date|due date|weighting percentage|weighting)\b/gi, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  const weightingMatch = workingLine.match(/(\d{1,3}\s*%)\s*$/);
+  if (!weightingMatch) {
+    return null;
+  }
+
+  const weighting = weightingMatch[1].replace(/\s+/g, "");
+  workingLine = workingLine.slice(0, weightingMatch.index).trim();
+
+  const dateChunkRegex =
+    /(?:Term\s*\d(?:\s*Week(?:s)?\s*[\d/&,\-\s]+)?(?:\s*or\s*Term\s*\d(?:\s*Week(?:s)?\s*[\d/&,\-\s]+)?)*)|(?:Ongoing(?:\s+[A-Za-z0-9/&,\-\s]+)?)|(?:(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\s+)?\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+(?:\s+\d{4})?/gi;
+  const dateMatches = [...workingLine.matchAll(dateChunkRegex)];
+  if (dateMatches.length < 2) {
+    return null;
+  }
+
+  const distributionMatch = dateMatches[dateMatches.length - 2];
+  const dueMatch = dateMatches[dateMatches.length - 1];
+  const distributionDate = distributionMatch[0].trim().replace(/\s+/g, " ");
+  const dueDate = dueMatch[0].trim().replace(/\s+/g, " ");
+  const headingText = workingLine.slice(0, distributionMatch.index).replace(/\s{2,}/g, " ").trim();
+  if (!headingText) {
+    return null;
+  }
+
+  let taskNumber = "";
+  let componentTask = headingText;
+  const taskMatch = headingText.match(/^(?:task\s*)?([A-Za-z]?\d+[A-Za-z]?|[A-Za-z]\d)\s*[-:.,]?\s+(.+)$/i);
+  if (taskMatch) {
+    taskNumber = taskMatch[1].trim();
+    componentTask = taskMatch[2].trim();
+  }
+
+  if (!componentTask) {
+    return null;
+  }
+
+  return {
+    subjectId,
+    assessment: {
+      id: createId(),
+      title: componentTask,
+      componentTask,
+      taskNumber: taskNumber || "TBC",
+      distributionDate,
+      dueDate,
+      weighting,
+      description: `${componentTask}.`,
+      linkedDocumentIds: [],
+      completed: false,
+      workNotes: "",
+      source: "schedule-upload"
+    }
+  };
+}
+
+async function extractAssessmentScheduleFromPdf(file) {
+  const pdfData = await extractPdfData(file);
+  const entriesBySubject = {};
+  let currentSubjectId = "";
+  let rowBuffer = "";
+
+  const flushRowBuffer = () => {
+    if (!rowBuffer) {
+      return;
+    }
+
+    const parsedRow = parseAssessmentScheduleLine(rowBuffer, currentSubjectId);
+    if (parsedRow) {
+      entriesBySubject[parsedRow.subjectId] = entriesBySubject[parsedRow.subjectId] || [];
+      entriesBySubject[parsedRow.subjectId].push(parsedRow.assessment);
+      currentSubjectId = parsedRow.subjectId;
+    }
+
+    rowBuffer = "";
+  };
+
+  pdfData.fullText
+    .split(/\n+/)
+    .map(normalizeScheduleLine)
+    .filter(Boolean)
+    .forEach((line) => {
+      if (isAssessmentScheduleNoiseLine(line)) {
+        return;
+      }
+
+      const headingSubjectId = findSubjectIdFromText(line);
+      const isLikelySubjectHeading =
+        headingSubjectId &&
+        !/\d{1,3}\s*%/.test(line) &&
+        !/\bterm\s*\d\b/i.test(line) &&
+        line.split(/\s+/).length <= 7;
+
+      if (isLikelySubjectHeading) {
+        flushRowBuffer();
+        currentSubjectId = headingSubjectId;
+        return;
+      }
+
+      rowBuffer = rowBuffer ? `${rowBuffer} ${line}` : line;
+      if (/\d{1,3}\s*%/.test(rowBuffer)) {
+        flushRowBuffer();
+      }
+    });
+
+  flushRowBuffer();
+
+  return entriesBySubject;
+}
+
+async function handleAssessmentScheduleUpload(event) {
+  const file = event.target.files?.[0];
+  if (!file) {
+    return;
+  }
+
+  if (!/\.pdf$/i.test(file.name)) {
+    elements.uploadStatus.textContent = "Upload the assessment schedule as a PDF.";
+    event.target.value = "";
+    return;
+  }
+
+  elements.uploadStatus.textContent = "Reading assessment schedule PDF...";
+
+  try {
+    const entriesBySubject = await extractAssessmentScheduleFromPdf(file);
+    const matchedSubjects = Object.keys(entriesBySubject).filter((subjectId) => entriesBySubject[subjectId]?.length);
+    const matchedAssessmentCount = matchedSubjects.reduce(
+      (total, subjectId) => total + entriesBySubject[subjectId].length,
+      0
+    );
+
+    if (!matchedAssessmentCount) {
+      throw new Error("No assessment rows could be matched. Check that the PDF includes subject, task number, distribution, due date, and weighting columns.");
+    }
+
+    state.subjects = state.subjects.map((subject) => {
+      const parsedAssessments = entriesBySubject[subject.id];
+      if (!parsedAssessments?.length) {
+        return subject;
+      }
+
+      return {
+        ...subject,
+        assessments: buildScheduleMergedAssessments(parsedAssessments, subject.assessments || [])
+      };
+    });
+
+    persistSubjects();
+    render();
+    elements.uploadStatus.textContent = `Assessment schedule uploaded: ${matchedAssessmentCount} assessments matched across ${matchedSubjects.length} subjects.`;
+  } catch (error) {
+    elements.uploadStatus.textContent =
+      error instanceof Error ? `Assessment schedule upload failed: ${error.message}` : "Assessment schedule upload failed.";
+  } finally {
+    event.target.value = "";
+  }
+}
+
 async function processFiles(fileList) {
   const files = [...fileList];
   const subject = getUploadSubject();
@@ -3447,32 +3725,9 @@ function handleSetTermDates() {
   render();
 }
 
-function loadAssessmentSchedule() {
-  const hasOfficialSchedule = state.subjects.some(
-    (subject) => Array.isArray(assessmentScheduleSeed[subject.id]) && assessmentScheduleSeed[subject.id].length
-  );
-  if (!hasOfficialSchedule) {
-    elements.uploadStatus.textContent = "No assessment schedule is available to load.";
-    return;
-  }
-
-  const hasExistingAssessments = state.subjects.some((subject) => subject.assessments.length);
-  if (hasExistingAssessments) {
-    const confirmed = window.confirm(
-      "Load the assessment schedule for every subject? Existing schedule items will be refreshed, and any custom assessments will be kept."
-    );
-    if (!confirmed) {
-      return;
-    }
-  }
-
-  state.subjects = state.subjects.map((subject) => ({
-    ...subject,
-    assessments: buildAssessmentScheduleForSubject(subject.id, subject.assessments || [])
-  }));
-  persistSubjects();
-  render();
-  elements.uploadStatus.textContent = "Assessment schedule loaded for all subjects.";
+function openAssessmentScheduleUpload() {
+  elements.assessmentScheduleUpload.value = "";
+  elements.assessmentScheduleUpload.click();
 }
 
 function saveAccountSettings() {
@@ -3763,7 +4018,8 @@ elements.clearUploadButton.addEventListener("click", () => {
   clearPendingUpload();
   resetUploadStatus();
 });
-elements.loadAssessmentScheduleButton.addEventListener("click", loadAssessmentSchedule);
+elements.uploadAssessmentScheduleButton.addEventListener("click", openAssessmentScheduleUpload);
+elements.assessmentScheduleUpload.addEventListener("change", handleAssessmentScheduleUpload);
 [
   elements.uploadClassNotes,
   elements.uploadAssessment,
