@@ -780,13 +780,13 @@ async function requestApi(endpoint, payload, expectBlob = false) {
 
   if (!response.ok) {
     let message = "Backend request failed.";
-    try {
-      const errorPayload = await response.json();
-      message = errorPayload?.error || errorPayload?.message || message;
-    } catch (error) {
-      const fallbackText = await response.text();
-      if (fallbackText) {
-        message = fallbackText;
+    const responseText = await response.text();
+    if (responseText) {
+      try {
+        const errorPayload = JSON.parse(responseText);
+        message = errorPayload?.error || errorPayload?.message || message;
+      } catch (error) {
+        message = responseText;
       }
     }
     throw new Error(message);
@@ -1157,34 +1157,6 @@ function speakDocument(document) {
     return;
   }
 
-  const speakWithBrowserVoice = () => {
-    if (!("speechSynthesis" in window)) {
-      elements.askResponse.textContent =
-        "Audio playback is not supported in this browser. You can still read the document in the reader.";
-      return;
-    }
-
-    const utterance = new SpeechSynthesisUtterance(textToRead);
-    const voices = window.speechSynthesis.getVoices();
-    const preferredVoice =
-      voices.find((voice) => /samantha|karen|tessa|ava|allison|serena|susan|olivia|female|woman|girl/i.test(`${voice.name} ${voice.voiceURI}`)) ||
-      voices.find((voice) => /en-au|en_gb|en-us/i.test(voice.lang) && /samantha|karen|tessa|ava|allison|serena|susan|olivia/i.test(`${voice.name} ${voice.voiceURI}`)) ||
-      voices.find((voice) => /en-au|en_gb|en-us/i.test(voice.lang)) ||
-      null;
-    if (preferredVoice) {
-      utterance.voice = preferredVoice;
-    }
-    utterance.rate = 0.95;
-    utterance.pitch = 1.06;
-    utterance.onend = () => {
-      state.listeningDocumentId = null;
-      renderDocuments();
-    };
-    state.listeningDocumentId = document.id;
-    window.speechSynthesis.speak(utterance);
-    renderDocuments();
-  };
-
   const speakWithOpenAi = async () => {
     state.listeningDocumentId = document.id;
     renderDocuments();
@@ -1205,7 +1177,7 @@ function speakDocument(document) {
     };
     currentAudioPlayback.onerror = () => {
       stopListening();
-      speakWithBrowserVoice();
+      elements.askResponse.textContent = "AI voice playback failed for this document.";
     };
     await currentAudioPlayback.play();
   };
@@ -1213,7 +1185,9 @@ function speakDocument(document) {
   speakWithOpenAi().catch((error) => {
     console.error("OpenAI speech failed.", error);
     stopListening();
-    speakWithBrowserVoice();
+    elements.askResponse.textContent =
+      error instanceof Error ? `Listen failed: ${error.message}` : "Listen failed.";
+    renderDocuments();
   });
 }
 
@@ -1222,6 +1196,8 @@ function stopListening() {
     window.speechSynthesis.cancel();
   }
   if (currentAudioPlayback) {
+    currentAudioPlayback.onended = null;
+    currentAudioPlayback.onerror = null;
     currentAudioPlayback.pause();
     currentAudioPlayback.src = "";
     currentAudioPlayback = null;
@@ -2295,13 +2271,13 @@ async function uploadPdfToApi(file) {
 
   if (!response.ok) {
     let message = "PDF upload failed.";
-    try {
-      const errorPayload = await response.json();
-      message = errorPayload?.error || errorPayload?.message || message;
-    } catch (error) {
-      const fallbackText = await response.text();
-      if (fallbackText) {
-        message = fallbackText;
+    const responseText = await response.text();
+    if (responseText) {
+      try {
+        const errorPayload = JSON.parse(responseText);
+        message = errorPayload?.error || errorPayload?.message || message;
+      } catch (error) {
+        message = responseText;
       }
     }
     throw new Error(message);
