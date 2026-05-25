@@ -334,8 +334,15 @@ const legacyAssessmentTemplateKeysBySubject = Object.fromEntries(
   ])
 );
 
-const maddieDocumentSeed = Object.fromEntries(
-  subjectSeed.map((subject) => [subject.id, structuredClone(subject.documents || [])])
+const legacyDocumentTemplateKeysBySubject = Object.fromEntries(
+  subjectSeed.map((subject) => [
+    subject.id,
+    new Set(
+      structuredClone(subject.documents || []).map((documentRecord) =>
+        String(documentRecord.title || "").trim().toLowerCase()
+      )
+    )
+  ])
 );
 
 const subjectAliasMap = {
@@ -517,12 +524,6 @@ function normaliseAccountKey(value) {
   return String(value || "").trim().toLowerCase();
 }
 
-function isMaddieAccount(accountOrName) {
-  const name =
-    typeof accountOrName === "string" ? accountOrName : accountOrName?.name || "";
-  return normaliseAccountKey(name) === "maddie woolley";
-}
-
 function buildAssessmentTemplateKey(assessment) {
   return [
     String(assessment.taskNumber || "").trim().toLowerCase(),
@@ -570,10 +571,9 @@ function createBaseSubjects() {
 }
 
 function createInitialSubjectsForAccount(account) {
-  const includeMaddieDocuments = isMaddieAccount(account);
   return createBaseSubjects().map((subject) => ({
     ...subject,
-    documents: includeMaddieDocuments ? structuredClone(maddieDocumentSeed[subject.id] || []) : [],
+    documents: [],
     assessments: [],
     watch: [],
     askHistory: []
@@ -624,6 +624,30 @@ function removeLegacySeededAssessments(subjects) {
         return true;
       }
       return !legacyAssessmentTemplateKeysBySubject[subject.id]?.has(buildAssessmentTemplateKey(assessment));
+    })
+  }));
+}
+
+function removeLegacySeededDocuments(subjects) {
+  return subjects.map((subject) => ({
+    ...subject,
+    documents: (subject.documents || []).filter((documentRecord) => {
+      const isLegacySeededTitle = legacyDocumentTemplateKeysBySubject[subject.id]?.has(
+        String(documentRecord.title || "").trim().toLowerCase()
+      );
+      const hasImportedState =
+        Boolean(documentRecord.originalFile) ||
+        Boolean(documentRecord.previewImageUrl) ||
+        Boolean(documentRecord.uploadGroupId) ||
+        Boolean(documentRecord.pageNumber) ||
+        Boolean(documentRecord.addedAt) ||
+        Boolean(documentRecord.workNotes);
+
+      if (hasImportedState) {
+        return true;
+      }
+
+      return !isLegacySeededTitle;
     })
   }));
 }
@@ -1147,7 +1171,9 @@ function restoreSubjectsForAccount(account) {
   const storedSubjectsMap = loadStoredSubjectsMap();
   const storedSubjects = storedSubjectsMap[accountKey];
   if (Array.isArray(storedSubjects)) {
-    state.subjects = removeLegacySeededAssessments(storedSubjects.map(hydrateStoredSubject));
+    state.subjects = removeLegacySeededDocuments(
+      removeLegacySeededAssessments(storedSubjects.map(hydrateStoredSubject))
+    );
     storedSubjectsMap[accountKey] = createPersistableSubjects(state.subjects);
     saveStoredSubjectsMap(storedSubjectsMap);
   } else {
