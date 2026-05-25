@@ -186,10 +186,10 @@
                   <h3 id="reader-title">Document reader</h3>
                 </div>
                 <div class="reader-toolbar" id="reader-toolbar">
-                  <button type="button" class="table-action" id="reader-read-button">Read</button>
+                  <button type="button" class="table-action" id="reader-previous-button" aria-label="Previous page">←</button>
                   <button type="button" class="table-action" id="reader-listen-button">Listen</button>
                   <button type="button" class="table-action" id="reader-ask-button">Ask</button>
-                  <button type="button" class="table-action table-action--danger" id="reader-delete-button">Delete</button>
+                  <button type="button" class="table-action" id="reader-next-button" aria-label="Next page">→</button>
                 </div>
               </div>
               <div class="reader-content" id="reader-content">
@@ -358,6 +358,23 @@
             <button type="button" class="ghost-button" id="clear-upload-button">Clear</button>
           </div>
           <div class="upload-status" id="upload-status"></div>
+        </section>
+      </div>
+
+      <div class="modal hidden" id="attach-notes-modal" aria-hidden="true">
+        <button type="button" class="modal__scrim" id="close-attach-notes-scrim" aria-label="Close attach notes"></button>
+        <section class="modal__panel modal__panel--wide" role="dialog" aria-modal="true" aria-labelledby="attach-notes-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Assessment support</p>
+              <h3 id="attach-notes-title">Attach notes</h3>
+            </div>
+            <button type="button" class="ghost-button" id="close-attach-notes-button">Close</button>
+          </div>
+          <p class="helper-text" id="attach-notes-summary">
+            Select the document pages you want linked to this assessment.
+          </p>
+          <div id="attach-notes-list" class="attach-notes-list"></div>
         </section>
       </div>
     </div>

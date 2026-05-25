@@ -679,7 +679,7 @@ button {
 .subject-header__actions {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-start;
+  justify-content: flex-end;
   gap: 10px;
 }
 
@@ -801,6 +801,21 @@ button {
 .documents-date-button span {
   font-size: 0.84rem;
   color: var(--muted);
+}
+
+.documents-title-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.documents-title-button strong {
+  font: inherit;
+  font-weight: 600;
 }
 
 .table-actions {
@@ -1197,6 +1212,100 @@ button {
   box-shadow: none;
 }
 
+.modal__panel--wide {
+  width: min(1080px, 100%);
+}
+
+.attach-notes-list {
+  display: grid;
+  gap: 18px;
+}
+
+.attach-notes-group {
+  border: 1px solid rgba(17, 17, 17, 0.08);
+  border-radius: 22px;
+  background: #fbfaf8;
+  padding: 18px;
+}
+
+.attach-notes-group__toggle {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.attach-notes-group__toggle strong {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #6c655d;
+}
+
+.attach-notes-group__toggle span {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.attach-notes-pages {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.attach-notes-page {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  padding: 14px;
+  border-radius: 18px;
+  background: #ffffff;
+  border: 1px solid rgba(17, 17, 17, 0.08);
+}
+
+.attach-notes-page__preview {
+  width: 100%;
+  border-radius: 14px;
+  border: 1px solid rgba(17, 17, 17, 0.1);
+  background: #ffffff;
+}
+
+.attach-notes-page__body {
+  display: grid;
+  gap: 10px;
+}
+
+.attach-notes-page__select {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink);
+  font-size: 0.95rem;
+}
+
+.attach-notes-page__select input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.attach-notes-page__meta {
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+
 @media (max-width: 1180px) {
   .landing-panel,
   .home-grid,
@@ -1288,6 +1397,10 @@ button {
   .documents-bulk-actions {
     width: 100%;
     justify-content: flex-start;
+  }
+
+  .attach-notes-page {
+    grid-template-columns: 1fr;
   }
 
   .landing-copy h1 {

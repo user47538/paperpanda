@@ -317,6 +317,9 @@ const state = {
   listeningDocumentId: null,
   selectedDocumentIds: [],
   expandedDocumentGroups: {},
+  attachmentModalOpen: false,
+  activeAttachmentAssessment: null,
+  expandedAttachmentGroups: {},
   documentsExpanded: false,
   currentView: "home",
   activeTask: null,
@@ -398,10 +401,10 @@ const elements = {
   readerCard: document.getElementById("reader-card"),
   readerTitle: document.getElementById("reader-title"),
   readerContent: document.getElementById("reader-content"),
-  readerReadButton: document.getElementById("reader-read-button"),
+  readerPreviousButton: document.getElementById("reader-previous-button"),
   readerListenButton: document.getElementById("reader-listen-button"),
   readerAskButton: document.getElementById("reader-ask-button"),
-  readerDeleteButton: document.getElementById("reader-delete-button"),
+  readerNextButton: document.getElementById("reader-next-button"),
   assessmentList: document.getElementById("assessment-list"),
   practiceList: document.getElementById("practice-list"),
   watchList: document.getElementById("watch-list"),
@@ -415,6 +418,11 @@ const elements = {
   uploadModal: document.getElementById("upload-modal"),
   closeUploadScrim: document.getElementById("close-upload-scrim"),
   closeUploadButton: document.getElementById("close-upload-button"),
+  attachNotesModal: document.getElementById("attach-notes-modal"),
+  closeAttachNotesScrim: document.getElementById("close-attach-notes-scrim"),
+  closeAttachNotesButton: document.getElementById("close-attach-notes-button"),
+  attachNotesSummary: document.getElementById("attach-notes-summary"),
+  attachNotesList: document.getElementById("attach-notes-list"),
   taskViewTitle: document.getElementById("task-view-title"),
   taskSourceTitle: document.getElementById("task-source-title"),
   taskSourceContent: document.getElementById("task-source-content"),
@@ -962,12 +970,12 @@ function renderSubjectHeader() {
   }
 
   elements.subjectHeader.innerHTML = `
-    <div class="subject-header__actions">
-      <button type="button" class="ghost-button" id="subject-upload-button">Upload</button>
-    </div>
     <div class="subject-header__title">
       <p class="eyebrow">Current subject</p>
       <h3>${escapeHtml(subject.name)}</h3>
+    </div>
+    <div class="subject-header__actions">
+      <button type="button" class="ghost-button" id="subject-upload-button">Upload</button>
     </div>
   `;
   document.getElementById("subject-upload-button")?.addEventListener("click", openUploadModal);
@@ -1057,6 +1065,31 @@ function getDocumentGroups(subject) {
   }));
 }
 
+function getSelectedDocumentIndex() {
+  const subject = getSelectedSubject();
+  const selectedDocument = getSelectedDocument();
+  if (!subject || !selectedDocument) {
+    return -1;
+  }
+  return getSortedDocuments(subject).findIndex((documentRecord) => documentRecord.id === selectedDocument.id);
+}
+
+function selectAdjacentDocument(direction) {
+  const subject = getSelectedSubject();
+  const selectedIndex = getSelectedDocumentIndex();
+  if (!subject || selectedIndex === -1) {
+    return;
+  }
+  const sortedDocuments = getSortedDocuments(subject);
+  const nextDocument = sortedDocuments[selectedIndex + direction];
+  if (!nextDocument) {
+    return;
+  }
+  state.selectedDocumentId = nextDocument.id;
+  renderDocuments();
+  scrollReaderIntoView();
+}
+
 function renderDocumentBulkActions(subject) {
   const documentIds = subject.documents.map((documentRecord) => documentRecord.id);
   state.selectedDocumentIds = state.selectedDocumentIds.filter((documentId) => documentIds.includes(documentId));
@@ -1087,12 +1120,14 @@ function renderAskContext() {
 
 function renderReaderToolbar() {
   const selectedDocument = getSelectedDocument();
+  const selectedIndex = getSelectedDocumentIndex();
+  const documentCount = getSelectedSubject()?.documents.length || 0;
   const hasDocument = Boolean(selectedDocument);
 
-  elements.readerReadButton.disabled = !hasDocument;
+  elements.readerPreviousButton.disabled = !hasDocument || selectedIndex <= 0;
   elements.readerListenButton.disabled = !hasDocument;
   elements.readerAskButton.disabled = !hasDocument;
-  elements.readerDeleteButton.disabled = !hasDocument;
+  elements.readerNextButton.disabled = !hasDocument || selectedIndex === -1 || selectedIndex >= documentCount - 1;
   elements.readerListenButton.textContent =
     selectedDocument && state.listeningDocumentId === selectedDocument.id ? "Stop" : "Listen";
 }
@@ -1156,7 +1191,11 @@ function renderDocuments() {
                   ? `<td rowspan="${visibleDocuments.length}">${dateCellMarkup}</td>`
                   : ""
               }
-              <td><strong>${escapeHtml(document.title)}</strong></td>
+              <td>
+                <button type="button" class="documents-title-button" data-document-title-id="${document.id}">
+                  <strong>${escapeHtml(document.title)}</strong>
+                </button>
+              </td>
               <td>${escapeHtml(document.type)}</td>
               <td>
                 <div class="table-actions">
@@ -1185,6 +1224,18 @@ function renderDocuments() {
       }
       state.expandedDocumentGroups[groupId] = !state.expandedDocumentGroups[groupId];
       renderDocuments();
+    });
+  });
+
+  elements.documentsBody.querySelectorAll("[data-document-title-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const documentRecord = subject.documents.find((doc) => doc.id === button.dataset.documentTitleId);
+      if (!documentRecord) {
+        return;
+      }
+      state.selectedDocumentId = documentRecord.id;
+      renderDocuments();
+      scrollReaderIntoView();
     });
   });
 
@@ -1460,6 +1511,7 @@ function deleteDocuments(documentIds) {
 function getAssessmentActionsMarkup(assessmentId, isCompleted) {
   return `
     <div class="assessment-actions">
+      <button type="button" class="assessment-action" data-assessment-action="attach" data-assessment-id="${assessmentId}">Attach notes</button>
       <button type="button" class="assessment-action" data-assessment-action="edit" data-assessment-id="${assessmentId}">Edit</button>
       <button type="button" class="assessment-action assessment-action--danger" data-assessment-action="delete" data-assessment-id="${assessmentId}">Delete</button>
       ${
@@ -1479,6 +1531,10 @@ function attachAssessmentActionHandlers(container, subject) {
         return;
       }
 
+      if (button.dataset.assessmentAction === "attach") {
+        openAttachNotesModal(subject.id, assessmentId);
+      }
+
       if (button.dataset.assessmentAction === "edit") {
         editAssessment(subject.id, assessmentId);
       }
@@ -1490,6 +1546,115 @@ function attachAssessmentActionHandlers(container, subject) {
       if (button.dataset.assessmentAction === "complete") {
         completeAssessment(subject.id, assessmentId);
       }
+    });
+  });
+}
+
+function openAttachNotesModal(subjectId, assessmentId) {
+  state.activeAttachmentAssessment = { subjectId, assessmentId };
+  state.attachmentModalOpen = true;
+  elements.attachNotesModal.classList.remove("hidden");
+  elements.attachNotesModal.setAttribute("aria-hidden", "false");
+  renderAttachNotesModal();
+}
+
+function closeAttachNotesModal() {
+  state.attachmentModalOpen = false;
+  state.activeAttachmentAssessment = null;
+  state.expandedAttachmentGroups = {};
+  elements.attachNotesModal.classList.add("hidden");
+  elements.attachNotesModal.setAttribute("aria-hidden", "true");
+}
+
+function renderAttachNotesModal() {
+  const context = state.activeAttachmentAssessment;
+  if (!context) {
+    elements.attachNotesList.innerHTML = `<div class="empty-state">Select an assessment first.</div>`;
+    return;
+  }
+
+  const subject = state.subjects.find((item) => item.id === context.subjectId);
+  const assessment = subject?.assessments.find((item) => item.id === context.assessmentId);
+  if (!subject || !assessment) {
+    elements.attachNotesList.innerHTML = `<div class="empty-state">This assessment is no longer available.</div>`;
+    return;
+  }
+
+  elements.attachNotesSummary.textContent = `${assessment.componentTask || assessment.title} · ${assessment.linkedDocumentIds.length} page${assessment.linkedDocumentIds.length === 1 ? "" : "s"} attached`;
+
+  if (!subject.documents.length) {
+    elements.attachNotesList.innerHTML = `<div class="empty-state">Upload documents to this subject before attaching notes.</div>`;
+    return;
+  }
+
+  const groups = getDocumentGroups(subject);
+  elements.attachNotesList.innerHTML = groups
+    .map((group) => {
+      const isExpanded = Boolean(state.expandedAttachmentGroups[group.id]);
+      const visibleDocuments = group.isPageGroup && !isExpanded ? [group.documents[0]] : group.documents;
+      return `
+        <section class="attach-notes-group">
+          <button type="button" class="attach-notes-group__toggle" data-attach-group-toggle="${group.id}">
+            <strong>${escapeHtml(group.added)}</strong>
+            <span>${group.isPageGroup ? `${group.documents.length} pages` : `${group.documents.length} file${group.documents.length === 1 ? "" : "s"}`} · ${isExpanded ? "Hide" : "Show all"}</span>
+          </button>
+          <div class="attach-notes-pages">
+            ${visibleDocuments
+              .map(
+                (documentRecord) => `
+                  <article class="attach-notes-page">
+                    ${
+                      documentRecord.previewImageUrl
+                        ? `<img class="attach-notes-page__preview" src="${escapeHtml(documentRecord.previewImageUrl)}" alt="${escapeHtml(documentRecord.title)} preview" />`
+                        : `<div class="empty-state">No preview available</div>`
+                    }
+                    <div class="attach-notes-page__body">
+                      <label class="attach-notes-page__select">
+                        <input type="checkbox" data-attach-document-id="${documentRecord.id}" ${assessment.linkedDocumentIds.includes(documentRecord.id) ? "checked" : ""} />
+                        <span>${escapeHtml(documentRecord.title)}</span>
+                      </label>
+                      <div class="attach-notes-page__meta">
+                        ${escapeHtml(documentRecord.type)}${documentRecord.pageNumber ? ` · Page ${documentRecord.pageNumber}` : ""}
+                      </div>
+                    </div>
+                  </article>
+                `
+              )
+              .join("")}
+          </div>
+        </section>
+      `;
+    })
+    .join("");
+
+  elements.attachNotesList.querySelectorAll("[data-attach-group-toggle]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const groupId = button.dataset.attachGroupToggle;
+      if (!groupId) {
+        return;
+      }
+      state.expandedAttachmentGroups[groupId] = !state.expandedAttachmentGroups[groupId];
+      renderAttachNotesModal();
+    });
+  });
+
+  elements.attachNotesList.querySelectorAll("[data-attach-document-id]").forEach((checkbox) => {
+    checkbox.addEventListener("change", (event) => {
+      const documentId = event.target.dataset.attachDocumentId;
+      if (!documentId) {
+        return;
+      }
+      if (event.target.checked) {
+        if (!assessment.linkedDocumentIds.includes(documentId)) {
+          assessment.linkedDocumentIds.push(documentId);
+        }
+      } else {
+        assessment.linkedDocumentIds = assessment.linkedDocumentIds.filter((id) => id !== documentId);
+      }
+      persistSubjects();
+      renderAssessments();
+      renderUpcomingModal();
+      renderAttachNotesModal();
     });
   });
 }
@@ -1789,9 +1954,6 @@ function renderAssessments() {
     const wrapper = document.createElement("article");
     wrapper.className = "assessment-item assessment-item--current";
 
-    const linkedDocuments = subject.documents.filter((doc) =>
-      assessment.linkedDocumentIds.includes(doc.id)
-    );
     const dueLabel = formatAssessmentDueLabel(assessment.dueDate);
     const distributionText = assessment.distributionDate || "TBC";
     const weightingText = assessment.weighting || "TBC";
@@ -1823,52 +1985,12 @@ function renderAssessments() {
           <span>${escapeHtml(assessment.componentTask || assessment.title)}</span>
         </div>
       </div>
-      <div class="assessment-links">
-        ${
-          linkedDocuments.length
-            ? linkedDocuments.map((doc) => `<span class="document-chip">${escapeHtml(doc.title)}</span>`).join("")
-            : '<span class="document-empty">No linked documents yet.</span>'
-        }
-      </div>
+      <div class="practice-copy">${assessment.linkedDocumentIds.length} note page${assessment.linkedDocumentIds.length === 1 ? "" : "s"} attached.</div>
       ${getAssessmentActionsMarkup(assessment.id, assessment.completed)}
-      <div class="attachment-grid"></div>
     `;
 
-    const attachmentGrid = wrapper.querySelector(".attachment-grid");
     const actionsContainer = wrapper.querySelector(".assessment-actions");
     const openAssessmentButton = wrapper.querySelector("[data-open-assessment]");
-
-    if (!subject.documents.length) {
-      attachmentGrid.innerHTML = `
-        <div class="empty-state">Upload documents to attach them to this assessment.</div>
-      `;
-    } else {
-      subject.documents.forEach((doc) => {
-        const option = document.createElement("label");
-        option.className = "attachment-option";
-        option.innerHTML = `
-          <input type="checkbox" ${assessment.linkedDocumentIds.includes(doc.id) ? "checked" : ""} />
-          <span>Attach ${escapeHtml(doc.title)}</span>
-        `;
-
-        option.querySelector("input").addEventListener("change", (event) => {
-          const isChecked = event.target.checked;
-          if (isChecked) {
-            if (!assessment.linkedDocumentIds.includes(doc.id)) {
-              assessment.linkedDocumentIds.push(doc.id);
-            }
-          } else {
-            assessment.linkedDocumentIds = assessment.linkedDocumentIds.filter((id) => id !== doc.id);
-          }
-
-          persistSubjects();
-          renderAssessments();
-          renderUpcomingModal();
-        });
-
-        attachmentGrid.appendChild(option);
-      });
-    }
 
     if (actionsContainer) {
       attachAssessmentActionHandlers(wrapper, subject);
@@ -2848,6 +2970,9 @@ function render() {
   renderAssessments();
   renderPractice();
   renderWatchList();
+  if (state.attachmentModalOpen) {
+    renderAttachNotesModal();
+  }
   if (state.currentView === "task") {
     renderTaskView();
   }
@@ -2864,12 +2989,8 @@ function handleDashboardOpen() {
 }
 
 elements.askButton.addEventListener("click", handleAsk);
-elements.readerReadButton.addEventListener("click", () => {
-  if (!getSelectedDocument()) {
-    return;
-  }
-  renderReader();
-  scrollReaderIntoView();
+elements.readerPreviousButton.addEventListener("click", () => {
+  selectAdjacentDocument(-1);
 });
 elements.readerListenButton.addEventListener("click", () => {
   const selectedDocument = getSelectedDocument();
@@ -2889,12 +3010,8 @@ elements.readerAskButton.addEventListener("click", () => {
   elements.askResponse.textContent = "Ask a question about the selected document.";
   focusAskComposer();
 });
-elements.readerDeleteButton.addEventListener("click", () => {
-  const selectedDocument = getSelectedDocument();
-  if (!selectedDocument) {
-    return;
-  }
-  deleteDocument(selectedDocument.id);
+elements.readerNextButton.addEventListener("click", () => {
+  selectAdjacentDocument(1);
 });
 elements.openDashboardButton.addEventListener("click", handleDashboardOpen);
 elements.navHomeButton.addEventListener("click", () => {
@@ -2921,6 +3038,8 @@ elements.closeUpcomingButton.addEventListener("click", closeUpcomingModal);
 elements.setTermDatesButton.addEventListener("click", handleSetTermDates);
 elements.closeUploadScrim.addEventListener("click", closeUploadModal);
 elements.closeUploadButton.addEventListener("click", closeUploadModal);
+elements.closeAttachNotesScrim.addEventListener("click", closeAttachNotesModal);
+elements.closeAttachNotesButton.addEventListener("click", closeAttachNotesModal);
 elements.closeTaskViewButton.addEventListener("click", () => {
   state.currentView = "subjects";
   render();
@@ -3002,6 +3121,9 @@ document.addEventListener("keydown", (event) => {
   }
   if (event.key === "Escape" && !elements.uploadModal.classList.contains("hidden")) {
     closeUploadModal();
+  }
+  if (event.key === "Escape" && state.attachmentModalOpen) {
+    closeAttachNotesModal();
   }
 });
 
