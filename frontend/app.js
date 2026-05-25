@@ -323,6 +323,7 @@ const state = {
   attachmentModalOpen: false,
   activeAttachmentAssessment: null,
   expandedAttachmentGroups: {},
+  watchExpanded: false,
   documentsExpanded: false,
   currentView: "home",
   activeTask: null,
@@ -411,6 +412,7 @@ const elements = {
   assessmentList: document.getElementById("assessment-list"),
   practiceList: document.getElementById("practice-list"),
   watchList: document.getElementById("watch-list"),
+  watchToggleButton: document.getElementById("watch-toggle-button"),
   upcomingModal: document.getElementById("upcoming-modal"),
   closeUpcomingScrim: document.getElementById("close-upcoming-scrim"),
   closeUpcomingButton: document.getElementById("close-upcoming-button"),
@@ -1079,6 +1081,7 @@ function renderSubjectList() {
       state.selectedSubjectId = subject.id;
       state.selectedDocumentIds = [];
       state.expandedDocumentGroups = {};
+      state.watchExpanded = false;
       state.documentsExpanded = false;
       state.selectedDocumentId = getSortedDocuments(subject)[0]?.id || null;
       state.askDocumentId = getSortedDocuments(subject)[0]?.id || null;
@@ -1100,10 +1103,24 @@ function renderSubjectHeader() {
       <h3>${escapeHtml(subject.name)}</h3>
     </div>
     <div class="subject-header__actions">
+      <div class="subject-header__nav">
+        <button type="button" class="subject-nav-button" data-subject-section="documents-section">Documents</button>
+        <button type="button" class="subject-nav-button" data-subject-section="reader-section">Read</button>
+        <button type="button" class="subject-nav-button" data-subject-section="homework-section">Homework</button>
+        <button type="button" class="subject-nav-button" data-subject-section="assessments-section">Assessments</button>
+        <button type="button" class="subject-nav-button" data-subject-section="watch-section">Watch</button>
+      </div>
       <button type="button" class="ghost-button" id="subject-upload-button">Upload</button>
     </div>
   `;
   document.getElementById("subject-upload-button")?.addEventListener("click", openUploadModal);
+  elements.subjectHeader.querySelectorAll("[data-subject-section]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const targetId = button.dataset.subjectSection;
+      const target = targetId ? document.getElementById(targetId) : null;
+      target?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
 }
 
 function renderPendingUpload() {
@@ -1417,10 +1434,13 @@ function renderWatchList() {
   const watchItems = Array.isArray(subject.watch) ? subject.watch : [];
   if (!watchItems.length) {
     elements.watchList.innerHTML = `<div class="empty-state">No WATCH items for this subject yet.</div>`;
+    elements.watchToggleButton.classList.add("hidden");
     return;
   }
 
-  elements.watchList.innerHTML = watchItems
+  const visibleItems = state.watchExpanded ? watchItems : watchItems.slice(0, 3);
+
+  elements.watchList.innerHTML = visibleItems
     .map(
       (item) => `
         <article class="practice-item">
@@ -1436,6 +1456,12 @@ function renderWatchList() {
     )
     .join("");
 
+  const hasExtraWatchItems = watchItems.length > 3;
+  elements.watchToggleButton.classList.toggle("hidden", !hasExtraWatchItems);
+  if (hasExtraWatchItems) {
+    elements.watchToggleButton.textContent = state.watchExpanded ? "Show less" : "Load more";
+  }
+
   elements.watchList.querySelectorAll("[data-watch-action]").forEach((button) => {
     button.addEventListener("click", () => {
       const item = watchItems.find((entry) => entry.id === button.dataset.watchId);
@@ -1450,7 +1476,7 @@ function renderWatchList() {
       if (button.dataset.watchAction === "delete") {
         subject.watch = watchItems.filter((entry) => entry.id !== item.id);
         persistSubjects();
-        renderWatchList();
+        render();
       }
     });
   });
@@ -1955,48 +1981,50 @@ function renderTaskView() {
     elements.taskViewTitle.textContent = assessment.componentTask || assessment.title;
     elements.taskSourceTitle.textContent = "Assessment document";
     elements.taskSourceContent.innerHTML = `
-      <div class="assessment-grid">
-        <div class="assessment-fact">
-          <strong>Subject</strong>
-          <span>${escapeHtml(subject.name)}</span>
+      <article class="assessment-item assessment-item--current task-assessment-card">
+        <div class="assessment-item__header">
+          <div class="assessment-item__title-group">
+            <span class="assessment-date">Due ${escapeHtml(formatAssessmentDueLabel(assessment.dueDate))}</span>
+            <h4>${escapeHtml(assessment.componentTask || assessment.title)}</h4>
+            <span class="document-chip assessment-item__subject">${escapeHtml(subject.name)}</span>
+          </div>
+          <span class="assessment-item__task">Task ${escapeHtml(assessment.taskNumber || "Uploaded")}</span>
         </div>
-        <div class="assessment-fact">
-          <strong>Task number</strong>
-          <span>${escapeHtml(assessment.taskNumber || "Uploaded")}</span>
+        <div class="assessment-grid">
+          <div class="assessment-fact">
+            <strong>Due date</strong>
+            <span>${escapeHtml(formatAssessmentDueLabel(assessment.dueDate))}</span>
+          </div>
+          <div class="assessment-fact">
+            <strong>Distribution</strong>
+            <span>${escapeHtml(assessment.distributionDate || "TBC")}</span>
+          </div>
+          <div class="assessment-fact">
+            <strong>Weighting</strong>
+            <span>${escapeHtml(assessment.weighting || "TBC")}</span>
+          </div>
+          <div class="assessment-fact">
+            <strong>Task</strong>
+            <span>${escapeHtml(assessment.componentTask || assessment.title)}</span>
+          </div>
         </div>
-        <div class="assessment-fact">
-          <strong>Distribution</strong>
-          <span>${escapeHtml(assessment.distributionDate || "TBC")}</span>
+        <div class="task-assessment-card__summary">${escapeHtml(assessment.description || `${assessment.componentTask || assessment.title}.`)}</div>
+        <div class="reader-actions" style="margin-top:22px;display:flex;flex-wrap:wrap;gap:10px;">
+          ${
+            linkedDocuments.length
+              ? linkedDocuments
+                  .map(
+                    (document) => `
+                      <button type="button" class="ghost-button" data-task-document-id="${document.id}">
+                        ${escapeHtml(document.title)}
+                      </button>
+                    `
+                  )
+                  .join("")
+              : '<span class="document-empty">No supporting documents linked yet.</span>'
+          }
         </div>
-        <div class="assessment-fact">
-          <strong>Due</strong>
-          <span>${escapeHtml(formatAssessmentDueLabel(assessment.dueDate))}</span>
-        </div>
-        <div class="assessment-fact">
-          <strong>Weighting</strong>
-          <span>${escapeHtml(assessment.weighting || "TBC")}</span>
-        </div>
-        <div class="assessment-fact">
-          <strong>Component / task</strong>
-          <span>${escapeHtml(assessment.componentTask || assessment.title)}</span>
-        </div>
-      </div>
-      <div class="reader-content__text" style="margin-top:18px;">${escapeHtml(assessment.description || `${assessment.componentTask || assessment.title}.`)}</div>
-      <div class="reader-actions" style="margin-top:22px;display:flex;flex-wrap:wrap;gap:10px;">
-        ${
-          linkedDocuments.length
-            ? linkedDocuments
-                .map(
-                  (document) => `
-                    <button type="button" class="ghost-button" data-task-document-id="${document.id}">
-                      ${escapeHtml(document.title)}
-                    </button>
-                  `
-                )
-                .join("")
-            : '<span class="document-empty">No supporting documents linked yet.</span>'
-        }
-      </div>
+      </article>
     `;
     elements.taskSourceContent.querySelectorAll("[data-task-document-id]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -3208,6 +3236,10 @@ elements.documentsDeleteSelectedButton.addEventListener("click", () => {
     return;
   }
   deleteDocuments(state.selectedDocumentIds);
+});
+elements.watchToggleButton.addEventListener("click", () => {
+  state.watchExpanded = !state.watchExpanded;
+  renderWatchList();
 });
 elements.processUploadButton.addEventListener("click", handleProcessUpload);
 elements.clearUploadButton.addEventListener("click", () => {

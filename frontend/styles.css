@@ -668,8 +668,13 @@ button {
   justify-content: space-between;
   gap: 18px;
   margin-bottom: 0;
-  padding-bottom: 18px;
+  padding: 18px 0;
   border-bottom: 1px solid #d9d6d2;
+  position: sticky;
+  top: 18px;
+  z-index: 6;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(8px);
 }
 
 .subject-header__title {
@@ -680,7 +685,33 @@ button {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 10px;
+  align-items: center;
+  gap: 12px 18px;
+}
+
+.subject-header__nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px 16px;
+}
+
+.subject-nav-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #6c655d;
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.subject-nav-button:hover {
+  color: var(--ink);
 }
 
 .subject-header__meta {
@@ -1012,17 +1043,18 @@ button {
   margin-top: 14px;
 }
 
-.lower-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 24px;
-  margin-top: 24px;
-}
-
 .assessment-list,
 .practice-list {
   display: grid;
   gap: 16px;
+}
+
+#documents-section,
+#reader-section,
+#homework-section,
+#watch-section,
+#assessments-section {
+  scroll-margin-top: 124px;
 }
 
 .assessment-item,
@@ -1306,6 +1338,19 @@ button {
   line-height: 1.55;
 }
 
+.task-assessment-card {
+  border-radius: 22px;
+  padding: 18px;
+  background: #f8f4ef;
+  border: 1px solid rgba(17, 17, 17, 0.1);
+}
+
+.task-assessment-card__summary {
+  margin-top: 14px;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
 @media (max-width: 1180px) {
   .landing-panel,
   .home-grid,
@@ -1390,11 +1435,17 @@ button {
   .subject-header {
     flex-direction: column;
     align-items: flex-start;
+    top: 0;
   }
 
   .subject-header__actions,
   .documents-footer,
   .documents-bulk-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .subject-header__nav {
     width: 100%;
     justify-content: flex-start;
   }

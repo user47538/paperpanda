@@ -150,7 +150,7 @@
           <section class="content-panel">
             <div class="subject-header" id="subject-header"></div>
 
-            <section class="documents-card">
+            <section class="documents-card" id="documents-section">
               <div class="section-heading section-heading--stacked">
                 <div>
                   <p class="eyebrow">Resources</p>
@@ -179,7 +179,7 @@
               </div>
             </section>
 
-            <section class="reader-card" id="reader-card">
+            <section class="reader-card" id="reader-section">
               <div class="section-heading section-heading--reader">
                 <div>
                   <p class="eyebrow">Read and listen</p>
@@ -197,7 +197,7 @@
               </div>
             </section>
 
-            <section class="practice-card">
+            <section class="practice-card" id="homework-section">
               <div class="section-heading">
                 <div>
                   <p class="eyebrow">Homework</p>
@@ -207,27 +207,28 @@
               <div id="practice-list" class="practice-list"></div>
             </section>
 
-            <div class="lower-grid">
-              <section class="practice-card">
-                <div class="section-heading">
-                  <div>
-                    <p class="eyebrow">Watch</p>
-                    <h3>Watch</h3>
-                  </div>
+            <section class="practice-card" id="watch-section">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Watch</p>
+                  <h3>Watch</h3>
                 </div>
-                <div id="watch-list" class="practice-list"></div>
-              </section>
+              </div>
+              <div id="watch-list" class="practice-list"></div>
+              <div class="documents-footer">
+                <button type="button" class="ghost-button hidden" id="watch-toggle-button">Load more</button>
+              </div>
+            </section>
 
-              <section class="assessment-card">
-                <div class="section-heading">
-                  <div>
-                    <p class="eyebrow">Deadlines</p>
-                    <h3>Assessment Schedule</h3>
-                  </div>
+            <section class="assessment-card" id="assessments-section">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Deadlines</p>
+                  <h3>Assessment Schedule</h3>
                 </div>
-                <div id="assessment-list" class="assessment-list"></div>
-              </section>
-            </div>
+              </div>
+              <div id="assessment-list" class="assessment-list"></div>
+            </section>
           </section>
         </section>
       </main>
