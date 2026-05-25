@@ -59,6 +59,19 @@ function extractResponseText(responsePayload) {
   return textParts.join("\n\n").trim();
 }
 
+function extractResponseJson(responsePayload) {
+  const text = extractResponseText(responsePayload);
+  if (!text) {
+    throw new Error("OpenAI returned an empty response.");
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new Error("OpenAI returned invalid schedule JSON.");
+  }
+}
+
 async function callOpenAiJson(endpoint, payload) {
   requireOpenAiKey();
   const response = await fetch(`https://api.openai.com/v1/${endpoint}`, {
@@ -325,6 +338,95 @@ app.post("/api/upload/pdf", upload.single("file"), async (request, response) => 
   } catch (error) {
     response.status(500).json({
       error: error instanceof Error ? error.message : "PDF processing failed."
+    });
+  }
+});
+
+app.post("/api/upload/assessment-schedule", upload.single("file"), async (request, response) => {
+  try {
+    if (!request.file?.buffer) {
+      response.status(400).json({ error: "A PDF schedule file is required." });
+      return;
+    }
+
+    const pdfData = await parsePdfBuffer(request.file.buffer);
+    if (!pdfData.pages.length) {
+      response.status(400).json({ error: "The PDF schedule could not be read." });
+      return;
+    }
+
+    const responsePayload = await callOpenAiJson("responses", {
+      model: "gpt-4o-mini",
+      input: [
+        {
+          role: "system",
+          content: [
+            {
+              type: "input_text",
+              text:
+                "You extract assessment schedule rows from school PDFs. Return only JSON. Read the page carefully, including image text. Normalize each row into the schema requested. Preserve the exact subject wording, task number, component/task, distribution date, due date, and weighting as shown. Ignore headers, totals, semester totals, course totals, and extension labels unless they are part of a real assessment row."
+            }
+          ]
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text:
+                "Extract the assessment schedule from this PDF page. Return a JSON object with one key, assessments, whose value is an array of rows. Each row must have subjectName, taskNumber, componentTask, distributionDate, dueDate, and weighting as strings. If a subject is implied by a grouped section, carry that subject to subsequent rows until the next subject heading."
+            },
+            ...pdfData.pages.slice(0, 3).flatMap((page) => {
+              const content = [];
+              if (page.text) {
+                content.push({
+                  type: "input_text",
+                  text: `Extracted page text for page ${page.pageNumber}:\n${page.text}`
+                });
+              }
+              content.push({
+                type: "input_image",
+                image_url: page.imageUrl,
+                detail: "high"
+              });
+              return content;
+            })
+          ]
+        }
+      ],
+      text: {
+        format: {
+          type: "json_object"
+        }
+      },
+      max_output_tokens: 4000
+    });
+
+    const parsed = extractResponseJson(responsePayload);
+    const assessments = Array.isArray(parsed?.assessments)
+      ? parsed.assessments
+          .map((row) => ({
+            subjectName: String(row?.subjectName || "").trim(),
+            taskNumber: String(row?.taskNumber || "").trim(),
+            componentTask: String(row?.componentTask || "").trim(),
+            distributionDate: String(row?.distributionDate || "").trim(),
+            dueDate: String(row?.dueDate || "").trim(),
+            weighting: String(row?.weighting || "").trim()
+          }))
+          .filter(
+            (row) =>
+              row.subjectName &&
+              row.componentTask &&
+              row.distributionDate &&
+              row.dueDate &&
+              row.weighting
+          )
+      : [];
+
+    response.json({ assessments });
+  } catch (error) {
+    response.status(500).json({
+      error: error instanceof Error ? error.message : "Assessment schedule parsing failed."
     });
   }
 });

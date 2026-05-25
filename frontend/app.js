@@ -1377,6 +1377,29 @@ async function requestApi(endpoint, payload, expectBlob = false) {
   return expectBlob ? response.blob() : response.json();
 }
 
+async function requestApiFormData(endpoint, formData) {
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    method: "POST",
+    body: formData
+  });
+
+  const responseText = await response.text();
+  let parsedPayload = null;
+  if (responseText) {
+    try {
+      parsedPayload = JSON.parse(responseText);
+    } catch (error) {
+      parsedPayload = null;
+    }
+  }
+
+  if (!response.ok) {
+    throw new Error(parsedPayload?.error || responseText || "Request failed.");
+  }
+
+  return parsedPayload || {};
+}
+
 async function requestAskAnswer(question, subject, document) {
   const recentHistory = getTodayAskHistory(subject)
     .slice(-4)
@@ -3461,6 +3484,50 @@ async function extractAssessmentScheduleFromPdf(file) {
   return entriesBySubject;
 }
 
+function normalizeScheduleAssessmentRow(row) {
+  return {
+    subjectName: String(row?.subjectName || "").trim(),
+    taskNumber: String(row?.taskNumber || "").trim(),
+    componentTask: String(row?.componentTask || "").trim(),
+    distributionDate: String(row?.distributionDate || "").trim(),
+    dueDate: String(row?.dueDate || "").trim(),
+    weighting: String(row?.weighting || "").trim()
+  };
+}
+
+async function extractAssessmentScheduleViaBackend(file) {
+  const formData = new FormData();
+  formData.append("file", file);
+  const payload = await requestApiFormData("/api/upload/assessment-schedule", formData);
+  const rows = Array.isArray(payload?.assessments) ? payload.assessments.map(normalizeScheduleAssessmentRow) : [];
+  const entriesBySubject = {};
+
+  rows.forEach((row) => {
+    const subjectId = findSubjectIdFromText(row.subjectName);
+    if (!subjectId || !row.componentTask || !row.dueDate || !row.distributionDate || !row.weighting) {
+      return;
+    }
+
+    entriesBySubject[subjectId] = entriesBySubject[subjectId] || [];
+    entriesBySubject[subjectId].push({
+      id: createId(),
+      title: row.componentTask,
+      componentTask: row.componentTask,
+      taskNumber: row.taskNumber || "TBC",
+      distributionDate: row.distributionDate,
+      dueDate: row.dueDate,
+      weighting: row.weighting,
+      description: `${row.componentTask}.`,
+      linkedDocumentIds: [],
+      completed: false,
+      workNotes: "",
+      source: "schedule-upload"
+    });
+  });
+
+  return entriesBySubject;
+}
+
 async function handleAssessmentScheduleUpload(event) {
   const file = event.target.files?.[0];
   if (!file) {
@@ -3476,7 +3543,7 @@ async function handleAssessmentScheduleUpload(event) {
   elements.uploadStatus.textContent = "Reading assessment schedule PDF...";
 
   try {
-    const entriesBySubject = await extractAssessmentScheduleFromPdf(file);
+    const entriesBySubject = await extractAssessmentScheduleViaBackend(file);
     const matchedSubjects = Object.keys(entriesBySubject).filter((subjectId) => entriesBySubject[subjectId]?.length);
     const matchedAssessmentCount = matchedSubjects.reduce(
       (total, subjectId) => total + entriesBySubject[subjectId].length,
