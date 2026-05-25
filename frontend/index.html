@@ -24,9 +24,13 @@
         </div>
 
         <div class="signin-card" id="signin-form">
-          <p class="signin-card__eyebrow">Student Sign In</p>
-          <h2>Enter the Year 7 dashboard</h2>
-          <label>
+          <p class="signin-card__eyebrow" id="signin-eyebrow">Student account</p>
+          <h2 id="signin-title">Create your account</h2>
+          <div class="signin-mode-row">
+            <button type="button" class="ghost-button signin-mode-button signin-mode-button--active" id="signin-mode-create-button">Create account</button>
+            <button type="button" class="ghost-button signin-mode-button" id="signin-mode-login-button">Sign in</button>
+          </div>
+          <label id="student-name-wrap">
             Student name
             <input type="text" id="student-name" placeholder="e.g. Mia Chen" />
           </label>
@@ -38,10 +42,15 @@
             Password
             <input type="password" id="student-password" placeholder="Enter password" />
           </label>
-          <button type="button" class="primary-button" id="open-dashboard-button">Open dashboard</button>
-          <p class="signin-note">
-            Prototype mode: any name, school email, and password will open the dashboard.
+          <label id="student-password-confirm-wrap">
+            Confirm password
+            <input type="password" id="student-password-confirm" placeholder="Confirm password" />
+          </label>
+          <button type="button" class="primary-button" id="open-dashboard-button">Create account</button>
+          <p class="signin-note" id="signin-note">
+            Create an account first, then sign in with your school email and password.
           </p>
+          <div class="upload-status" id="signin-status"></div>
         </div>
       </section>
 
@@ -52,10 +61,10 @@
             <h2 id="welcome-heading">Welcome back</h2>
           </div>
           <div class="topbar__actions">
-            <button type="button" class="ghost-button" id="nav-home-button">Home</button>
-            <button type="button" class="ghost-button" id="nav-subjects-button">Subjects</button>
-            <div class="topbar__year-pill">Year 7</div>
-            <button type="button" class="ghost-button" id="signout-button">Sign out</button>
+            <button type="button" class="topbar-link-button" id="nav-home-button">Home</button>
+            <button type="button" class="topbar-link-button" id="nav-subjects-button">Subjects</button>
+            <button type="button" class="topbar-link-button" id="nav-settings-button">Settings</button>
+            <button type="button" class="topbar-link-button" id="signout-button">Sign out</button>
           </div>
         </header>
 
@@ -102,6 +111,55 @@
               </div>
               <p class="helper-text">Send class notes, homework, assessments, PDFs, and WATCH links to the correct subject from one popup.</p>
               <button type="button" class="ghost-button" id="open-upload-modal-secondary">Open upload</button>
+            </section>
+          </section>
+        </section>
+
+        <section class="settings-view hidden" id="settings-view">
+          <section class="home-grid">
+            <section class="home-card">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Settings</p>
+                  <h3>Account</h3>
+                </div>
+              </div>
+              <label class="upload-field">
+                <span class="upload-field__label">Student name</span>
+                <input type="text" id="settings-name" />
+              </label>
+              <label class="upload-field">
+                <span class="upload-field__label">School email</span>
+                <input type="text" id="settings-email" />
+              </label>
+              <div class="upload-submit-row">
+                <button type="button" class="primary-button" id="save-account-settings-button">Save account</button>
+              </div>
+            </section>
+
+            <section class="home-card">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Security</p>
+                  <h3>Password</h3>
+                </div>
+              </div>
+              <label class="upload-field">
+                <span class="upload-field__label">Current password</span>
+                <input type="password" id="settings-current-password" />
+              </label>
+              <label class="upload-field">
+                <span class="upload-field__label">New password</span>
+                <input type="password" id="settings-new-password" />
+              </label>
+              <label class="upload-field">
+                <span class="upload-field__label">Confirm new password</span>
+                <input type="password" id="settings-confirm-password" />
+              </label>
+              <div class="upload-submit-row">
+                <button type="button" class="primary-button" id="save-password-settings-button">Update password</button>
+              </div>
+              <div class="upload-status" id="settings-status"></div>
             </section>
           </section>
         </section>
@@ -263,6 +321,7 @@
             <textarea id="task-work-editor" class="reader-editor" placeholder="Start writing here..."></textarea>
             <div class="reader-actions">
               <button type="button" class="primary-button" id="save-task-work-button">Save</button>
+              <button type="button" class="ghost-button" id="save-task-files-button">Save to files</button>
             </div>
             <div class="upload-status" id="task-work-status"></div>
           </section>

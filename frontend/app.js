@@ -8,7 +8,8 @@ window.__pdfjsLibPromise = Promise.resolve(pdfjsLib);
 window.__pdfjsLibError = "";
 window.dispatchEvent(new Event("studylift:pdf-ready"));
 
-const storageKey = "studylift-student";
+const accountsStorageKey = "studylift-accounts";
+const sessionStorageKey = "studylift-session";
 const subjectsStorageKey = "studylift-subjects";
 const settingsStorageKey = "studylift-settings";
 const previewDatabaseName = "studylift-assets";
@@ -314,6 +315,8 @@ const subjectSeed = [
 
 const state = {
   studentName: "",
+  currentUserEmail: "",
+  authMode: "create",
   selectedSubjectId: subjectSeed[0].id,
   selectedDocumentId: null,
   askDocumentId: null,
@@ -355,13 +358,25 @@ const elements = {
   landingPanel: document.getElementById("landing-panel"),
   appShell: document.getElementById("app-shell"),
   signInForm: document.getElementById("signin-form"),
+  signInEyebrow: document.getElementById("signin-eyebrow"),
+  signInTitle: document.getElementById("signin-title"),
+  signInModeCreateButton: document.getElementById("signin-mode-create-button"),
+  signInModeLoginButton: document.getElementById("signin-mode-login-button"),
   openDashboardButton: document.getElementById("open-dashboard-button"),
+  studentNameWrap: document.getElementById("student-name-wrap"),
   studentNameInput: document.getElementById("student-name"),
   studentEmailInput: document.getElementById("student-email"),
+  studentPasswordInput: document.getElementById("student-password"),
+  studentPasswordConfirmWrap: document.getElementById("student-password-confirm-wrap"),
+  studentPasswordConfirmInput: document.getElementById("student-password-confirm"),
+  signInNote: document.getElementById("signin-note"),
+  signInStatus: document.getElementById("signin-status"),
   welcomeHeading: document.getElementById("welcome-heading"),
   navHomeButton: document.getElementById("nav-home-button"),
   navSubjectsButton: document.getElementById("nav-subjects-button"),
+  navSettingsButton: document.getElementById("nav-settings-button"),
   homeView: document.getElementById("home-view"),
+  settingsView: document.getElementById("settings-view"),
   subjectsView: document.getElementById("subjects-view"),
   taskView: document.getElementById("task-view"),
   backgroundUpload: document.getElementById("background-upload"),
@@ -441,12 +456,21 @@ const elements = {
   saveEditAssessmentButton: document.getElementById("save-edit-assessment-button"),
   cancelEditAssessmentButton: document.getElementById("cancel-edit-assessment-button"),
   editAssessmentStatus: document.getElementById("edit-assessment-status"),
+  settingsNameInput: document.getElementById("settings-name"),
+  settingsEmailInput: document.getElementById("settings-email"),
+  settingsCurrentPasswordInput: document.getElementById("settings-current-password"),
+  settingsNewPasswordInput: document.getElementById("settings-new-password"),
+  settingsConfirmPasswordInput: document.getElementById("settings-confirm-password"),
+  saveAccountSettingsButton: document.getElementById("save-account-settings-button"),
+  savePasswordSettingsButton: document.getElementById("save-password-settings-button"),
+  settingsStatus: document.getElementById("settings-status"),
   taskViewTitle: document.getElementById("task-view-title"),
   taskSourceTitle: document.getElementById("task-source-title"),
   taskSourceContent: document.getElementById("task-source-content"),
   taskWorkEditor: document.getElementById("task-work-editor"),
   taskWorkStatus: document.getElementById("task-work-status"),
   saveTaskWorkButton: document.getElementById("save-task-work-button"),
+  saveTaskFilesButton: document.getElementById("save-task-files-button"),
   closeTaskViewButton: document.getElementById("close-task-view-button")
 };
 
@@ -497,9 +521,15 @@ function parseAssessmentDate(value) {
     return null;
   }
 
-  const manualDateMatch = value.trim().match(/^(\d{1,2})\s+([A-Za-z]{3,})$/);
+  const isoDateMatch = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoDateMatch) {
+    const parsedIsoDate = new Date(`${isoDateMatch[1]}-${isoDateMatch[2]}-${isoDateMatch[3]}T00:00:00`);
+    return Number.isNaN(parsedIsoDate.getTime()) ? null : parsedIsoDate;
+  }
+
+  const manualDateMatch = value.trim().match(/^(\d{1,2})\s+([A-Za-z]{3,})(?:\s+(\d{4}))?$/);
   if (manualDateMatch) {
-    const parsed = new Date(`${manualDateMatch[1]} ${manualDateMatch[2]} 2026`);
+    const parsed = new Date(`${manualDateMatch[1]} ${manualDateMatch[2]} ${manualDateMatch[3] || "2026"}`);
     return Number.isNaN(parsed.getTime()) ? null : parsed;
   }
 
@@ -610,6 +640,15 @@ function formatAssessmentDueLabel(value) {
   return `${originalValue} · ${formatAssessmentDate(parsedDate)}`;
 }
 
+function buildTaskExportName(subjectName, title) {
+  const baseName = `${subjectName} ${title}`
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+  return `${baseName || "study-task"}.txt`;
+}
+
 function openUpcomingModal() {
   state.upcomingModalOpen = true;
   state.upcomingModalMode = "upcoming";
@@ -624,8 +663,63 @@ function closeUpcomingModal() {
   elements.upcomingModal.setAttribute("aria-hidden", "true");
 }
 
-function persistStudent(name) {
-  window.localStorage.setItem(storageKey, name);
+function loadAccounts() {
+  const raw = window.localStorage.getItem(accountsStorageKey);
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    console.error("Accounts could not be restored.", error);
+    return [];
+  }
+}
+
+function saveAccounts(accounts) {
+  window.localStorage.setItem(accountsStorageKey, JSON.stringify(accounts));
+}
+
+function persistSession(email) {
+  window.localStorage.setItem(sessionStorageKey, email);
+}
+
+function clearSession() {
+  window.localStorage.removeItem(sessionStorageKey);
+}
+
+function findAccountByEmail(email) {
+  return loadAccounts().find((account) => account.email.toLowerCase() === email.toLowerCase()) || null;
+}
+
+function syncSignInMode() {
+  const isCreateMode = state.authMode === "create";
+  elements.signInEyebrow.textContent = isCreateMode ? "Student account" : "Student sign in";
+  elements.signInTitle.textContent = isCreateMode ? "Create your account" : "Sign in to Year 7";
+  elements.studentNameWrap.classList.toggle("hidden", !isCreateMode);
+  elements.studentPasswordConfirmWrap.classList.toggle("hidden", !isCreateMode);
+  elements.openDashboardButton.textContent = isCreateMode ? "Create account" : "Sign in";
+  elements.signInModeCreateButton.classList.toggle("signin-mode-button--active", isCreateMode);
+  elements.signInModeLoginButton.classList.toggle("signin-mode-button--active", !isCreateMode);
+  elements.signInNote.textContent = isCreateMode
+    ? "Create an account first, then sign in with your school email and password."
+    : "Use the school email and password you created for this portal.";
+}
+
+function hydrateSettingsView() {
+  const account = findAccountByEmail(state.currentUserEmail);
+  if (!account) {
+    return;
+  }
+
+  elements.settingsNameInput.value = account.name || "";
+  elements.settingsEmailInput.value = account.email || "";
+  elements.settingsCurrentPasswordInput.value = "";
+  elements.settingsNewPasswordInput.value = "";
+  elements.settingsConfirmPasswordInput.value = "";
+  elements.settingsStatus.textContent = "";
 }
 
 function openPreviewDatabase() {
@@ -816,10 +910,6 @@ function persistSettings() {
   );
 }
 
-function clearStudent() {
-  window.localStorage.removeItem(storageKey);
-}
-
 function normaliseAssessment(assessment) {
   return {
     ...assessment,
@@ -869,14 +959,21 @@ function restoreSubjects() {
   hydratePreviewImages();
 }
 
-function restoreStudent() {
-  const savedStudent = window.localStorage.getItem(storageKey);
-  if (!savedStudent) {
+function restoreSessionUser() {
+  const savedEmail = window.localStorage.getItem(sessionStorageKey);
+  if (!savedEmail) {
     return;
   }
 
-  state.studentName = savedStudent;
-  openDashboard();
+  const account = findAccountByEmail(savedEmail);
+  if (!account) {
+    clearSession();
+    return;
+  }
+
+  state.currentUserEmail = account.email;
+  state.studentName = account.name;
+  openDashboard("home");
 }
 
 function restoreSettings() {
@@ -921,11 +1018,12 @@ function renderAiConnectionState() {
   }
 }
 
-function openDashboard() {
+function openDashboard(nextView = "home") {
   elements.landingPanel.classList.add("hidden");
   elements.appShell.classList.remove("hidden");
   elements.welcomeHeading.textContent = `Welcome back, ${state.studentName}`;
-  state.currentView = "home";
+  hydrateSettingsView();
+  state.currentView = nextView;
   render();
 }
 
@@ -933,12 +1031,18 @@ function showLanding() {
   stopListening();
   closeUpcomingModal();
   closeUploadModal();
+  closeAttachNotesModal();
+  closeEditAssessmentModal();
 
   elements.appShell.classList.add("hidden");
   elements.taskView.classList.add("hidden");
   elements.landingPanel.classList.remove("hidden");
   state.selectedDocumentId = null;
   state.currentView = "home";
+  elements.studentPasswordInput.value = "";
+  elements.studentPasswordConfirmInput.value = "";
+  elements.signInStatus.textContent = "";
+  syncSignInMode();
   elements.askResponse.textContent =
     "Ask a question about the selected subject or document.";
   elements.readerTitle.textContent = "Document reader";
@@ -968,6 +1072,7 @@ function renderOverview() {
 function renderCurrentView() {
   elements.appShell.classList.toggle("hidden", state.currentView === "task");
   elements.homeView.classList.toggle("hidden", state.currentView !== "home");
+  elements.settingsView.classList.toggle("hidden", state.currentView !== "settings");
   elements.subjectsView.classList.toggle("hidden", state.currentView !== "subjects");
   elements.taskView.classList.toggle("hidden", state.currentView !== "task");
 }
@@ -1994,6 +2099,10 @@ function openTaskView(taskConfig) {
   elements.taskWorkStatus.textContent = "";
   renderTaskView();
   renderCurrentView();
+  window.requestAnimationFrame(() => {
+    elements.taskView.scrollIntoView({ block: "start", inline: "nearest" });
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  });
 }
 
 function renderTaskView() {
@@ -2028,7 +2137,7 @@ function renderTaskView() {
           </div>
           <div class="assessment-fact">
             <strong>Distribution</strong>
-            <span>${escapeHtml(assessment.distributionDate || "TBC")}</span>
+            <span>${escapeHtml(formatAssessmentDueLabel(assessment.distributionDate || "TBC"))}</span>
           </div>
           <div class="assessment-fact">
             <strong>Weighting</strong>
@@ -2114,6 +2223,36 @@ function saveTaskWorkspace() {
   elements.taskWorkStatus.textContent = "Saved.";
 }
 
+function saveTaskWorkspaceToFiles() {
+  const subject = getSelectedSubject();
+  const activeTask = state.activeTask;
+  if (!subject || !activeTask) {
+    return;
+  }
+
+  let title = "task-work";
+  if (activeTask.kind === "assessment") {
+    const assessment = subject.assessments.find((item) => item.id === activeTask.id);
+    title = assessment?.componentTask || assessment?.title || title;
+  }
+  if (activeTask.kind === "homework") {
+    const homeworkDocument = subject.documents.find((item) => item.id === activeTask.id);
+    title = homeworkDocument?.title || title;
+  }
+
+  const exportContent = elements.taskWorkEditor.value || "";
+  const blob = new Blob([exportContent], { type: "text/plain;charset=utf-8" });
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = buildTaskExportName(subject.name, title);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(objectUrl);
+  elements.taskWorkStatus.textContent = "Saved to files.";
+}
+
 function renderAssessments() {
   const selectedSubject = getSelectedSubject();
   if (!selectedSubject) {
@@ -2123,61 +2262,75 @@ function renderAssessments() {
   elements.assessmentList.innerHTML = "";
 
   const selectedEntries = selectedSubject.assessments
-    .filter((assessment) => !assessment.completed)
     .map((assessment) => ({
       subject: selectedSubject,
       assessment,
       dueDateObject: parseAssessmentDate(assessment.dueDate)
     }))
     .sort((left, right) => {
+      if (left.assessment.completed !== right.assessment.completed) {
+        return Number(left.assessment.completed) - Number(right.assessment.completed);
+      }
       const leftTime = left.dueDateObject ? left.dueDateObject.getTime() : Number.POSITIVE_INFINITY;
       const rightTime = right.dueDateObject ? right.dueDateObject.getTime() : Number.POSITIVE_INFINITY;
       return leftTime - rightTime;
     });
 
   if (!selectedEntries.length) {
-    elements.assessmentList.innerHTML = `<div class="empty-state">No active assessments for ${escapeHtml(selectedSubject.name)}.</div>`;
+    elements.assessmentList.innerHTML = `<div class="empty-state">No assessments for ${escapeHtml(selectedSubject.name)} yet.</div>`;
     return;
   }
 
   selectedEntries.forEach(({ subject, assessment, dueDateObject }) => {
     const wrapper = document.createElement("article");
-    wrapper.className = "assessment-item assessment-item--current";
+    wrapper.className = `assessment-item ${assessment.completed ? "assessment-item--completed assessment-item--compressed" : "assessment-item--current"}`;
 
     const dueLabel = formatAssessmentDueLabel(assessment.dueDate);
-    const distributionText = assessment.distributionDate || "TBC";
+    const distributionText = formatAssessmentDueLabel(assessment.distributionDate || "TBC");
     const weightingText = assessment.weighting || "TBC";
 
-    wrapper.innerHTML = `
-      <div class="assessment-item__header">
-        <div class="assessment-item__title-group">
-          <span class="assessment-date">Due ${escapeHtml(dueLabel)}</span>
-          <h4><button type="button" class="assessment-link-button" data-open-assessment="${assessment.id}">${escapeHtml(assessment.componentTask || assessment.title)}</button></h4>
-          <span class="document-chip assessment-item__subject">${escapeHtml(subject.name)}</span>
+    wrapper.innerHTML = assessment.completed
+      ? `
+        <div class="assessment-item__header">
+          <div class="assessment-item__title-group">
+            <h4><button type="button" class="assessment-link-button" data-open-assessment="${assessment.id}">${escapeHtml(assessment.componentTask || assessment.title)}</button></h4>
+          </div>
+          <div class="assessment-item__meta-row">
+            <span class="assessment-item__task">Task ${escapeHtml(assessment.taskNumber || "Uploaded")}</span>
+            <span class="document-chip assessment-complete-chip">Complete</span>
+          </div>
         </div>
-        <span class="assessment-item__task">Task ${escapeHtml(assessment.taskNumber || "Uploaded")}</span>
-      </div>
-      <div class="assessment-grid">
-        <div class="assessment-fact">
-          <strong>Due date</strong>
-          <span>${escapeHtml(dueLabel)}</span>
+      `
+      : `
+        <div class="assessment-item__header">
+          <div class="assessment-item__title-group">
+            <span class="assessment-date">Due ${escapeHtml(dueLabel)}</span>
+            <h4><button type="button" class="assessment-link-button" data-open-assessment="${assessment.id}">${escapeHtml(assessment.componentTask || assessment.title)}</button></h4>
+            <span class="document-chip assessment-item__subject">${escapeHtml(subject.name)}</span>
+          </div>
+          <span class="assessment-item__task">Task ${escapeHtml(assessment.taskNumber || "Uploaded")}</span>
         </div>
-        <div class="assessment-fact">
-          <strong>Distribution</strong>
-          <span>${escapeHtml(distributionText)}</span>
+        <div class="assessment-grid">
+          <div class="assessment-fact">
+            <strong>Due date</strong>
+            <span>${escapeHtml(dueLabel)}</span>
+          </div>
+          <div class="assessment-fact">
+            <strong>Distribution</strong>
+            <span>${escapeHtml(distributionText)}</span>
+          </div>
+          <div class="assessment-fact">
+            <strong>Weighting</strong>
+            <span>${escapeHtml(weightingText)}</span>
+          </div>
+          <div class="assessment-fact">
+            <strong>Task</strong>
+            <span>${escapeHtml(assessment.componentTask || assessment.title)}</span>
+          </div>
         </div>
-        <div class="assessment-fact">
-          <strong>Weighting</strong>
-          <span>${escapeHtml(weightingText)}</span>
-        </div>
-        <div class="assessment-fact">
-          <strong>Task</strong>
-          <span>${escapeHtml(assessment.componentTask || assessment.title)}</span>
-        </div>
-      </div>
-      <div class="practice-copy">${assessment.linkedDocumentIds.length} note page${assessment.linkedDocumentIds.length === 1 ? "" : "s"} attached.</div>
-      ${getAssessmentActionsMarkup(assessment.id, assessment.completed)}
-    `;
+        <div class="practice-copy">${assessment.linkedDocumentIds.length} note page${assessment.linkedDocumentIds.length === 1 ? "" : "s"} attached.</div>
+        ${getAssessmentActionsMarkup(assessment.id, assessment.completed)}
+      `;
 
     const actionsContainer = wrapper.querySelector(".assessment-actions");
     const openAssessmentButton = wrapper.querySelector("[data-open-assessment]");
@@ -2256,7 +2409,7 @@ function renderUpcomingModal() {
                 </span>
                 <span class="assessment-ledger__cell">
                   <span class="assessment-ledger__label">Distribution</span>
-                  ${escapeHtml(assessment.distributionDate || "TBC")}
+                  ${escapeHtml(formatAssessmentDueLabel(assessment.distributionDate || "TBC"))}
                 </span>
                 <span class="assessment-ledger__cell">
                   <span class="assessment-ledger__label">Due</span>
@@ -2341,7 +2494,7 @@ function renderUpcomingModal() {
           <div class="assessment-grid">
             <div class="assessment-fact">
               <strong>Distribution</strong>
-              <span>${escapeHtml(assessment.distributionDate || "TBC")}</span>
+              <span>${escapeHtml(formatAssessmentDueLabel(assessment.distributionDate || "TBC"))}</span>
             </div>
             <div class="assessment-fact">
               <strong>Due</strong>
@@ -3147,6 +3300,80 @@ function handleSetTermDates() {
   render();
 }
 
+function saveAccountSettings() {
+  const currentAccount = findAccountByEmail(state.currentUserEmail);
+  if (!currentAccount) {
+    elements.settingsStatus.textContent = "Account could not be found.";
+    return;
+  }
+
+  const nextName = elements.settingsNameInput.value.trim();
+  const nextEmail = elements.settingsEmailInput.value.trim().toLowerCase();
+  if (!nextName || !nextEmail) {
+    elements.settingsStatus.textContent = "Enter both a student name and school email.";
+    return;
+  }
+
+  const accounts = loadAccounts();
+  const emailTaken = accounts.some(
+    (account) => account.email.toLowerCase() === nextEmail && account.email.toLowerCase() !== currentAccount.email.toLowerCase()
+  );
+  if (emailTaken) {
+    elements.settingsStatus.textContent = "That email is already in use.";
+    return;
+  }
+
+  const updatedAccounts = accounts.map((account) =>
+    account.email.toLowerCase() === currentAccount.email.toLowerCase()
+      ? { ...account, name: nextName, email: nextEmail }
+      : account
+  );
+  saveAccounts(updatedAccounts);
+  state.studentName = nextName;
+  state.currentUserEmail = nextEmail;
+  persistSession(nextEmail);
+  elements.welcomeHeading.textContent = `Welcome back, ${state.studentName}`;
+  elements.settingsStatus.textContent = "Account saved.";
+}
+
+function savePasswordSettings() {
+  const currentAccount = findAccountByEmail(state.currentUserEmail);
+  if (!currentAccount) {
+    elements.settingsStatus.textContent = "Account could not be found.";
+    return;
+  }
+
+  const currentPassword = elements.settingsCurrentPasswordInput.value;
+  const newPassword = elements.settingsNewPasswordInput.value;
+  const confirmPassword = elements.settingsConfirmPasswordInput.value;
+
+  if (currentPassword !== currentAccount.password) {
+    elements.settingsStatus.textContent = "Current password is incorrect.";
+    return;
+  }
+
+  if (!newPassword) {
+    elements.settingsStatus.textContent = "Enter a new password.";
+    return;
+  }
+
+  if (newPassword !== confirmPassword) {
+    elements.settingsStatus.textContent = "New passwords do not match.";
+    return;
+  }
+
+  const updatedAccounts = loadAccounts().map((account) =>
+    account.email.toLowerCase() === currentAccount.email.toLowerCase()
+      ? { ...account, password: newPassword }
+      : account
+  );
+  saveAccounts(updatedAccounts);
+  elements.settingsCurrentPasswordInput.value = "";
+  elements.settingsNewPasswordInput.value = "";
+  elements.settingsConfirmPasswordInput.value = "";
+  elements.settingsStatus.textContent = "Password updated.";
+}
+
 function render() {
   applyBackgrounds();
   renderAiConnectionState();
@@ -3170,15 +3397,72 @@ function render() {
 
 function handleDashboardOpen() {
   const studentName = elements.studentNameInput.value.trim();
-  const studentEmail = elements.studentEmailInput.value.trim();
-  const displayName = studentName || studentEmail || "Student";
+  const studentEmail = elements.studentEmailInput.value.trim().toLowerCase();
+  const password = elements.studentPasswordInput.value;
+  const confirmPassword = elements.studentPasswordConfirmInput.value;
 
-  state.studentName = displayName;
-  persistStudent(displayName);
-  openDashboard();
+  elements.signInStatus.textContent = "";
+
+  if (!studentEmail || !password) {
+    elements.signInStatus.textContent = "Enter your school email and password.";
+    return;
+  }
+
+  if (state.authMode === "create") {
+    if (!studentName) {
+      elements.signInStatus.textContent = "Enter a student name.";
+      return;
+    }
+    if (!confirmPassword) {
+      elements.signInStatus.textContent = "Confirm the password.";
+      return;
+    }
+    if (password !== confirmPassword) {
+      elements.signInStatus.textContent = "Passwords do not match.";
+      return;
+    }
+    if (findAccountByEmail(studentEmail)) {
+      elements.signInStatus.textContent = "That email already has an account. Sign in instead.";
+      return;
+    }
+
+    const accounts = loadAccounts();
+    accounts.push({
+      name: studentName,
+      email: studentEmail,
+      password
+    });
+    saveAccounts(accounts);
+    state.studentName = studentName;
+    state.currentUserEmail = studentEmail;
+    persistSession(studentEmail);
+    openDashboard("home");
+    return;
+  }
+
+  const account = findAccountByEmail(studentEmail);
+  if (!account || account.password !== password) {
+    elements.signInStatus.textContent = "That email or password is incorrect.";
+    return;
+  }
+
+  state.studentName = account.name;
+  state.currentUserEmail = account.email;
+  persistSession(account.email);
+  openDashboard("home");
 }
 
 elements.askButton.addEventListener("click", handleAsk);
+elements.signInModeCreateButton.addEventListener("click", () => {
+  state.authMode = "create";
+  elements.signInStatus.textContent = "";
+  syncSignInMode();
+});
+elements.signInModeLoginButton.addEventListener("click", () => {
+  state.authMode = "signin";
+  elements.signInStatus.textContent = "";
+  syncSignInMode();
+});
 elements.readerPreviousButton.addEventListener("click", () => {
   selectAdjacentDocument(-1);
 });
@@ -3212,6 +3496,11 @@ elements.navSubjectsButton.addEventListener("click", () => {
   state.currentView = "subjects";
   render();
 });
+elements.navSettingsButton.addEventListener("click", () => {
+  hydrateSettingsView();
+  state.currentView = "settings";
+  render();
+});
 elements.changeBackgroundButton.addEventListener("click", () => {
   elements.backgroundUpload.click();
 });
@@ -3234,11 +3523,14 @@ elements.closeEditAssessmentScrim.addEventListener("click", closeEditAssessmentM
 elements.closeEditAssessmentButton.addEventListener("click", closeEditAssessmentModal);
 elements.cancelEditAssessmentButton.addEventListener("click", closeEditAssessmentModal);
 elements.saveEditAssessmentButton.addEventListener("click", saveEditedAssessment);
+elements.saveAccountSettingsButton.addEventListener("click", saveAccountSettings);
+elements.savePasswordSettingsButton.addEventListener("click", savePasswordSettings);
 elements.closeTaskViewButton.addEventListener("click", () => {
   state.currentView = "subjects";
   render();
 });
 elements.saveTaskWorkButton.addEventListener("click", saveTaskWorkspace);
+elements.saveTaskFilesButton.addEventListener("click", saveTaskWorkspaceToFiles);
 elements.toggleUpcomingModeButton.addEventListener("click", () => {
   state.upcomingModalMode = state.upcomingModalMode === "all" ? "upcoming" : "all";
   renderUpcomingModal();
@@ -3309,8 +3601,9 @@ elements.uploadPanel.addEventListener("drop", async (event) => {
   }
 });
 elements.signoutButton.addEventListener("click", () => {
-  clearStudent();
+  clearSession();
   state.studentName = "";
+  state.currentUserEmail = "";
   showLanding();
 });
 document.addEventListener("keydown", (event) => {
@@ -3329,7 +3622,8 @@ document.addEventListener("keydown", (event) => {
 });
 
 syncUploadOptions();
+syncSignInMode();
 restoreSettings();
 restoreSubjects();
-restoreStudent();
+restoreSessionUser();
 render();
