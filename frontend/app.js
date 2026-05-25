@@ -584,8 +584,60 @@ function persistStudent(name) {
   window.localStorage.setItem(storageKey, name);
 }
 
+function createPersistableDocument(documentRecord) {
+  return {
+    ...documentRecord,
+    previewImageUrl: null,
+    originalFile: documentRecord.originalFile
+      ? {
+          name: documentRecord.originalFile.name || "",
+          mimeType: documentRecord.originalFile.mimeType || "",
+          kind: documentRecord.originalFile.kind || ""
+        }
+      : null
+  };
+}
+
+function createQuotaFallbackDocument(documentRecord) {
+  return {
+    id: documentRecord.id,
+    title: documentRecord.title,
+    type: documentRecord.type,
+    added: documentRecord.added,
+    addedAt: documentRecord.addedAt,
+    content: typeof documentRecord.content === "string" ? documentRecord.content.slice(0, 4000) : "",
+    workNotes: typeof documentRecord.workNotes === "string" ? documentRecord.workNotes.slice(0, 4000) : "",
+    flags: { ...(documentRecord.flags || {}) },
+    pageNumber: documentRecord.pageNumber || null,
+    originalFile: null,
+    previewImageUrl: null
+  };
+}
+
 function persistSubjects() {
-  window.localStorage.setItem(subjectsStorageKey, JSON.stringify(state.subjects));
+  const persistableSubjects = state.subjects.map((subject) => ({
+    ...subject,
+    documents: Array.isArray(subject.documents)
+      ? subject.documents.map(createPersistableDocument)
+      : []
+  }));
+
+  try {
+    window.localStorage.setItem(subjectsStorageKey, JSON.stringify(persistableSubjects));
+  } catch (error) {
+    const fallbackSubjects = state.subjects.map((subject) => ({
+      ...subject,
+      askHistory: Array.isArray(subject.askHistory) ? subject.askHistory.slice(-5) : [],
+      documents: Array.isArray(subject.documents)
+        ? subject.documents.map(createQuotaFallbackDocument)
+        : []
+    }));
+    window.localStorage.setItem(subjectsStorageKey, JSON.stringify(fallbackSubjects));
+    if (elements?.uploadStatus) {
+      elements.uploadStatus.textContent =
+        "Large document previews will stay available in this session, but only a lighter saved version will persist after refresh.";
+    }
+  }
 }
 
 function persistSettings() {
