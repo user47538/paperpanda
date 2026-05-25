@@ -2244,6 +2244,30 @@ function createDocumentWithFlags(details, flags) {
   return record;
 }
 
+function createPdfPageRecords(fileName, flags, originalFile, pages) {
+  const sanitizedName = fileName.replace(/\.[^.]+$/, "");
+  return pages.map((page) => {
+    const record = createDocumentWithFlags(
+      {
+        title: `${sanitizedName} - Page ${page.pageNumber}`,
+        type: flags.classNotes
+          ? "Class Notes"
+          : flags.assessment
+            ? "Assessment"
+            : flags.homework
+              ? "Homework"
+              : "PDF Page",
+        content: page.text || `Page ${page.pageNumber}`
+      },
+      flags
+    );
+    record.originalFile = originalFile;
+    record.previewImageUrl = page.imageUrl;
+    record.pageNumber = page.pageNumber;
+    return record;
+  });
+}
+
 function buildOriginalFile(file) {
   return {
     name: file.name,
@@ -2293,27 +2317,7 @@ async function readUploadedDocument(file, flags) {
 
   if (lowerName.endsWith(".pdf")) {
     const pdfData = await extractPdfData(file);
-    const content = pdfData.fullText || "No readable text was detected in this PDF.";
-    let records = [];
-    if (flags.classNotes) {
-      records = splitClassNotesByDate(file.name, content, flags, originalFile, pdfData.pages);
-    } else {
-      records = pdfData.pages.map((page) => {
-        const record = createDocumentWithFlags({
-          title: `${file.name.replace(/\.[^.]+$/, "")} - Page ${page.pageNumber}`,
-          type: flags.assessment ? "Assessment" : flags.homework ? "Homework" : "PDF Page",
-          content: page.text || `Page ${page.pageNumber}`
-        }, flags);
-        record.previewImageUrl = page.imageUrl;
-        return record;
-      });
-    }
-    records.forEach((record) => {
-      record.originalFile = originalFile;
-      if (!record.previewImageUrl) {
-        record.previewImageUrl = pdfData.pages[0]?.imageUrl || null;
-      }
-    });
+    const records = createPdfPageRecords(file.name, flags, originalFile, pdfData.pages);
     return {
       records
     };
