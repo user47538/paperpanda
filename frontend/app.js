@@ -22,6 +22,7 @@ let pdfjsLibPromise = null;
 let currentAudioPlayback = null;
 let currentAudioObjectUrl = "";
 let previewDatabasePromise = null;
+let currentListenSessionId = 0;
 const defaultGrade = "7";
 
 const subjectSeed = [
@@ -1668,6 +1669,37 @@ function normaliseSpeechText(value) {
     .trim();
 }
 
+function splitSpeechTextIntoChunks(text, maxLength = 1100) {
+  const cleanedText = String(text || "").trim();
+  if (!cleanedText) {
+    return [];
+  }
+
+  const chunks = [];
+  let cursor = 0;
+  while (cursor < cleanedText.length) {
+    let sliceEnd = Math.min(cleanedText.length, cursor + maxLength);
+    if (sliceEnd < cleanedText.length) {
+      const breakpoint = Math.max(
+        cleanedText.lastIndexOf(". ", sliceEnd),
+        cleanedText.lastIndexOf("? ", sliceEnd),
+        cleanedText.lastIndexOf("! ", sliceEnd),
+        cleanedText.lastIndexOf(", ", sliceEnd)
+      );
+      if (breakpoint > cursor + Math.floor(maxLength * 0.45)) {
+        sliceEnd = breakpoint + 1;
+      }
+    }
+    const chunk = cleanedText.slice(cursor, sliceEnd).trim();
+    if (chunk) {
+      chunks.push(chunk);
+    }
+    cursor = sliceEnd;
+  }
+
+  return chunks;
+}
+
 async function requestApiGet(endpoint) {
   const response = await fetch(`${API_BASE_URL}${endpoint}`);
   if (!response.ok) {
@@ -3035,28 +3067,58 @@ function speakDocument(document) {
   }
 
   const speakWithOpenAi = async () => {
+    const listenSessionId = Date.now();
+    currentListenSessionId = listenSessionId;
     state.listeningDocumentId = document.id;
     renderDocuments();
+    elements.askResponse.textContent = "Preparing audio...";
 
-    const speechBlob = await requestApi(
-      "/api/speak",
-      {
-        text: clipText(textToRead, 3500)
-      },
-      true
-    );
+    const chunks = splitSpeechTextIntoChunks(clipText(textToRead, 3500), 1100);
+    if (!chunks.length) {
+      throw new Error("There is no readable text available for this document yet.");
+    }
 
-    currentAudioObjectUrl = URL.createObjectURL(speechBlob);
-    currentAudioPlayback = new Audio(currentAudioObjectUrl);
-    currentAudioPlayback.onended = () => {
-      stopListening();
-      renderDocuments();
-    };
-    currentAudioPlayback.onerror = () => {
-      stopListening();
-      elements.askResponse.textContent = "AI voice playback failed for this document.";
-    };
-    await currentAudioPlayback.play();
+    for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
+      if (currentListenSessionId !== listenSessionId) {
+        return;
+      }
+
+      const speechBlob = await requestApi(
+        "/api/speak",
+        {
+          text: chunks[chunkIndex]
+        },
+        true
+      );
+
+      if (currentListenSessionId !== listenSessionId) {
+        return;
+      }
+
+      if (currentAudioObjectUrl) {
+        URL.revokeObjectURL(currentAudioObjectUrl);
+      }
+      currentAudioObjectUrl = URL.createObjectURL(speechBlob);
+      currentAudioPlayback = new Audio(currentAudioObjectUrl);
+      currentAudioPlayback.onerror = () => {
+        stopListening();
+        elements.askResponse.textContent = "AI voice playback failed for this document.";
+      };
+      await currentAudioPlayback.play();
+      elements.askResponse.textContent = "Reading document...";
+
+      await new Promise((resolve, reject) => {
+        if (!currentAudioPlayback) {
+          resolve();
+          return;
+        }
+        currentAudioPlayback.onended = () => resolve();
+        currentAudioPlayback.onerror = () => reject(new Error("AI voice playback failed for this document."));
+      });
+    }
+
+    stopListening();
+    renderDocuments();
   };
 
   speakWithOpenAi().catch((error) => {
@@ -3069,6 +3131,7 @@ function speakDocument(document) {
 }
 
 function stopListening() {
+  currentListenSessionId += 1;
   if ("speechSynthesis" in window) {
     window.speechSynthesis.cancel();
   }
