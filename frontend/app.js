@@ -451,6 +451,8 @@ const elements = {
   uploadWatch: document.getElementById("upload-watch"),
   uploadDueDateWrap: document.getElementById("upload-due-date-wrap"),
   uploadDueDate: document.getElementById("upload-due-date"),
+  uploadAssessmentTaskWrap: document.getElementById("upload-assessment-task-wrap"),
+  uploadAssessmentTaskSelect: document.getElementById("upload-assessment-task-select"),
   uploadWatchUrlWrap: document.getElementById("upload-watch-url-wrap"),
   uploadWatchUrl: document.getElementById("upload-watch-url"),
   uploadWatchTitleWrap: document.getElementById("upload-watch-title-wrap"),
@@ -668,6 +670,10 @@ function getAskDocument() {
 
 function getUploadSubject() {
   return state.subjects.find((subject) => subject.id === elements.uploadSubjectSelect.value) || null;
+}
+
+function getSelectedUploadAssessmentId() {
+  return elements.uploadAssessmentTaskSelect.value || "";
 }
 
 function scrollReaderIntoView() {
@@ -1149,6 +1155,8 @@ function normaliseDocument(documentRecord) {
   return {
     ...documentRecord,
     workNotes: documentRecord.workNotes || "",
+    reviewed: Boolean(documentRecord.reviewed),
+    reviewMode: documentRecord.reviewMode || "",
     flags: {
       classNotes: Boolean(documentRecord.flags?.classNotes || documentRecord.flags?.termOverview),
       assessment: Boolean(documentRecord.flags?.assessment),
@@ -1446,6 +1454,7 @@ function renderSubjectList() {
     .map((subject) => `<option value="${subject.id}">${escapeHtml(subject.name)}</option>`)
     .join("");
   elements.uploadSubjectSelect.value = state.selectedSubjectId;
+  renderUploadAssessmentTaskOptions();
 
   elements.subjectList.innerHTML = state.subjects
     .map(
@@ -1527,6 +1536,22 @@ function renderPendingUpload() {
   `;
 }
 
+function renderUploadAssessmentTaskOptions() {
+  const subject = getUploadSubject();
+  const assessments = Array.isArray(subject?.assessments) ? subject.assessments : [];
+  const options = [
+    `<option value="">Create new assessment from uploaded document</option>`,
+    ...assessments.map(
+      (assessment) =>
+        `<option value="${assessment.id}">${escapeHtml(
+          `${assessment.taskNumber || "Task"} - ${assessment.componentTask || assessment.title}`
+        )}</option>`
+    )
+  ];
+
+  elements.uploadAssessmentTaskSelect.innerHTML = options.join("");
+}
+
 function getDocumentSortValue(documentRecord) {
   if (documentRecord.addedAt) {
     const timestamp = new Date(documentRecord.addedAt).getTime();
@@ -1567,9 +1592,9 @@ function getSortedDocuments(subject) {
   });
 }
 
-function getDocumentGroups(subject) {
+function getDocumentGroupsFromDocuments(documents) {
   const grouped = new Map();
-  getSortedDocuments(subject).forEach((documentRecord) => {
+  [...documents].forEach((documentRecord) => {
     const groupId = getDocumentGroupId(documentRecord);
     const existing = grouped.get(groupId);
     if (existing) {
@@ -1595,6 +1620,10 @@ function getDocumentGroups(subject) {
       return left.title.localeCompare(right.title, undefined, { numeric: true });
     })
   }));
+}
+
+function getDocumentGroups(subject) {
+  return getDocumentGroupsFromDocuments(getSortedDocuments(subject));
 }
 
 function getSelectedDocumentIndex() {
@@ -1664,6 +1693,60 @@ function renderReaderToolbar() {
     selectedDocument && state.listeningDocumentId === selectedDocument.id ? "Stop" : "Listen";
 }
 
+function renderDocumentGroupRows(group, { reviewedSection = false } = {}) {
+  const isExpanded = Boolean(state.expandedDocumentGroups[group.id]);
+  const visibleDocuments =
+    group.isPageGroup && !isExpanded ? [group.documents[0]] : group.documents;
+  const dateCellMarkup = group.isPageGroup
+    ? `
+      <button type="button" class="documents-date-button" data-document-group-toggle="${group.id}">
+        <strong>${escapeHtml(group.added)}</strong>
+        <span>${isExpanded ? "Hide pages" : `${group.documents.length} pages`}</span>
+      </button>
+    `
+    : `<span class="documents-date-button"><strong>${escapeHtml(group.added)}</strong></span>`;
+
+  return visibleDocuments
+    .map(
+      (document, index) => `
+        <tr class="${document.id === state.selectedDocumentId ? "is-selected" : ""}${state.selectedDocumentIds.includes(document.id) ? " is-bulk-selected" : ""}${reviewedSection ? " documents-row--reviewed" : ""}">
+          ${
+            index === 0
+              ? `<td rowspan="${visibleDocuments.length}">${dateCellMarkup}</td>`
+              : ""
+          }
+          <td>
+            <button type="button" class="documents-title-button" data-document-title-id="${document.id}">
+              <strong>${escapeHtml(document.title)}</strong>
+            </button>
+          </td>
+          <td>${escapeHtml(document.type)}</td>
+          <td>
+            <label class="document-review-toggle">
+              <input
+                type="checkbox"
+                data-document-reviewed-id="${document.id}"
+                ${document.reviewed ? "checked" : ""}
+              />
+              <span>${document.reviewed ? "Read / listened" : "Mark done"}</span>
+            </label>
+          </td>
+          <td>
+            <div class="table-actions">
+              <button type="button" class="table-action" data-action="read" data-document-id="${document.id}">Read</button>
+              <button type="button" class="table-action" data-action="listen" data-document-id="${document.id}">
+                ${state.listeningDocumentId === document.id ? "Stop" : "Listen"}
+              </button>
+              <button type="button" class="table-action" data-action="ask" data-document-id="${document.id}">Ask</button>
+              <button type="button" class="table-action table-action--danger" data-action="delete" data-document-id="${document.id}">Delete</button>
+            </div>
+          </td>
+        </tr>
+      `
+    )
+    .join("");
+}
+
 function renderDocuments() {
   const subject = getSelectedSubject();
   if (!subject) {
@@ -1673,7 +1756,7 @@ function renderDocuments() {
   if (!subject.documents.length) {
     elements.documentsBody.innerHTML = `
       <tr>
-        <td colspan="4">
+        <td colspan="5">
           <div class="empty-state">
             No documents uploaded for this subject yet. Add worksheets, rubrics, or weekly notes.
           </div>
@@ -1689,7 +1772,11 @@ function renderDocuments() {
   }
 
   const sortedDocuments = getSortedDocuments(subject);
+  const unreadDocuments = sortedDocuments.filter((document) => !document.reviewed);
+  const reviewedDocuments = sortedDocuments.filter((document) => document.reviewed);
   const groupedDocuments = getDocumentGroups(subject);
+  const unreadGroups = getDocumentGroupsFromDocuments(unreadDocuments);
+  const reviewedGroups = getDocumentGroupsFromDocuments(reviewedDocuments);
 
   if (!sortedDocuments.find((doc) => doc.id === state.selectedDocumentId)) {
     state.selectedDocumentId = sortedDocuments[0].id;
@@ -1699,52 +1786,29 @@ function renderDocuments() {
     state.askDocumentId = sortedDocuments[0].id;
   }
 
-  const visibleGroups = state.documentsExpanded ? groupedDocuments : groupedDocuments.slice(0, 6);
-  const rowsMarkup = visibleGroups
-    .map((group) => {
-      const isExpanded = Boolean(state.expandedDocumentGroups[group.id]);
-      const visibleDocuments =
-        group.isPageGroup && !isExpanded ? [group.documents[0]] : group.documents;
-      const dateCellMarkup = group.isPageGroup
-        ? `
-          <button type="button" class="documents-date-button" data-document-group-toggle="${group.id}">
-            <strong>${escapeHtml(group.added)}</strong>
-            <span>${isExpanded ? "Hide pages" : `${group.documents.length} pages`}</span>
-          </button>
-        `
-        : `<span class="documents-date-button"><strong>${escapeHtml(group.added)}</strong></span>`;
-
-      return visibleDocuments
-        .map(
-          (document, index) => `
-            <tr class="${document.id === state.selectedDocumentId ? "is-selected" : ""}${state.selectedDocumentIds.includes(document.id) ? " is-bulk-selected" : ""}">
-              ${
-                index === 0
-                  ? `<td rowspan="${visibleDocuments.length}">${dateCellMarkup}</td>`
-                  : ""
-              }
-              <td>
-                <button type="button" class="documents-title-button" data-document-title-id="${document.id}">
-                  <strong>${escapeHtml(document.title)}</strong>
-                </button>
-              </td>
-              <td>${escapeHtml(document.type)}</td>
-              <td>
-                <div class="table-actions">
-                  <button type="button" class="table-action" data-action="read" data-document-id="${document.id}">Read</button>
-                  <button type="button" class="table-action" data-action="listen" data-document-id="${document.id}">
-                    ${state.listeningDocumentId === document.id ? "Stop" : "Listen"}
-                  </button>
-                  <button type="button" class="table-action" data-action="ask" data-document-id="${document.id}">Ask</button>
-                  <button type="button" class="table-action table-action--danger" data-action="delete" data-document-id="${document.id}">Delete</button>
-                </div>
-              </td>
-            </tr>
-          `
-        )
-        .join("");
-    })
-    .join("");
+  const visibleUnreadGroups = state.documentsExpanded ? unreadGroups : unreadGroups.slice(0, 6);
+  const rowsMarkup = [
+    `
+      <tr class="documents-section-row">
+        <td colspan="5">Newly uploaded</td>
+      </tr>
+    `,
+    visibleUnreadGroups.length
+      ? visibleUnreadGroups.map((group) => renderDocumentGroupRows(group)).join("")
+      : `
+        <tr class="documents-empty-row">
+          <td colspan="5"><div class="empty-state">No new documents waiting to be read.</div></td>
+        </tr>
+      `,
+    reviewedGroups.length
+      ? `
+        <tr class="documents-section-row documents-section-row--reviewed">
+          <td colspan="5">Read / listened</td>
+        </tr>
+        ${reviewedGroups.map((group) => renderDocumentGroupRows(group, { reviewedSection: true })).join("")}
+      `
+      : ""
+  ].join("");
 
   elements.documentsBody.innerHTML = rowsMarkup;
 
@@ -1768,6 +1832,19 @@ function renderDocuments() {
       state.selectedDocumentId = documentRecord.id;
       renderDocuments();
       scrollReaderIntoView();
+    });
+  });
+
+  elements.documentsBody.querySelectorAll("[data-document-reviewed-id]").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      const documentRecord = subject.documents.find((doc) => doc.id === checkbox.dataset.documentReviewedId);
+      if (!documentRecord) {
+        return;
+      }
+      documentRecord.reviewed = checkbox.checked;
+      documentRecord.reviewMode = checkbox.checked ? "manual" : "";
+      persistSubjects();
+      renderDocuments();
     });
   });
 
@@ -1801,14 +1878,15 @@ function renderDocuments() {
 
       if (button.dataset.action === "delete") {
         deleteDocument(documentRecord.id);
+        return;
       }
     });
   });
 
-  const hasExtraDocuments = groupedDocuments.length > 6;
+  const hasExtraDocuments = unreadGroups.length > 6;
   elements.documentsToggleButton.classList.toggle("hidden", !hasExtraDocuments);
   if (hasExtraDocuments) {
-    elements.documentsToggleButton.textContent = state.documentsExpanded ? "Show recent documents" : "Show all documents";
+    elements.documentsToggleButton.textContent = state.documentsExpanded ? "Show recent documents" : "Show all new documents";
   }
 
   renderDocumentBulkActions(subject);
@@ -2019,6 +2097,17 @@ function toggleListen(documentRecord) {
 }
 
 function deleteDocument(documentId) {
+  const subject = getSelectedSubject();
+  const documentRecord = subject?.documents.find((document) => document.id === documentId);
+  if (!documentRecord) {
+    return;
+  }
+
+  const confirmed = window.confirm(`Delete "${documentRecord.title}"?`);
+  if (!confirmed) {
+    return;
+  }
+
   deleteDocuments([documentId]);
 }
 
@@ -2564,9 +2653,7 @@ function renderAssessments() {
     wrapper.innerHTML = assessment.completed
       ? `
         <div class="assessment-item__header">
-          <div class="assessment-item__title-group">
-            <h4><button type="button" class="assessment-link-button" data-open-assessment="${assessment.id}">${escapeHtml(assessment.componentTask || assessment.title)}</button></h4>
-          </div>
+          <h4><button type="button" class="assessment-link-button" data-open-assessment="${assessment.id}">${escapeHtml(assessment.componentTask || assessment.title)}</button></h4>
           <div class="assessment-item__meta-row">
             <span class="assessment-item__task">Task ${escapeHtml(assessment.taskNumber || "Uploaded")}</span>
             <span class="document-chip assessment-complete-chip">Complete</span>
@@ -2897,6 +2984,8 @@ function createDocumentRecord({ title, type, content }) {
     uploadGroupId: null,
     originalFile: null,
     previewImageUrl: null,
+    reviewed: false,
+    reviewMode: "",
     flags: {
       classNotes: false,
       assessment: false,
@@ -3159,6 +3248,14 @@ function buildUploadFlags() {
     homework: selectedType === "homework",
     watch: selectedType === "watch"
   };
+}
+
+function getAssessmentUploadTarget(subject) {
+  const selectedAssessmentId = getSelectedUploadAssessmentId();
+  if (!selectedAssessmentId) {
+    return null;
+  }
+  return subject.assessments.find((assessment) => assessment.id === selectedAssessmentId) || null;
 }
 
 function getSelectedUploadType() {
@@ -3620,19 +3717,43 @@ async function processFiles(fileList) {
   elements.uploadStatus.textContent = "Reading document...";
 
   try {
+    const processedUploads = [];
     for (const file of files) {
       const { records } = await readUploadedDocument(file, flags);
-      const duplicateTitle = records.find((record) =>
-        subject.documents.some((document) => document.title.toLowerCase() === record.title.toLowerCase())
-      );
-      if (duplicateTitle) {
-        throw new Error(`"${duplicateTitle.title}" is already in ${subject.name}.`);
+      processedUploads.push({ file, records });
+    }
+
+    const existingTitles = new Set(subject.documents.map((document) => document.title.toLowerCase()));
+    const batchTitles = new Set();
+    for (const { records } of processedUploads) {
+      for (const record of records) {
+        const lowerTitle = record.title.toLowerCase();
+        if (existingTitles.has(lowerTitle) || batchTitles.has(lowerTitle)) {
+          throw new Error(`"${record.title}" is already in ${subject.name}.`);
+        }
+        batchTitles.add(lowerTitle);
       }
+    }
+
+    processedUploads.forEach(({ records }) => {
       subject.documents.unshift(...records);
-      if (flags.assessment) {
-        subject.assessments.unshift(
-          buildAssessmentFromUpload(file.name, formatDueDate(elements.uploadDueDate.value), records.map((record) => record.id))
-        );
+    });
+
+    if (flags.assessment) {
+      const selectedAssessment = getAssessmentUploadTarget(subject);
+      if (selectedAssessment) {
+        const linkedRecordIds = processedUploads.flatMap(({ records }) => records.map((record) => record.id));
+        const existingLinkedIds = new Set(selectedAssessment.linkedDocumentIds || []);
+        linkedRecordIds.forEach((recordId) => {
+          existingLinkedIds.add(recordId);
+        });
+        selectedAssessment.linkedDocumentIds = [...existingLinkedIds];
+      } else {
+        processedUploads.forEach(({ file, records }) => {
+          subject.assessments.unshift(
+            buildAssessmentFromUpload(file.name, formatDueDate(elements.uploadDueDate.value), records.map((record) => record.id))
+          );
+        });
       }
     }
 
@@ -3659,6 +3780,7 @@ function clearUploadOptions() {
   elements.uploadHomework.checked = false;
   elements.uploadWatch.checked = false;
   elements.uploadDueDate.value = "";
+  elements.uploadAssessmentTaskSelect.value = "";
   elements.uploadWatchUrl.value = "";
   elements.uploadWatchTitle.value = "";
   syncUploadOptions();
@@ -3673,11 +3795,15 @@ function clearPendingUpload() {
 
 function syncUploadOptions() {
   elements.uploadDueDateWrap.classList.toggle("upload-field--hidden", !elements.uploadAssessment.checked);
+  elements.uploadAssessmentTaskWrap.classList.toggle("upload-field--hidden", !elements.uploadAssessment.checked);
   const showWatchFields = elements.uploadWatch.checked;
   elements.uploadWatchUrlWrap.classList.toggle("upload-field--hidden", !showWatchFields);
   elements.uploadWatchTitleWrap.classList.toggle("upload-field--hidden", !showWatchFields);
   elements.uploadPanel.classList.toggle("hidden", showWatchFields);
   elements.pendingUpload.classList.toggle("hidden", showWatchFields);
+  if (elements.uploadAssessment.checked) {
+    renderUploadAssessmentTaskOptions();
+  }
 }
 
 function handleUploadTypeSelection(selectedElement) {
@@ -3691,6 +3817,7 @@ function handleUploadTypeSelection(selectedElement) {
 
 function openUploadModal() {
   elements.uploadSubjectSelect.value = state.selectedSubjectId;
+  renderUploadAssessmentTaskOptions();
   resetUploadStatus();
   clearPendingUpload();
   elements.uploadModal.classList.remove("hidden");
@@ -4077,6 +4204,9 @@ elements.signInForm.addEventListener("keydown", (event) => {
   }
 });
 elements.documentUpload.addEventListener("change", handleUpload);
+elements.uploadSubjectSelect.addEventListener("change", () => {
+  renderUploadAssessmentTaskOptions();
+});
 elements.documentsToggleButton.addEventListener("click", () => {
   state.documentsExpanded = !state.documentsExpanded;
   renderDocuments();
