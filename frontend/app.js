@@ -13,7 +13,7 @@ const sessionStorageKey = "studylift-session";
 const subjectsStorageKey = "paperpanda-subjects-by-account";
 const settingsStorageKey = "studylift-settings";
 const uiVersionStorageKey = "paperpanda-ui-version";
-const currentUiVersion = "2026-05-25-white-background";
+const currentUiVersion = "2026-05-26-homework-whole-file";
 const previewDatabaseName = "paperpanda-assets";
 const previewStoreName = "document-previews";
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://localhost:3001").replace(/\/$/, "");
@@ -1320,10 +1320,6 @@ function restoreSettings() {
   }
 
   if (window.localStorage.getItem(uiVersionStorageKey) !== currentUiVersion) {
-    state.settings.homeBackground = "";
-    state.settings.subjectsBackground = "";
-    state.settings.headingColor = "#111111";
-    persistSettings();
     window.localStorage.setItem(uiVersionStorageKey, currentUiVersion);
   }
 }
@@ -4072,6 +4068,23 @@ function createPdfPageRecords(fileName, flags, originalFile, pages) {
   });
 }
 
+function createWholePdfRecord(fileName, flags, originalFile, pdfData) {
+  const sanitizedName = fileName.replace(/\.[^.]+$/, "");
+  const firstPagePreview = Array.isArray(pdfData?.pages) ? pdfData.pages.find((page) => page.imageUrl)?.imageUrl || null : null;
+  const fullText = String(pdfData?.fullText || "").trim();
+  const record = createDocumentWithFlags(
+    {
+      title: sanitizedName,
+      type: flags.homework ? "Homework" : flags.assessment ? "Assessment" : "PDF",
+      content: fullText || "No readable text was detected in this PDF."
+    },
+    flags
+  );
+  record.originalFile = originalFile;
+  record.previewImageUrl = firstPagePreview;
+  return record;
+}
+
 function buildOriginalFile(file) {
   return {
     name: file.name,
@@ -4121,7 +4134,9 @@ async function readUploadedDocument(file, flags) {
 
   if (lowerName.endsWith(".pdf")) {
     const pdfData = await extractPdfData(file);
-    const records = createPdfPageRecords(file.name, flags, originalFile, pdfData.pages);
+    const records = flags.homework
+      ? [createWholePdfRecord(file.name, flags, originalFile, pdfData)]
+      : createPdfPageRecords(file.name, flags, originalFile, pdfData.pages);
     return {
       records
     };

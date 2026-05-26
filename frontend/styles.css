@@ -59,7 +59,7 @@ button {
 }
 
 .page-shell {
-  width: min(1600px, calc(100% - 32px));
+  width: 100%;
   margin: 0 auto;
   padding: 0 0 64px;
 }
@@ -72,8 +72,8 @@ button {
 .home-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.8fr);
-  gap: 24px;
-  padding: 0 40px;
+  gap: 36px;
+  padding: 0 56px;
 }
 
 .home-grid--revision {
@@ -180,6 +180,7 @@ button {
   font-weight: 600;
   letter-spacing: -0.04em;
   text-transform: none;
+  color: var(--custom-heading-color);
 }
 
 .brand-lockup__name--topbar {
@@ -244,7 +245,10 @@ button {
 .topbar h2,
 .section-heading h3,
 .subject-header h3,
-.reader-card h3 {
+.reader-card h3,
+.assessment-item h4,
+.practice-item h4,
+.revision-feedback__summary h3 {
   margin: 0;
   font-family: var(--font-display);
   font-weight: 400;
@@ -721,7 +725,7 @@ button {
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--ink);
+  color: var(--custom-heading-color);
   font-family: var(--font-display);
   font-size: 12px;
   font-weight: 500;
@@ -736,9 +740,9 @@ button {
 
 .overview-band {
   display: grid;
-  gap: 16px;
-  margin-bottom: 24px;
-  padding: 0 40px;
+  gap: 24px;
+  margin-bottom: 36px;
+  padding: 0 56px;
 }
 
 .overview-band--single {
@@ -832,7 +836,7 @@ button {
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
-  border-radius: 28px;
+  border-radius: 0;
 }
 
 #heading-colour-input {
@@ -936,6 +940,7 @@ button {
   font-weight: 400;
   text-transform: uppercase;
   letter-spacing: 0.12em;
+  color: var(--custom-heading-color);
 }
 
 .subject-header {
@@ -1391,9 +1396,7 @@ button {
 .assessment-item h4,
 .practice-item h4 {
   margin: 0 0 8px;
-  font-family: var(--font-display);
   font-size: 1.1rem;
-  font-weight: 500;
 }
 
 .practice-copy--source {
@@ -1799,7 +1802,7 @@ button {
 
 @media (max-width: 760px) {
   .page-shell {
-    width: min(100% - 20px, 1480px);
+    width: 100%;
     padding-top: 0;
   }
 
