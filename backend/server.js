@@ -3,6 +3,7 @@ import express from "express";
 import multer from "multer";
 import { createCanvas } from "@napi-rs/canvas";
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
+import { availableRevisionGrades, getRevisionCatalogueForGrade, getRevisionEntry } from "./curriculumCatalog.js";
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
@@ -70,6 +71,22 @@ function extractResponseJson(responsePayload) {
   } catch (error) {
     throw new Error("OpenAI returned invalid schedule JSON.");
   }
+}
+
+function cleanRevisionNotes(notes) {
+  if (!Array.isArray(notes)) {
+    return [];
+  }
+
+  return notes
+    .map((note) => ({
+      title: String(note?.title || "").trim(),
+      content: String(note?.content || "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 3000)
+    }))
+    .filter((note) => note.title || note.content);
 }
 
 async function callOpenAiJson(endpoint, payload) {
@@ -243,6 +260,15 @@ app.get("/health", (_request, response) => {
   });
 });
 
+app.get("/api/revision/catalogue", (request, response) => {
+  const grade = String(request.query?.grade || "7");
+  response.json({
+    grade,
+    grades: availableRevisionGrades,
+    entries: getRevisionCatalogueForGrade(grade)
+  });
+});
+
 app.post("/api/ask", async (request, response) => {
   try {
     const { subjectName, question, recentHistory = [], nextAssessment = null, document = null } = request.body || {};
@@ -260,7 +286,7 @@ app.post("/api/ask", async (request, response) => {
             {
               type: "input_text",
               text:
-                "You are a helpful Australian Year 7 study support tutor. Explain clearly, use short paragraphs, keep language age-appropriate, and base your help on the provided subject and document context. Give guidance, examples, steps, and clarification rather than claiming to have unseen information."
+                "You are a helpful Australian school study support tutor. Explain clearly, use short paragraphs, keep language age-appropriate, and base your help on the provided subject and document context. Give guidance, examples, steps, and clarification rather than claiming to have unseen information."
             }
           ]
         },
@@ -314,7 +340,7 @@ app.post("/api/speak", async (request, response) => {
       format: "mp3",
       input: text,
       instructions:
-        "Speak as a warm, fluent female tutor for a Year 7 student. Use natural pauses, clear emphasis, and calm expressive delivery."
+        "Speak as a warm, fluent female tutor for an Australian school student. Use natural pauses, clear emphasis, and calm expressive delivery."
     });
 
     response.setHeader("Content-Type", speech.contentType);
@@ -322,6 +348,107 @@ app.post("/api/speak", async (request, response) => {
   } catch (error) {
     response.status(500).json({
       error: error instanceof Error ? error.message : "Speech generation failed."
+    });
+  }
+});
+
+app.post("/api/revision/generate-test", async (request, response) => {
+  try {
+    const grade = String(request.body?.grade || "").trim();
+    const subjectId = String(request.body?.subjectId || "").trim();
+    const topic = String(request.body?.topic || "").trim();
+    const textTitle = String(request.body?.textTitle || "").trim();
+    const notes = cleanRevisionNotes(request.body?.notes);
+
+    if (!grade || !subjectId) {
+      response.status(400).json({ error: "grade and subjectId are required." });
+      return;
+    }
+
+    const revisionEntry = getRevisionEntry(grade, subjectId);
+    if (!revisionEntry) {
+      response.status(404).json({ error: "No revision catalogue entry exists for that grade and subject." });
+      return;
+    }
+
+    const responsePayload = await callOpenAiJson("responses", {
+      model: "gpt-4o-mini",
+      input: [
+        {
+          role: "system",
+          content: [
+            {
+              type: "input_text",
+              text:
+                "You build Australian school revision tests. Return only JSON. Use a NAPLAN-inspired structure: a short stimulus or scenario, a mix of multiple-choice and short-answer questions, then a longer written response. For English, stay closest to NAPLAN reading/language/writing style. For other subjects, adapt that structure to the subject while keeping the question style clear and age-appropriate."
+            }
+          ]
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: JSON.stringify(
+                {
+                  request: {
+                    grade,
+                    topic,
+                    textTitle,
+                    selectedNotes: notes
+                  },
+                  syllabusEntry: revisionEntry,
+                  outputSchema: {
+                    title: "string",
+                    subjectName: "string",
+                    grade: "string",
+                    focus: "string",
+                    estimatedMinutes: "number",
+                    instructions: "string",
+                    sections: [
+                      {
+                        title: "string",
+                        sectionType: "reading | language | application | writing",
+                        stimulusTitle: "string",
+                        stimulusText: "string",
+                        questions: [
+                          {
+                            number: "number",
+                            type: "multiple-choice | short-answer | extended-response",
+                            prompt: "string",
+                            options: ["string"],
+                            answerGuide: "string",
+                            marks: "number",
+                            skill: "string"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                },
+                null,
+                2
+              )
+            }
+          ]
+        }
+      ],
+      text: {
+        format: {
+          type: "json_object"
+        }
+      },
+      max_output_tokens: 4000
+    });
+
+    const parsed = extractResponseJson(responsePayload);
+    response.json({
+      catalogueEntry: revisionEntry,
+      test: parsed
+    });
+  } catch (error) {
+    response.status(500).json({
+      error: error instanceof Error ? error.message : "Revision test generation failed."
     });
   }
 });

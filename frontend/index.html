@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>PaperPanda Year 7 Portal</title>
+    <title>PaperPanda Student Portal</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -14,7 +14,7 @@
             <img src="/paperpanda-logo.png" alt="PaperPanda logo" class="brand-lockup__logo" />
             <div class="brand-lockup__copy">
               <span class="brand-lockup__name">PaperPanda</span>
-              <span class="brand-lockup__tag">Year 7 learning support</span>
+              <span class="brand-lockup__tag">Student learning support</span>
             </div>
           </div>
           <h1>PaperPanda helps students read, organise, and understand schoolwork.</h1>
@@ -39,6 +39,17 @@
           <label id="student-name-wrap">
             Student name
             <input type="text" id="student-name" placeholder="e.g. Mia Chen" />
+          </label>
+          <label id="student-grade-wrap">
+            School year
+            <select id="student-grade">
+              <option value="7">Year 7</option>
+              <option value="8">Year 8</option>
+              <option value="9">Year 9</option>
+              <option value="10">Year 10</option>
+              <option value="11">Year 11</option>
+              <option value="12">HSC / Year 12</option>
+            </select>
           </label>
           <label>
             School email
@@ -81,6 +92,41 @@
         </header>
 
         <section class="home-view" id="home-view">
+          <section class="overview-band overview-band--triple">
+            <article class="overview-card overview-card--metric">
+              <div class="overview-card__body">
+                <p class="overview-card__label">Documents To Read</p>
+                <strong id="documents-to-read-count">0</strong>
+                <span id="documents-to-read-summary">No unread documents right now.</span>
+              </div>
+              <div class="progress-meter">
+                <span class="progress-meter__bar" id="documents-to-read-progress"></span>
+              </div>
+            </article>
+
+            <article class="overview-card overview-card--metric">
+              <div class="overview-card__body">
+                <p class="overview-card__label">Hometasks To Complete</p>
+                <strong id="homework-to-complete-count">0</strong>
+                <span id="homework-to-complete-summary">No homework tasks waiting.</span>
+              </div>
+              <div class="progress-meter">
+                <span class="progress-meter__bar" id="homework-to-complete-progress"></span>
+              </div>
+            </article>
+
+            <article class="overview-card overview-card--metric">
+              <div class="overview-card__body">
+                <p class="overview-card__label">Assessments Upcoming</p>
+                <strong id="assessments-upcoming-count">0</strong>
+                <span id="assessments-upcoming-summary">No active assessments right now.</span>
+              </div>
+              <div class="progress-meter">
+                <span class="progress-meter__bar" id="assessments-upcoming-progress"></span>
+              </div>
+            </article>
+          </section>
+
           <section class="overview-band overview-band--single">
             <button type="button" class="overview-card overview-card--upcoming" id="upcoming-assessments-button">
               <div class="overview-card__body">
@@ -93,27 +139,6 @@
           </section>
 
           <section class="home-grid">
-            <section class="home-card home-card--welcome">
-              <p class="eyebrow">Home</p>
-              <h3>Welcome</h3>
-              <p class="helper-text">Upload this week&apos;s documents, check what is due next, then enter the subjects area to work from the selected class.</p>
-              <div class="background-controls">
-                <input type="file" id="background-upload" class="upload-panel__input upload-panel__input--hidden" accept="image/*" />
-                <button type="button" class="ghost-button" id="change-background-button">Change Background</button>
-                <label class="upload-option">
-                  <input type="checkbox" id="background-home-checkbox" checked />
-                  <span>Home</span>
-                </label>
-                <label class="upload-option">
-                  <input type="checkbox" id="background-subjects-checkbox" />
-                  <span>Subjects</span>
-                </label>
-              </div>
-              <div class="home-actions">
-                <button type="button" class="ghost-button" id="enter-subjects-button">Enter</button>
-              </div>
-            </section>
-
             <section class="home-card">
               <div class="section-heading">
                 <div>
@@ -123,6 +148,88 @@
               </div>
               <p class="helper-text">Send class notes, homework, assessments, PDFs, and WATCH links to the correct subject from one popup.</p>
               <button type="button" class="ghost-button" id="open-upload-modal-secondary">Open upload</button>
+            </section>
+
+            <section class="home-card">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Customise</p>
+                  <h3>Customise</h3>
+                </div>
+              </div>
+              <p class="helper-text">Change the homepage and subjects background, choose a heading colour, and leave room for more personal controls later.</p>
+              <div class="background-controls">
+                <input type="file" id="background-upload" class="upload-panel__input upload-panel__input--hidden" accept="image/*" />
+                <button type="button" class="ghost-button" id="change-background-button">Change Background</button>
+                <button type="button" class="ghost-button" id="remove-background-button">Remove Background</button>
+                <label class="upload-option">
+                  <input type="checkbox" id="background-home-checkbox" checked />
+                  <span>Home</span>
+                </label>
+                <label class="upload-option">
+                  <input type="checkbox" id="background-subjects-checkbox" />
+                  <span>Subjects</span>
+                </label>
+              </div>
+              <label class="upload-field">
+                <span class="upload-field__label">Heading colour</span>
+                <input type="color" id="heading-colour-input" value="#111111" />
+              </label>
+              <div class="home-actions">
+                <button type="button" class="ghost-button" id="clear-heading-colour-button">Reset heading colour</button>
+                <button type="button" class="ghost-button" id="enter-subjects-button">Open subjects</button>
+              </div>
+            </section>
+          </section>
+
+          <section class="home-grid home-grid--revision">
+            <section class="home-card home-card--revision">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Revision</p>
+                  <h3>Create revision test</h3>
+                </div>
+              </div>
+              <p class="helper-text" id="revision-grade-copy">
+                PaperPanda will use the selected school year to pull the right curriculum and practice resources.
+              </p>
+              <label class="upload-field">
+                <span class="upload-field__label">Subject</span>
+                <select id="revision-subject-select" class="upload-select"></select>
+              </label>
+              <label class="upload-field" id="revision-topic-wrap">
+                <span class="upload-field__label">Topic</span>
+                <select id="revision-topic-select" class="upload-select"></select>
+              </label>
+              <label class="upload-field hidden" id="revision-text-wrap">
+                <span class="upload-field__label">English text / novel / film</span>
+                <input type="text" id="revision-text-input" placeholder="e.g. The Giver or persuasive speeches" />
+              </label>
+              <label class="upload-field">
+                <span class="upload-field__label">Notes to include</span>
+                <select id="revision-notes-select" class="upload-select upload-select--notes" multiple></select>
+              </label>
+              <div class="upload-submit-row">
+                <button type="button" class="primary-button" id="create-revision-test-button">Create test</button>
+              </div>
+              <div class="upload-status" id="revision-status"></div>
+            </section>
+
+            <section class="home-card home-card--revision-output">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Curriculum</p>
+                  <h3>Revision resources</h3>
+                </div>
+              </div>
+              <div class="revision-summary" id="revision-summary">
+                Select a subject to load the curriculum overview, tested skills and practice resources.
+              </div>
+              <div class="revision-skills" id="revision-skills"></div>
+              <div class="revision-resources" id="revision-resources"></div>
+              <div class="revision-generated-test" id="revision-generated-test">
+                Create a test to see the generated sections and questions here.
+              </div>
             </section>
           </section>
         </section>
@@ -143,6 +250,17 @@
               <label class="upload-field">
                 <span class="upload-field__label">School email</span>
                 <input type="text" id="settings-email" />
+              </label>
+              <label class="upload-field">
+                <span class="upload-field__label">School year</span>
+                <select id="settings-grade" class="upload-select">
+                  <option value="7">Year 7</option>
+                  <option value="8">Year 8</option>
+                  <option value="9">Year 9</option>
+                  <option value="10">Year 10</option>
+                  <option value="11">Year 11</option>
+                  <option value="12">HSC / Year 12</option>
+                </select>
               </label>
               <div class="upload-submit-row">
                 <button type="button" class="primary-button" id="save-account-settings-button">Save account</button>
@@ -284,7 +402,9 @@
                   <p class="eyebrow">Watch</p>
                   <h3>Watch</h3>
                 </div>
+                <button type="button" class="ghost-button" id="watch-rescan-button">Rescan links</button>
               </div>
+              <div class="upload-status" id="watch-status"></div>
               <div id="watch-list" class="practice-list"></div>
               <div class="documents-footer">
                 <button type="button" class="ghost-button hidden" id="watch-toggle-button">Load more</button>

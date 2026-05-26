@@ -21,6 +21,7 @@ let pdfjsLibPromise = null;
 let currentAudioPlayback = null;
 let currentAudioObjectUrl = "";
 let previewDatabasePromise = null;
+const defaultGrade = "7";
 
 const subjectSeed = [
   {
@@ -360,6 +361,7 @@ const subjectAliasMap = {
 const state = {
   studentName: "",
   currentUserEmail: "",
+  studentGrade: defaultGrade,
   authMode: "create",
   selectedSubjectId: subjectSeed[0].id,
   selectedDocumentId: null,
@@ -376,6 +378,13 @@ const state = {
   documentsExpanded: false,
   currentView: "home",
   activeTask: null,
+  revisionCatalogue: [],
+  revisionCatalogueLoadedGrade: "",
+  revisionSelectedSubjectId: "",
+  revisionSelectedTopic: "",
+  revisionTextTitle: "",
+  revisionSelectedNoteIds: [],
+  generatedRevisionTest: null,
   upcomingModalOpen: false,
   upcomingModalMode: "upcoming",
   pendingFiles: [],
@@ -393,7 +402,8 @@ const state = {
   },
   settings: {
     homeBackground: "",
-    subjectsBackground: ""
+    subjectsBackground: "",
+    headingColor: "#111111"
   },
   subjects: createBaseSubjects()
 };
@@ -408,7 +418,9 @@ const elements = {
   signInModeLoginButton: document.getElementById("signin-mode-login-button"),
   openDashboardButton: document.getElementById("open-dashboard-button"),
   studentNameWrap: document.getElementById("student-name-wrap"),
+  studentGradeWrap: document.getElementById("student-grade-wrap"),
   studentNameInput: document.getElementById("student-name"),
+  studentGradeSelect: document.getElementById("student-grade"),
   studentEmailInput: document.getElementById("student-email"),
   studentPasswordInput: document.getElementById("student-password"),
   studentPasswordConfirmWrap: document.getElementById("student-password-confirm-wrap"),
@@ -423,13 +435,38 @@ const elements = {
   settingsView: document.getElementById("settings-view"),
   subjectsView: document.getElementById("subjects-view"),
   taskView: document.getElementById("task-view"),
+  documentsToReadCount: document.getElementById("documents-to-read-count"),
+  documentsToReadSummary: document.getElementById("documents-to-read-summary"),
+  documentsToReadProgress: document.getElementById("documents-to-read-progress"),
+  homeworkToCompleteCount: document.getElementById("homework-to-complete-count"),
+  homeworkToCompleteSummary: document.getElementById("homework-to-complete-summary"),
+  homeworkToCompleteProgress: document.getElementById("homework-to-complete-progress"),
+  assessmentsUpcomingCount: document.getElementById("assessments-upcoming-count"),
+  assessmentsUpcomingSummary: document.getElementById("assessments-upcoming-summary"),
+  assessmentsUpcomingProgress: document.getElementById("assessments-upcoming-progress"),
   backgroundUpload: document.getElementById("background-upload"),
   changeBackgroundButton: document.getElementById("change-background-button"),
+  removeBackgroundButton: document.getElementById("remove-background-button"),
   backgroundHomeCheckbox: document.getElementById("background-home-checkbox"),
   backgroundSubjectsCheckbox: document.getElementById("background-subjects-checkbox"),
+  headingColourInput: document.getElementById("heading-colour-input"),
+  clearHeadingColourButton: document.getElementById("clear-heading-colour-button"),
   enterSubjectsButton: document.getElementById("enter-subjects-button"),
   openUploadModalButton: document.getElementById("open-upload-modal-button"),
   openUploadModalSecondary: document.getElementById("open-upload-modal-secondary"),
+  revisionGradeCopy: document.getElementById("revision-grade-copy"),
+  revisionSubjectSelect: document.getElementById("revision-subject-select"),
+  revisionTopicWrap: document.getElementById("revision-topic-wrap"),
+  revisionTopicSelect: document.getElementById("revision-topic-select"),
+  revisionTextWrap: document.getElementById("revision-text-wrap"),
+  revisionTextInput: document.getElementById("revision-text-input"),
+  revisionNotesSelect: document.getElementById("revision-notes-select"),
+  createRevisionTestButton: document.getElementById("create-revision-test-button"),
+  revisionStatus: document.getElementById("revision-status"),
+  revisionSummary: document.getElementById("revision-summary"),
+  revisionSkills: document.getElementById("revision-skills"),
+  revisionResources: document.getElementById("revision-resources"),
+  revisionGeneratedTest: document.getElementById("revision-generated-test"),
   signoutButton: document.getElementById("signout-button"),
   upcomingAssessmentsButton: document.getElementById("upcoming-assessments-button"),
   upcomingAssessmentCount: document.getElementById("upcoming-assessment-count"),
@@ -478,6 +515,8 @@ const elements = {
   practiceList: document.getElementById("practice-list"),
   watchList: document.getElementById("watch-list"),
   watchToggleButton: document.getElementById("watch-toggle-button"),
+  watchRescanButton: document.getElementById("watch-rescan-button"),
+  watchStatus: document.getElementById("watch-status"),
   upcomingModal: document.getElementById("upcoming-modal"),
   closeUpcomingScrim: document.getElementById("close-upcoming-scrim"),
   closeUpcomingButton: document.getElementById("close-upcoming-button"),
@@ -506,6 +545,7 @@ const elements = {
   editAssessmentStatus: document.getElementById("edit-assessment-status"),
   settingsNameInput: document.getElementById("settings-name"),
   settingsEmailInput: document.getElementById("settings-email"),
+  settingsGradeSelect: document.getElementById("settings-grade"),
   settingsCurrentPasswordInput: document.getElementById("settings-current-password"),
   settingsNewPasswordInput: document.getElementById("settings-new-password"),
   settingsConfirmPasswordInput: document.getElementById("settings-confirm-password"),
@@ -524,6 +564,15 @@ const elements = {
 
 function normaliseAccountKey(value) {
   return String(value || "").trim().toLowerCase();
+}
+
+function normaliseGrade(value) {
+  const grade = String(value || defaultGrade).trim();
+  return ["7", "8", "9", "10", "11", "12"].includes(grade) ? grade : defaultGrade;
+}
+
+function formatGradeLabel(grade) {
+  return grade === "12" ? "HSC / Year 12" : `Year ${normaliseGrade(grade)}`;
 }
 
 function buildAssessmentTemplateKey(assessment) {
@@ -855,7 +904,12 @@ function loadAccounts() {
 
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed)
+      ? parsed.map((account) => ({
+          ...account,
+          grade: normaliseGrade(account?.grade)
+        }))
+      : [];
   } catch (error) {
     console.error("Accounts could not be restored.", error);
     return [];
@@ -881,8 +935,9 @@ function findAccountByEmail(email) {
 function syncSignInMode() {
   const isCreateMode = state.authMode === "create";
   elements.signInEyebrow.textContent = isCreateMode ? "Student account" : "Student sign in";
-  elements.signInTitle.textContent = isCreateMode ? "Create your account" : "Sign in to Year 7";
+  elements.signInTitle.textContent = isCreateMode ? "Create your account" : "Sign in to PaperPanda";
   elements.studentNameWrap.classList.toggle("hidden", !isCreateMode);
+  elements.studentGradeWrap.classList.toggle("hidden", !isCreateMode);
   elements.studentPasswordConfirmWrap.classList.toggle("hidden", !isCreateMode);
   elements.openDashboardButton.textContent = isCreateMode ? "Create account" : "Sign in";
   elements.signInModeCreateButton.classList.toggle("signin-mode-button--active", isCreateMode);
@@ -900,6 +955,7 @@ function hydrateSettingsView() {
 
   elements.settingsNameInput.value = account.name || "";
   elements.settingsEmailInput.value = account.email || "";
+  elements.settingsGradeSelect.value = normaliseGrade(account.grade);
   elements.settingsCurrentPasswordInput.value = "";
   elements.settingsNewPasswordInput.value = "";
   elements.settingsConfirmPasswordInput.value = "";
@@ -1137,7 +1193,8 @@ function persistSettings() {
       termStarts: state.termStarts,
       termEnds: state.termEnds,
       homeBackground: state.settings.homeBackground,
-      subjectsBackground: state.settings.subjectsBackground
+      subjectsBackground: state.settings.subjectsBackground,
+      headingColor: state.settings.headingColor
     })
   );
 }
@@ -1202,6 +1259,8 @@ function restoreSubjectsForAccount(account) {
   state.watchExpanded = false;
   state.documentsExpanded = false;
 
+  syncAutoWatchForAllSubjects();
+  persistSubjects();
   hydratePreviewImages();
 }
 
@@ -1219,6 +1278,7 @@ function restoreSessionUser() {
 
   state.currentUserEmail = account.email;
   state.studentName = account.name;
+  state.studentGrade = normaliseGrade(account.grade);
   restoreSubjectsForAccount(account);
   openDashboard("home");
 }
@@ -1243,7 +1303,8 @@ function restoreSettings() {
     state.settings = {
       ...state.settings,
       homeBackground: parsed.homeBackground || "",
-      subjectsBackground: parsed.subjectsBackground || ""
+      subjectsBackground: parsed.subjectsBackground || "",
+      headingColor: parsed.headingColor || "#111111"
     };
   } catch (error) {
     console.error("Failed to restore settings.", error);
@@ -1252,6 +1313,7 @@ function restoreSettings() {
   if (window.localStorage.getItem(uiVersionStorageKey) !== currentUiVersion) {
     state.settings.homeBackground = "";
     state.settings.subjectsBackground = "";
+    state.settings.headingColor = "#111111";
     persistSettings();
     window.localStorage.setItem(uiVersionStorageKey, currentUiVersion);
   }
@@ -1266,6 +1328,10 @@ function applyBackgrounds() {
     : "";
   elements.homeView.style.backgroundColor = "#ffffff";
   elements.subjectsView.style.backgroundColor = "#ffffff";
+  document.documentElement.style.setProperty("--custom-heading-color", state.settings.headingColor || "#111111");
+  if (elements.headingColourInput) {
+    elements.headingColourInput.value = state.settings.headingColor || "#111111";
+  }
 }
 
 function renderAiConnectionState() {
@@ -1282,6 +1348,7 @@ function openDashboard(nextView = "home") {
   hydrateSettingsView();
   state.currentView = nextView;
   render();
+  void loadRevisionCatalogue();
 }
 
 function showLanding() {
@@ -1307,13 +1374,94 @@ function showLanding() {
   resetUploadStatus();
 }
 
+function clampProgressRatio(value) {
+  return Math.max(0, Math.min(1, value || 0));
+}
+
+function getTextCompletionRatio(value, targetLength = 400) {
+  const textLength = String(value || "").trim().length;
+  return clampProgressRatio(textLength / targetLength);
+}
+
+function setProgressBar(element, ratio) {
+  if (!element) {
+    return;
+  }
+  element.style.width = `${Math.round(clampProgressRatio(ratio) * 100)}%`;
+}
+
+function getAllHomeworkBundles() {
+  return state.subjects.flatMap((subject) =>
+    getHomeworkBundles(subject).map((bundle) => ({ subject, bundle }))
+  );
+}
+
+function getUnreadDocumentMetrics() {
+  const allDocuments = state.subjects.flatMap((subject) => subject.documents || []);
+  const unreadDocuments = allDocuments.filter((documentRecord) => !documentRecord.reviewed);
+  return {
+    total: allDocuments.length,
+    unread: unreadDocuments.length,
+    progress: allDocuments.length ? (allDocuments.length - unreadDocuments.length) / allDocuments.length : 0
+  };
+}
+
+function getHomeworkMetrics() {
+  const bundles = getAllHomeworkBundles();
+  const incompleteBundles = bundles.filter(({ bundle }) => getTextCompletionRatio(bundle.workNotes, 350) < 1);
+  const averageProgress = bundles.length
+    ? bundles.reduce((total, { bundle }) => total + getTextCompletionRatio(bundle.workNotes, 350), 0) / bundles.length
+    : 0;
+
+  return {
+    total: bundles.length,
+    remaining: incompleteBundles.length,
+    progress: averageProgress
+  };
+}
+
+function getAssessmentProgressMetrics() {
+  const activeAssessments = getAssessmentEntries().filter(({ assessment }) => !assessment.completed);
+  const averageProgress = activeAssessments.length
+    ? activeAssessments.reduce((total, { assessment }) => total + getTextCompletionRatio(assessment.workNotes, 600), 0) /
+      activeAssessments.length
+    : 0;
+
+  return {
+    active: activeAssessments.length,
+    upcoming: getUpcomingAssessmentEntries().length,
+    progress: averageProgress
+  };
+}
+
 function renderOverview() {
+  const unreadDocumentMetrics = getUnreadDocumentMetrics();
+  const homeworkMetrics = getHomeworkMetrics();
+  const assessmentMetrics = getAssessmentProgressMetrics();
   const upcomingEntries = getUpcomingAssessmentEntries();
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const nextEntry =
     getAssessmentEntries().find((entry) => entry.dueDateObject && entry.dueDateObject >= today) ||
     getAssessmentEntries().find((entry) => entry.dueDateObject);
+
+  elements.documentsToReadCount.textContent = String(unreadDocumentMetrics.unread);
+  elements.documentsToReadSummary.textContent = unreadDocumentMetrics.total
+    ? `${unreadDocumentMetrics.total - unreadDocumentMetrics.unread} of ${unreadDocumentMetrics.total} documents have been marked read or listened to.`
+    : "No documents have been uploaded yet.";
+  setProgressBar(elements.documentsToReadProgress, unreadDocumentMetrics.progress);
+
+  elements.homeworkToCompleteCount.textContent = String(homeworkMetrics.remaining);
+  elements.homeworkToCompleteSummary.textContent = homeworkMetrics.total
+    ? `${homeworkMetrics.total - homeworkMetrics.remaining} of ${homeworkMetrics.total} homework items have enough writing started.`
+    : "No homework items are waiting right now.";
+  setProgressBar(elements.homeworkToCompleteProgress, homeworkMetrics.progress);
+
+  elements.assessmentsUpcomingCount.textContent = String(assessmentMetrics.upcoming);
+  elements.assessmentsUpcomingSummary.textContent = assessmentMetrics.active
+    ? `${assessmentMetrics.active} active assessments are being tracked across the account.`
+    : "No active assessments are being tracked right now.";
+  setProgressBar(elements.assessmentsUpcomingProgress, assessmentMetrics.progress);
 
   elements.upcomingAssessmentCount.textContent = `${upcomingEntries.length} due in the next fortnight`;
   elements.upcomingAssessmentSummary.textContent = upcomingEntries.length
@@ -1352,6 +1500,25 @@ function normaliseSpeechText(value) {
     .replace(/\n/g, ", ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+async function requestApiGet(endpoint) {
+  const response = await fetch(`${API_BASE_URL}${endpoint}`);
+  if (!response.ok) {
+    let message = "The request failed.";
+    try {
+      const errorPayload = await response.json();
+      message = errorPayload?.error || message;
+    } catch (error) {
+      const fallbackText = await response.text();
+      if (fallbackText) {
+        message = fallbackText;
+      }
+    }
+    throw new Error(message);
+  }
+
+  return response.json();
 }
 
 async function requestApi(endpoint, payload, expectBlob = false) {
@@ -1536,6 +1703,247 @@ function renderPendingUpload() {
   `;
 }
 
+function getRevisionSubjectEntry() {
+  return state.revisionCatalogue.find((entry) => entry.subjectId === state.revisionSelectedSubjectId) || null;
+}
+
+function getDocumentsForRevisionEntry(entry) {
+  if (!entry) {
+    return [];
+  }
+
+  const matchingSubject =
+    state.subjects.find((subject) => subject.id === entry.subjectId) ||
+    state.subjects.find((subject) => subject.name.toLowerCase() === String(entry.subjectName || "").toLowerCase());
+
+  return matchingSubject ? getSortedDocuments(matchingSubject) : [];
+}
+
+function syncRevisionSelection() {
+  if (!state.revisionCatalogue.length) {
+    state.revisionSelectedSubjectId = "";
+    state.revisionSelectedTopic = "";
+    state.revisionSelectedNoteIds = [];
+    return;
+  }
+
+  if (!state.revisionCatalogue.some((entry) => entry.subjectId === state.revisionSelectedSubjectId)) {
+    state.revisionSelectedSubjectId = state.revisionCatalogue[0].subjectId;
+  }
+
+  const selectedEntry = getRevisionSubjectEntry();
+  const topics = Array.isArray(selectedEntry?.topics) ? selectedEntry.topics : [];
+  if (!topics.includes(state.revisionSelectedTopic)) {
+    state.revisionSelectedTopic = topics[0] || "";
+  }
+  if (!selectedEntry?.allowsTextInput) {
+    state.revisionTextTitle = "";
+  }
+
+  const availableNoteIds = new Set(getDocumentsForRevisionEntry(selectedEntry).map((documentRecord) => documentRecord.id));
+  state.revisionSelectedNoteIds = state.revisionSelectedNoteIds.filter((documentId) => availableNoteIds.has(documentId));
+}
+
+async function loadRevisionCatalogue(force = false) {
+  const grade = normaliseGrade(state.studentGrade);
+  if (!grade) {
+    return;
+  }
+
+  if (!force && state.revisionCatalogueLoadedGrade === grade && state.revisionCatalogue.length) {
+    renderRevisionPanel();
+    return;
+  }
+
+  elements.revisionStatus.textContent = "Loading revision resources...";
+
+  try {
+    const payload = await requestApiGet(`/api/revision/catalogue?grade=${encodeURIComponent(grade)}`);
+    state.revisionCatalogue = Array.isArray(payload?.entries) ? payload.entries : [];
+    state.revisionCatalogueLoadedGrade = grade;
+    state.generatedRevisionTest = null;
+    syncRevisionSelection();
+    renderRevisionPanel();
+    elements.revisionStatus.textContent = state.revisionCatalogue.length
+      ? ""
+      : "No revision subjects are available for this grade yet.";
+  } catch (error) {
+    state.revisionCatalogue = [];
+    state.revisionCatalogueLoadedGrade = "";
+    renderRevisionPanel();
+    elements.revisionStatus.textContent =
+      error instanceof Error ? `Revision resources failed to load: ${error.message}` : "Revision resources failed to load.";
+  }
+}
+
+function renderRevisionGeneratedTest() {
+  const test = state.generatedRevisionTest;
+  if (!test) {
+    elements.revisionGeneratedTest.textContent = "Create a test to see the generated sections and questions here.";
+    return;
+  }
+
+  const sections = Array.isArray(test.sections) ? test.sections : [];
+  elements.revisionGeneratedTest.innerHTML = `
+    <div class="revision-test-header">
+      <p class="eyebrow">Generated test</p>
+      <h4>${escapeHtml(test.title || `${test.subjectName || "Revision"} test`)}</h4>
+      <p class="revision-summary">${escapeHtml(test.instructions || "")}</p>
+      <span class="revision-test-meta">${escapeHtml(`${test.grade || ""} ${test.subjectName || ""} · ${test.estimatedMinutes || 0} mins`)}</span>
+    </div>
+    <div class="revision-test-section-list">
+      ${sections
+        .map(
+          (section) => `
+            <section class="revision-test-section">
+              <p class="eyebrow">${escapeHtml(section.sectionType || "section")}</p>
+              <h4>${escapeHtml(section.title || "Section")}</h4>
+              ${section.stimulusTitle ? `<p><strong>${escapeHtml(section.stimulusTitle)}</strong></p>` : ""}
+              ${section.stimulusText ? `<p class="revision-summary">${escapeHtml(section.stimulusText)}</p>` : ""}
+              <div class="revision-test-question-list">
+                ${(Array.isArray(section.questions) ? section.questions : [])
+                  .map(
+                    (question) => `
+                      <article class="revision-test-question">
+                        <p><strong>Q${escapeHtml(question.number || "")}.</strong> ${escapeHtml(question.prompt || "")}</p>
+                        ${
+                          Array.isArray(question.options) && question.options.length
+                            ? `<ol class="revision-test-question-options">${question.options
+                                .map((option) => `<li>${escapeHtml(option)}</li>`)
+                                .join("")}</ol>`
+                            : ""
+                        }
+                        <span class="revision-test-question-type">${escapeHtml(
+                          `${question.type || "question"} · ${question.marks || 0} marks · ${question.skill || ""}`
+                        )}</span>
+                        ${question.answerGuide ? `<p class="revision-summary">Answer guide: ${escapeHtml(question.answerGuide)}</p>` : ""}
+                      </article>
+                    `
+                  )
+                  .join("")}
+              </div>
+            </section>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderRevisionPanel() {
+  syncRevisionSelection();
+
+  elements.revisionGradeCopy.textContent = `PaperPanda is using ${formatGradeLabel(
+    state.studentGrade
+  )} curriculum guidance and practice resources to build this revision test.`;
+
+  elements.revisionSubjectSelect.innerHTML = state.revisionCatalogue.length
+    ? state.revisionCatalogue
+        .map(
+          (entry) =>
+            `<option value="${entry.subjectId}"${entry.subjectId === state.revisionSelectedSubjectId ? " selected" : ""}>${escapeHtml(entry.subjectName)}</option>`
+        )
+        .join("")
+    : `<option value="">No subjects available</option>`;
+
+  const selectedEntry = getRevisionSubjectEntry();
+  const topics = Array.isArray(selectedEntry?.topics) ? selectedEntry.topics : [];
+  elements.revisionTopicWrap.classList.toggle("hidden", !topics.length);
+  elements.revisionTopicSelect.innerHTML = topics.length
+    ? topics
+        .map(
+          (topic) =>
+            `<option value="${escapeHtml(topic)}"${topic === state.revisionSelectedTopic ? " selected" : ""}>${escapeHtml(topic)}</option>`
+        )
+        .join("")
+    : `<option value="">No set topics</option>`;
+
+  elements.revisionTextWrap.classList.toggle("hidden", !selectedEntry?.allowsTextInput);
+  elements.revisionTextInput.value = state.revisionTextTitle;
+
+  const revisionDocuments = getDocumentsForRevisionEntry(selectedEntry);
+  elements.revisionNotesSelect.innerHTML = revisionDocuments.length
+    ? revisionDocuments
+        .map(
+          (documentRecord) =>
+            `<option value="${documentRecord.id}"${state.revisionSelectedNoteIds.includes(documentRecord.id) ? " selected" : ""}>${escapeHtml(documentRecord.title)}</option>`
+        )
+        .join("")
+    : `<option value="">No notes uploaded for this subject yet</option>`;
+  elements.revisionNotesSelect.disabled = !revisionDocuments.length;
+
+  if (!selectedEntry) {
+    elements.revisionSummary.textContent = "Select a subject to load the curriculum overview, tested skills and practice resources.";
+    elements.revisionSkills.innerHTML = "";
+    elements.revisionResources.innerHTML = "";
+    renderRevisionGeneratedTest();
+    return;
+  }
+
+  elements.revisionSummary.innerHTML = `
+    <p><strong>${escapeHtml(selectedEntry.subjectName)}</strong></p>
+    <p>${escapeHtml(selectedEntry.curriculumOverview || "")}</p>
+  `;
+  elements.revisionSkills.innerHTML = (selectedEntry.skillsTested || [])
+    .map((skill) => `<span class="revision-skill-chip">${escapeHtml(skill)}</span>`)
+    .join("");
+  elements.revisionResources.innerHTML = `
+    <p class="eyebrow">Stored backend resources</p>
+    <div class="revision-resource-list">
+      ${(selectedEntry.resources || [])
+        .map(
+          (resource) => `
+            <article class="revision-resource-card">
+              <p><a href="${escapeHtml(resource.url)}" target="_blank" rel="noreferrer">${escapeHtml(resource.label)}</a></p>
+              <p class="revision-summary">${escapeHtml(resource.note || "")}</p>
+              <span class="revision-resource-type">${escapeHtml(resource.type || "resource")}</span>
+            </article>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+  renderRevisionGeneratedTest();
+}
+
+async function handleCreateRevisionTest() {
+  const selectedEntry = getRevisionSubjectEntry();
+  if (!selectedEntry) {
+    elements.revisionStatus.textContent = "Select a subject first.";
+    return;
+  }
+
+  state.revisionSelectedNoteIds = [...elements.revisionNotesSelect.selectedOptions].map((option) => option.value).filter(Boolean);
+  state.revisionTextTitle = elements.revisionTextInput.value.trim();
+  const selectedNotes = getDocumentsForRevisionEntry(selectedEntry)
+    .filter((documentRecord) => state.revisionSelectedNoteIds.includes(documentRecord.id))
+    .map((documentRecord) => ({
+      title: documentRecord.title,
+      content: `${documentRecord.content || ""}\n\n${documentRecord.workNotes || ""}`.trim()
+    }));
+
+  elements.createRevisionTestButton.disabled = true;
+  elements.revisionStatus.textContent = "Building revision test...";
+
+  try {
+    const payload = await requestApi("/api/revision/generate-test", {
+      grade: normaliseGrade(state.studentGrade),
+      subjectId: selectedEntry.subjectId,
+      topic: state.revisionSelectedTopic,
+      textTitle: state.revisionTextTitle,
+      notes: selectedNotes
+    });
+    state.generatedRevisionTest = payload?.test || null;
+    renderRevisionGeneratedTest();
+    elements.revisionStatus.textContent = "Revision test created.";
+  } catch (error) {
+    elements.revisionStatus.textContent =
+      error instanceof Error ? `Revision test failed: ${error.message}` : "Revision test failed.";
+  } finally {
+    elements.createRevisionTestButton.disabled = false;
+  }
+}
+
 function renderUploadAssessmentTaskOptions() {
   const subject = getUploadSubject();
   const assessments = Array.isArray(subject?.assessments) ? subject.assessments : [];
@@ -1574,6 +1982,144 @@ function getDocumentPageNumber(documentRecord) {
 
 function getDocumentGroupId(documentRecord) {
   return documentRecord.uploadGroupId || documentRecord.id;
+}
+
+function getBaseDocumentTitle(documentRecord) {
+  return String(documentRecord?.title || "").replace(/\s*-\s*Page\s+\d+$/i, "").trim();
+}
+
+function getSortedGroupDocuments(documents) {
+  return [...documents].sort((left, right) => {
+    const leftPage = getDocumentPageNumber(left);
+    const rightPage = getDocumentPageNumber(right);
+    if (leftPage !== null && rightPage !== null && leftPage !== rightPage) {
+      return leftPage - rightPage;
+    }
+    return left.title.localeCompare(right.title, undefined, { numeric: true });
+  });
+}
+
+function buildDocumentBundleFromDocuments(documents) {
+  const sortedDocuments = getSortedGroupDocuments(documents);
+  const firstDocument = sortedDocuments[0];
+  if (!firstDocument) {
+    return null;
+  }
+
+  return {
+    id: getDocumentGroupId(firstDocument),
+    title: getBaseDocumentTitle(firstDocument) || firstDocument.title,
+    type: firstDocument.type,
+    added: firstDocument.added,
+    addedAt: firstDocument.addedAt,
+    previewImageUrl: firstDocument.previewImageUrl || null,
+    originalFile: firstDocument.originalFile || null,
+    flags: { ...(firstDocument.flags || {}) },
+    documents: sortedDocuments,
+    content: sortedDocuments
+      .map((documentRecord) => String(documentRecord.content || "").trim())
+      .filter(Boolean)
+      .join("\n\n"),
+    workNotes: sortedDocuments.find((documentRecord) => documentRecord.workNotes)?.workNotes || "",
+    reviewed: sortedDocuments.every((documentRecord) => documentRecord.reviewed)
+  };
+}
+
+function getDocumentBundlesByFilter(subject, predicate) {
+  return getDocumentGroupsFromDocuments(subject.documents.filter(predicate))
+    .map((group) => buildDocumentBundleFromDocuments(group.documents))
+    .filter(Boolean)
+    .sort((left, right) => getDocumentSortValue(right) - getDocumentSortValue(left));
+}
+
+function getHomeworkBundles(subject) {
+  return getDocumentBundlesByFilter(subject, (documentRecord) => documentRecord.flags?.homework);
+}
+
+function getLinkedDocumentBundles(subject, linkedDocumentIds) {
+  const linkedIdSet = new Set(linkedDocumentIds || []);
+  return getDocumentBundlesByFilter(subject, (documentRecord) => linkedIdSet.has(documentRecord.id));
+}
+
+function findHomeworkBundle(subject, bundleId) {
+  return getHomeworkBundles(subject).find((bundle) => bundle.id === bundleId) || null;
+}
+
+function setDocumentReviewedState(subject, documentIds, reviewed) {
+  const idSet = new Set(documentIds);
+  subject.documents.forEach((documentRecord) => {
+    if (!idSet.has(documentRecord.id)) {
+      return;
+    }
+    documentRecord.reviewed = reviewed;
+    documentRecord.reviewMode = reviewed ? "manual" : "";
+  });
+}
+
+function getYoutubeReferencesFromText(text, fallbackTitle) {
+  const rawText = String(text || "");
+  const urlMatches = [...rawText.matchAll(/https?:\/\/(?:www\.)?(?:youtube\.com\/[^\s<>"']+|youtu\.be\/[^\s<>"']+)/gi)];
+  if (!urlMatches.length) {
+    return [];
+  }
+
+  return urlMatches.map((match, index) => {
+    const url = match[0].replace(/[),.;]+$/, "");
+    const lineStart = rawText.lastIndexOf("\n", match.index) + 1;
+    const nextBreak = rawText.indexOf("\n", match.index);
+    const lineEnd = nextBreak === -1 ? rawText.length : nextBreak;
+    const sourceLine = rawText.slice(lineStart, lineEnd).replace(url, "").trim();
+    const title = sourceLine || `${fallbackTitle} · Video ${index + 1}`;
+    return { url, title };
+  });
+}
+
+function syncAutoWatchForSubject(subject) {
+  const manualWatchItems = Array.isArray(subject.watch)
+    ? subject.watch.filter((item) => item.source !== "auto-document")
+    : [];
+  const manualUrls = new Set(manualWatchItems.map((item) => String(item.url || "").trim().toLowerCase()));
+  const existingAutoByUrl = new Map(
+    (Array.isArray(subject.watch) ? subject.watch : [])
+      .filter((item) => item.source === "auto-document")
+      .map((item) => [String(item.url || "").trim().toLowerCase(), item])
+  );
+
+  const autoWatchItems = [];
+  const seenAutoUrls = new Set();
+  subject.documents.forEach((documentRecord) => {
+    const sourceTitle = getBaseDocumentTitle(documentRecord) || documentRecord.title;
+    const references = getYoutubeReferencesFromText(documentRecord.content, sourceTitle);
+    references.forEach((reference) => {
+      const normalisedUrl = reference.url.toLowerCase();
+      if (!normalisedUrl || manualUrls.has(normalisedUrl) || seenAutoUrls.has(normalisedUrl)) {
+        return;
+      }
+      const existingAutoItem = existingAutoByUrl.get(normalisedUrl);
+      autoWatchItems.push({
+        id: existingAutoItem?.id || createId(),
+        title: existingAutoItem?.title || reference.title,
+        url: reference.url,
+        addedAt: existingAutoItem?.addedAt || documentRecord.addedAt || new Date().toISOString(),
+        source: "auto-document",
+        sourceDocumentId: documentRecord.id,
+        sourceBundleId: getDocumentGroupId(documentRecord),
+        sourceDocumentTitle: sourceTitle,
+        sourceSubjectId: subject.id
+      });
+      seenAutoUrls.add(normalisedUrl);
+    });
+  });
+
+  subject.watch = [...autoWatchItems, ...manualWatchItems].sort(
+    (left, right) => new Date(right.addedAt || 0).getTime() - new Date(left.addedAt || 0).getTime()
+  );
+}
+
+function syncAutoWatchForAllSubjects() {
+  state.subjects.forEach((subject) => {
+    syncAutoWatchForSubject(subject);
+  });
 }
 
 function getSortedDocuments(subject) {
@@ -1899,6 +2445,7 @@ function renderWatchList() {
     return;
   }
 
+  elements.watchStatus.textContent = "";
   const watchItems = Array.isArray(subject.watch) ? subject.watch : [];
   if (!watchItems.length) {
     elements.watchList.innerHTML = `<div class="empty-state">No WATCH items for this subject yet.</div>`;
@@ -1912,9 +2459,16 @@ function renderWatchList() {
     .map(
       (item) => `
         <article class="practice-item">
-          <span class="activity-tag">Watch</span>
+          <div class="activity-row">
+            <span class="activity-tag">${item.source === "auto-document" ? "Auto watch" : "Watch"}</span>
+          </div>
           <h4>${escapeHtml(item.title)}</h4>
           <p class="practice-copy">${escapeHtml(item.url)}</p>
+          ${
+            item.sourceDocumentTitle
+              ? `<p class="practice-copy practice-copy--source">Detected from ${escapeHtml(item.sourceDocumentTitle)}</p>`
+              : ""
+          }
           <div class="table-actions">
             <button type="button" class="table-action" data-watch-action="open" data-watch-id="${item.id}">Open</button>
             <button type="button" class="table-action table-action--danger" data-watch-action="delete" data-watch-id="${item.id}">Delete</button>
@@ -1950,6 +2504,18 @@ function renderWatchList() {
   });
 }
 
+function handleWatchRescan() {
+  const subject = getSelectedSubject();
+  if (!subject) {
+    return;
+  }
+
+  syncAutoWatchForSubject(subject);
+  persistSubjects();
+  renderWatchList();
+  elements.watchStatus.textContent = "YouTube links rescanned for this subject.";
+}
+
 function renderReader() {
   const selectedDocument = getSelectedDocument();
   if (!selectedDocument) {
@@ -1977,9 +2543,16 @@ function renderReader() {
       </div>
     `
     : "";
+  const reviewToggleMarkup = `
+    <label class="document-review-toggle document-review-toggle--reader">
+      <input type="checkbox" id="reader-reviewed-toggle" ${selectedDocument.reviewed ? "checked" : ""} />
+      <span>${selectedDocument.reviewed ? "Read / listened" : "Mark as read / listened"}</span>
+    </label>
+  `;
 
   if (selectedDocument.flags?.homework) {
     elements.readerContent.innerHTML = `
+      ${reviewToggleMarkup}
       ${previewImageMarkup}
       <textarea class="reader-editor" id="reader-editor">${escapeHtml(readableContent)}</textarea>
       <div class="reader-actions">
@@ -1991,11 +2564,23 @@ function renderReader() {
     const editor = document.getElementById("reader-editor");
     const saveButton = document.getElementById("save-homework-button");
     const openOriginalButton = document.getElementById("open-original-button");
+    const reviewToggle = document.getElementById("reader-reviewed-toggle");
     saveButton.addEventListener("click", () => {
       selectedDocument.content = editor.value;
       selectedDocument.workNotes = editor.value;
+      syncAutoWatchForSubject(getSelectedSubject());
       persistSubjects();
       elements.uploadStatus.textContent = "Homework edits saved.";
+      renderDocuments();
+      renderReader();
+    });
+    reviewToggle?.addEventListener("change", () => {
+      const subject = getSelectedSubject();
+      if (!subject) {
+        return;
+      }
+      setDocumentReviewedState(subject, [selectedDocument.id], reviewToggle.checked);
+      persistSubjects();
       renderDocuments();
       renderReader();
     });
@@ -2009,10 +2594,21 @@ function renderReader() {
   }
 
   elements.readerContent.innerHTML = `
+    ${reviewToggleMarkup}
     ${previewImageMarkup}
     <div class="reader-content__text">${escapeHtml(readableContent).replaceAll("\n", "<br />")}</div>
     ${openOriginalMarkup}
   `;
+  document.getElementById("reader-reviewed-toggle")?.addEventListener("change", (event) => {
+    const subject = getSelectedSubject();
+    if (!subject) {
+      return;
+    }
+    setDocumentReviewedState(subject, [selectedDocument.id], event.target.checked);
+    persistSubjects();
+    renderDocuments();
+    renderReader();
+  });
   const openOriginalButton = document.getElementById("open-original-button");
   if (openOriginalButton && selectedDocument.originalFile?.objectUrl) {
     openOriginalButton.addEventListener("click", () => {
@@ -2134,6 +2730,7 @@ function deleteDocuments(documentIds) {
   if (uniqueDocumentIds.includes(state.askDocumentId)) {
     state.askDocumentId = getSortedDocuments(subject)[0]?.id || null;
   }
+  syncAutoWatchForSubject(subject);
   persistSubjects();
   deletePreviewRecords(uniqueDocumentIds).catch((error) => {
     console.error("Preview images could not be removed.", error);
@@ -2424,9 +3021,14 @@ function openDocumentPopup(documentRecord) {
     return;
   }
 
-  const previewMarkup = documentRecord.previewImageUrl
-    ? `<img src="${escapeHtml(documentRecord.previewImageUrl)}" alt="${escapeHtml(documentRecord.title)} preview" style="max-width:100%;height:auto;border:1px solid #d9d6d2;border-radius:18px;display:block;margin:0 0 20px;" />`
-    : "";
+  const groupedDocuments = Array.isArray(documentRecord.documents) ? documentRecord.documents : [documentRecord];
+  const previewMarkup = groupedDocuments
+    .map((documentItem) =>
+      documentItem.previewImageUrl
+        ? `<img src="${escapeHtml(documentItem.previewImageUrl)}" alt="${escapeHtml(documentItem.title)} preview" style="max-width:100%;height:auto;border:1px solid #d9d6d2;border-radius:18px;display:block;margin:0 0 20px;" />`
+        : ""
+    )
+    .join("");
   const contentMarkup = documentRecord.content
     ? `<div style="white-space:pre-wrap;line-height:1.6;color:#222;">${escapeHtml(documentRecord.content)}</div>`
     : `<p style="color:#666;line-height:1.6;">Preview text is not available for this file yet.</p>`;
@@ -2478,7 +3080,8 @@ function renderTaskView() {
     if (!assessment) {
       return;
     }
-    const linkedDocuments = subject.documents.filter((document) => assessment.linkedDocumentIds.includes(document.id));
+    const linkedDocumentBundles = getLinkedDocumentBundles(subject, assessment.linkedDocumentIds);
+    const linkedPageCount = assessment.linkedDocumentIds.length;
     elements.taskViewTitle.textContent = assessment.componentTask || assessment.title;
     elements.taskSourceTitle.textContent = assessment.componentTask || assessment.title;
     elements.taskSourceContent.innerHTML = `
@@ -2514,12 +3117,12 @@ function renderTaskView() {
           <p class="eyebrow task-relevant-notes__heading">Relevant Notes</p>
           <div class="task-relevant-notes__list">
             ${
-              linkedDocuments.length
-                ? linkedDocuments
+              linkedDocumentBundles.length
+                ? linkedDocumentBundles
                     .map(
-                      (document) => `
-                        <button type="button" class="ghost-button task-note-chip" data-task-document-id="${document.id}">
-                          ${escapeHtml(document.title)}
+                      (documentBundle) => `
+                        <button type="button" class="ghost-button task-note-chip" data-task-document-id="${documentBundle.id}">
+                          ${escapeHtml(documentBundle.title)}
                         </button>
                       `
                     )
@@ -2527,14 +3130,15 @@ function renderTaskView() {
                 : '<span class="document-empty">No supporting documents linked yet.</span>'
             }
           </div>
+          ${linkedDocumentBundles.length ? `<div class="task-assessment-card__summary">${linkedPageCount} page${linkedPageCount === 1 ? "" : "s"} linked across ${linkedDocumentBundles.length} document${linkedDocumentBundles.length === 1 ? "" : "s"}.</div>` : ""}
         </div>
       </article>
     `;
     elements.taskSourceContent.querySelectorAll("[data-task-document-id]").forEach((button) => {
       button.addEventListener("click", () => {
-        const documentRecord = linkedDocuments.find((document) => document.id === button.dataset.taskDocumentId);
-        if (documentRecord) {
-          openDocumentPopup(documentRecord);
+        const documentBundle = linkedDocumentBundles.find((document) => document.id === button.dataset.taskDocumentId);
+        if (documentBundle) {
+          openDocumentPopup(documentBundle);
         }
       });
     });
@@ -2543,17 +3147,23 @@ function renderTaskView() {
   }
 
   if (activeTask.kind === "homework") {
-    const homeworkDocument = subject.documents.find((item) => item.id === activeTask.id);
-    if (!homeworkDocument) {
+    const homeworkBundle = findHomeworkBundle(subject, activeTask.id);
+    if (!homeworkBundle) {
       return;
     }
-    elements.taskViewTitle.textContent = homeworkDocument.title;
-    elements.taskSourceTitle.textContent = homeworkDocument.title;
+    elements.taskViewTitle.textContent = homeworkBundle.title;
+    elements.taskSourceTitle.textContent = homeworkBundle.title;
     elements.taskSourceContent.innerHTML = `
-      ${homeworkDocument.previewImageUrl ? `<img class="reader-preview-image" src="${escapeHtml(homeworkDocument.previewImageUrl)}" alt="${escapeHtml(homeworkDocument.title)} preview" />` : ""}
-      <div class="reader-content__text">${escapeHtml(homeworkDocument.content || "").replaceAll("\n", "<br />")}</div>
+      ${homeworkBundle.documents
+        .map((documentItem) =>
+          documentItem.previewImageUrl
+            ? `<img class="reader-preview-image" src="${escapeHtml(documentItem.previewImageUrl)}" alt="${escapeHtml(documentItem.title)} preview" />`
+            : ""
+        )
+        .join("")}
+      <div class="reader-content__text">${escapeHtml(homeworkBundle.content || "").replaceAll("\n", "<br />")}</div>
     `;
-    elements.taskWorkEditor.value = homeworkDocument.workNotes || "";
+    elements.taskWorkEditor.value = homeworkBundle.workNotes || "";
   }
 }
 
@@ -2573,11 +3183,13 @@ function saveTaskWorkspace() {
   }
 
   if (activeTask.kind === "homework") {
-    const homeworkDocument = subject.documents.find((item) => item.id === activeTask.id);
-    if (!homeworkDocument) {
+    const homeworkBundle = findHomeworkBundle(subject, activeTask.id);
+    if (!homeworkBundle) {
       return;
     }
-    homeworkDocument.workNotes = elements.taskWorkEditor.value;
+    homeworkBundle.documents.forEach((documentItem) => {
+      documentItem.workNotes = elements.taskWorkEditor.value;
+    });
   }
 
   persistSubjects();
@@ -2597,8 +3209,8 @@ function saveTaskWorkspaceToFiles() {
     title = assessment?.componentTask || assessment?.title || title;
   }
   if (activeTask.kind === "homework") {
-    const homeworkDocument = subject.documents.find((item) => item.id === activeTask.id);
-    title = homeworkDocument?.title || title;
+    const homeworkBundle = findHomeworkBundle(subject, activeTask.id);
+    title = homeworkBundle?.title || title;
   }
 
   const exportContent = elements.taskWorkEditor.value || "";
@@ -2883,21 +3495,21 @@ function renderPractice() {
     return;
   }
 
-  const homeworkDocuments = subject.documents.filter((document) => document.flags?.homework);
-  if (!homeworkDocuments.length) {
+  const homeworkBundles = getHomeworkBundles(subject);
+  if (!homeworkBundles.length) {
     elements.practiceList.innerHTML = `<div class="empty-state">No homework items for this subject yet.</div>`;
     return;
   }
 
-  elements.practiceList.innerHTML = homeworkDocuments
+  elements.practiceList.innerHTML = homeworkBundles
     .map(
-      (document) => `
+      (documentBundle) => `
         <article class="practice-item">
           <div class="activity-row">
             <span class="activity-tag">Homework</span>
           </div>
-          <h4><button type="button" class="assessment-link-button" data-open-homework="${document.id}">${escapeHtml(document.title)}</button></h4>
-          <p class="practice-copy">Open this homework item in the reader to edit notes or answers.</p>
+          <h4><button type="button" class="assessment-link-button" data-open-homework="${documentBundle.id}">${escapeHtml(documentBundle.title)}</button></h4>
+          <p class="practice-copy">Open this homework item to work from the full document while keeping page-by-page reading in Documents.</p>
         </article>
       `
     )
@@ -3738,6 +4350,7 @@ async function processFiles(fileList) {
     processedUploads.forEach(({ records }) => {
       subject.documents.unshift(...records);
     });
+    syncAutoWatchForSubject(subject);
 
     if (flags.assessment) {
       const selectedAssessment = getAssessmentUploadTarget(subject);
@@ -3896,6 +4509,36 @@ async function handleBackgroundUpload(event) {
   }
 }
 
+function handleRemoveBackground() {
+  if (!elements.backgroundHomeCheckbox.checked && !elements.backgroundSubjectsCheckbox.checked) {
+    window.alert("Select Home and/or Subjects before removing a background.");
+    return;
+  }
+
+  if (elements.backgroundHomeCheckbox.checked) {
+    state.settings.homeBackground = "";
+  }
+  if (elements.backgroundSubjectsCheckbox.checked) {
+    state.settings.subjectsBackground = "";
+  }
+
+  persistSettings();
+  applyBackgrounds();
+  renderCurrentView();
+}
+
+function handleHeadingColourChange(event) {
+  state.settings.headingColor = event.target.value || "#111111";
+  persistSettings();
+  applyBackgrounds();
+}
+
+function resetHeadingColour() {
+  state.settings.headingColor = "#111111";
+  persistSettings();
+  applyBackgrounds();
+}
+
 function handleSetTermDates() {
   const updatedStarts = { ...state.termStarts };
   const updatedEnds = { ...state.termEnds };
@@ -3959,6 +4602,7 @@ function saveAccountSettings() {
 
   const nextName = elements.settingsNameInput.value.trim();
   const nextEmail = elements.settingsEmailInput.value.trim().toLowerCase();
+  const nextGrade = normaliseGrade(elements.settingsGradeSelect.value);
   if (!nextName || !nextEmail) {
     elements.settingsStatus.textContent = "Enter both a student name and school email.";
     return;
@@ -3975,7 +4619,7 @@ function saveAccountSettings() {
 
   const updatedAccounts = accounts.map((account) =>
     account.email.toLowerCase() === currentAccount.email.toLowerCase()
-      ? { ...account, name: nextName, email: nextEmail }
+      ? { ...account, name: nextName, email: nextEmail, grade: nextGrade }
       : account
   );
   if (nextEmail !== currentAccount.email.toLowerCase()) {
@@ -3991,9 +4635,12 @@ function saveAccountSettings() {
   saveAccounts(updatedAccounts);
   state.studentName = nextName;
   state.currentUserEmail = nextEmail;
+  state.studentGrade = nextGrade;
   persistSession(nextEmail);
   elements.welcomeHeading.textContent = `Welcome back, ${state.studentName}`;
   elements.settingsStatus.textContent = "Account saved.";
+  state.generatedRevisionTest = null;
+  void loadRevisionCatalogue(true);
 }
 
 function savePasswordSettings() {
@@ -4039,6 +4686,7 @@ function render() {
   renderAiConnectionState();
   renderCurrentView();
   renderOverview();
+  renderRevisionPanel();
   renderSubjectList();
   renderSubjectHeader();
   renderPendingUpload();
@@ -4057,6 +4705,7 @@ function render() {
 
 function handleDashboardOpen() {
   const studentName = elements.studentNameInput.value.trim();
+  const studentGrade = normaliseGrade(elements.studentGradeSelect.value);
   const studentEmail = elements.studentEmailInput.value.trim().toLowerCase();
   const password = elements.studentPasswordInput.value;
   const confirmPassword = elements.studentPasswordConfirmInput.value;
@@ -4090,13 +4739,15 @@ function handleDashboardOpen() {
     accounts.push({
       name: studentName,
       email: studentEmail,
-      password
+      password,
+      grade: studentGrade
     });
     saveAccounts(accounts);
     state.studentName = studentName;
     state.currentUserEmail = studentEmail;
+    state.studentGrade = studentGrade;
     persistSession(studentEmail);
-    restoreSubjectsForAccount({ name: studentName, email: studentEmail });
+    restoreSubjectsForAccount({ name: studentName, email: studentEmail, grade: studentGrade });
     openDashboard("home");
     return;
   }
@@ -4109,6 +4760,7 @@ function handleDashboardOpen() {
 
   state.studentName = account.name;
   state.currentUserEmail = account.email;
+  state.studentGrade = normaliseGrade(account.grade);
   persistSession(account.email);
   restoreSubjectsForAccount(account);
   openDashboard("home");
@@ -4150,6 +4802,28 @@ elements.readerNextButton.addEventListener("click", () => {
   selectAdjacentDocument(1);
 });
 elements.openDashboardButton.addEventListener("click", handleDashboardOpen);
+elements.removeBackgroundButton.addEventListener("click", handleRemoveBackground);
+elements.headingColourInput.addEventListener("input", handleHeadingColourChange);
+elements.clearHeadingColourButton.addEventListener("click", resetHeadingColour);
+elements.revisionSubjectSelect.addEventListener("change", () => {
+  state.revisionSelectedSubjectId = elements.revisionSubjectSelect.value;
+  state.generatedRevisionTest = null;
+  renderRevisionPanel();
+});
+elements.revisionTopicSelect.addEventListener("change", () => {
+  state.revisionSelectedTopic = elements.revisionTopicSelect.value;
+  state.generatedRevisionTest = null;
+  renderRevisionPanel();
+});
+elements.revisionTextInput.addEventListener("input", () => {
+  state.revisionTextTitle = elements.revisionTextInput.value;
+});
+elements.revisionNotesSelect.addEventListener("change", () => {
+  state.revisionSelectedNoteIds = [...elements.revisionNotesSelect.selectedOptions]
+    .map((option) => option.value)
+    .filter(Boolean);
+});
+elements.createRevisionTestButton.addEventListener("click", handleCreateRevisionTest);
 elements.navHomeButton.addEventListener("click", () => {
   state.currentView = "home";
   render();
@@ -4236,6 +4910,7 @@ elements.watchToggleButton.addEventListener("click", () => {
   state.watchExpanded = !state.watchExpanded;
   renderWatchList();
 });
+elements.watchRescanButton.addEventListener("click", handleWatchRescan);
 elements.processUploadButton.addEventListener("click", handleProcessUpload);
 elements.clearUploadButton.addEventListener("click", () => {
   clearPendingUpload();
