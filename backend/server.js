@@ -539,8 +539,8 @@ app.post("/api/revision/submit-test", async (request, response) => {
           score,
           isCorrect,
           feedback: isCorrect
-            ? "Correct. You selected the strongest option."
-            : `Not correct. A stronger answer would choose: ${correctOption || "the best supported option"}.`,
+            ? `Correct. You selected the strongest option. Keep using the same clue-checking approach next time: ${question.answerGuide || "match the option to the strongest evidence in the question."}`
+            : `Not correct. The strongest answer is ${correctOption || "the best supported option"}. Use the correction guide below to see why that option is stronger and what clue or concept you should look for next time.`,
           answerGuide: question.answerGuide || "",
           studentAnswer,
           correctOption
@@ -571,7 +571,7 @@ app.post("/api/revision/submit-test", async (request, response) => {
               {
                 type: "input_text",
                 text:
-                  "You are marking Australian school revision responses. Return only JSON. Mark fairly and briefly. Reward what is correct, explain the main gap, and give one practical next step. Use the provided answer guide and marks only. Do not invent extra criteria."
+                  "You are marking Australian school revision responses. Return only JSON. Mark fairly and give fuller feedback that helps the student improve next time. Reward what is correct, explain the main gap clearly, describe what a stronger answer needed, and give one practical next step. Use 2 to 4 sentences for each response unless the answer is blank. Use the provided answer guide and marks only. Do not invent extra criteria."
               }
             ]
           },

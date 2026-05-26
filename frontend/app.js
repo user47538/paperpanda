@@ -16,6 +16,7 @@ const uiVersionStorageKey = "paperpanda-ui-version";
 const currentUiVersion = "2026-05-26-homework-whole-file";
 const previewDatabaseName = "paperpanda-assets";
 const previewStoreName = "document-previews";
+const settingsAssetStoreName = "settings-assets";
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://localhost:3001").replace(/\/$/, "");
 let pdfjsLibPromise = null;
 let currentAudioPlayback = null;
@@ -407,6 +408,10 @@ const state = {
   settings: {
     homeBackground: "",
     subjectsBackground: "",
+    homeBackgroundAssetId: "",
+    subjectsBackgroundAssetId: "",
+    homeBackgroundColor: "#ffffff",
+    subjectsBackgroundColor: "#ffffff",
     headingColor: "#111111"
   },
   subjects: createBaseSubjects()
@@ -454,6 +459,8 @@ const elements = {
   removeBackgroundButton: document.getElementById("remove-background-button"),
   backgroundHomeCheckbox: document.getElementById("background-home-checkbox"),
   backgroundSubjectsCheckbox: document.getElementById("background-subjects-checkbox"),
+  backgroundColourInput: document.getElementById("background-colour-input"),
+  clearBackgroundColourButton: document.getElementById("clear-background-colour-button"),
   headingColourInput: document.getElementById("heading-colour-input"),
   clearHeadingColourButton: document.getElementById("clear-heading-colour-button"),
   enterSubjectsButton: document.getElementById("enter-subjects-button"),
@@ -984,12 +991,15 @@ function openPreviewDatabase() {
 
   if (!previewDatabasePromise) {
     previewDatabasePromise = new Promise((resolve, reject) => {
-      const request = window.indexedDB.open(previewDatabaseName, 1);
+      const request = window.indexedDB.open(previewDatabaseName, 2);
       request.onerror = () => reject(request.error || new Error("Preview storage could not be opened."));
       request.onupgradeneeded = () => {
         const database = request.result;
         if (!database.objectStoreNames.contains(previewStoreName)) {
           database.createObjectStore(previewStoreName, { keyPath: "id" });
+        }
+        if (!database.objectStoreNames.contains(settingsAssetStoreName)) {
+          database.createObjectStore(settingsAssetStoreName, { keyPath: "id" });
         }
       };
       request.onsuccess = () => resolve(request.result);
@@ -1001,6 +1011,53 @@ function openPreviewDatabase() {
   }
 
   return previewDatabasePromise;
+}
+
+async function putSettingsAssetRecord(assetId, dataUrl) {
+  const database = await openPreviewDatabase();
+  if (!database || !assetId || !dataUrl) {
+    return;
+  }
+
+  await new Promise((resolve, reject) => {
+    const transaction = database.transaction(settingsAssetStoreName, "readwrite");
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error || new Error("Background asset could not be saved."));
+    transaction.objectStore(settingsAssetStoreName).put({ id: assetId, dataUrl });
+  });
+}
+
+async function getSettingsAssetRecord(assetId) {
+  const database = await openPreviewDatabase();
+  if (!database || !assetId) {
+    return null;
+  }
+
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(settingsAssetStoreName, "readonly");
+    const request = transaction.objectStore(settingsAssetStoreName).get(assetId);
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => reject(request.error || new Error("Background asset could not be loaded."));
+  });
+}
+
+async function deleteSettingsAssetRecords(assetIds) {
+  const database = await openPreviewDatabase();
+  if (!database || !assetIds.length) {
+    return;
+  }
+
+  await new Promise((resolve, reject) => {
+    const transaction = database.transaction(settingsAssetStoreName, "readwrite");
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error || new Error("Background assets could not be removed."));
+    const store = transaction.objectStore(settingsAssetStoreName);
+    assetIds.forEach((assetId) => {
+      if (assetId) {
+        store.delete(assetId);
+      }
+    });
+  });
 }
 
 async function putPreviewRecord(documentId, previewImageUrl) {
@@ -1210,8 +1267,10 @@ function persistSettings() {
     JSON.stringify({
       termStarts: state.termStarts,
       termEnds: state.termEnds,
-      homeBackground: state.settings.homeBackground,
-      subjectsBackground: state.settings.subjectsBackground,
+      homeBackgroundAssetId: state.settings.homeBackgroundAssetId,
+      subjectsBackgroundAssetId: state.settings.subjectsBackgroundAssetId,
+      homeBackgroundColor: state.settings.homeBackgroundColor,
+      subjectsBackgroundColor: state.settings.subjectsBackgroundColor,
       headingColor: state.settings.headingColor
     })
   );
@@ -1332,8 +1391,12 @@ function restoreSettings() {
     };
     state.settings = {
       ...state.settings,
-      homeBackground: parsed.homeBackground || "",
-      subjectsBackground: parsed.subjectsBackground || "",
+      homeBackground: String(parsed.homeBackground || ""),
+      subjectsBackground: String(parsed.subjectsBackground || ""),
+      homeBackgroundAssetId: String(parsed.homeBackgroundAssetId || (parsed.homeBackground ? "home-background" : "")),
+      subjectsBackgroundAssetId: String(parsed.subjectsBackgroundAssetId || (parsed.subjectsBackground ? "subjects-background" : "")),
+      homeBackgroundColor: parsed.homeBackgroundColor || "#ffffff",
+      subjectsBackgroundColor: parsed.subjectsBackgroundColor || "#ffffff",
       headingColor: parsed.headingColor || "#111111"
     };
   } catch (error) {
@@ -1345,6 +1408,63 @@ function restoreSettings() {
   }
 }
 
+async function migrateLegacyBackgroundAssets() {
+  const tasks = [];
+  if (state.settings.homeBackground && state.settings.homeBackground.startsWith("data:") && state.settings.homeBackgroundAssetId) {
+    tasks.push(putSettingsAssetRecord(state.settings.homeBackgroundAssetId, state.settings.homeBackground));
+  }
+  if (
+    state.settings.subjectsBackground &&
+    state.settings.subjectsBackground.startsWith("data:") &&
+    state.settings.subjectsBackgroundAssetId
+  ) {
+    tasks.push(putSettingsAssetRecord(state.settings.subjectsBackgroundAssetId, state.settings.subjectsBackground));
+  }
+
+  if (!tasks.length) {
+    return;
+  }
+
+  try {
+    await Promise.all(tasks);
+    persistSettings();
+  } catch (error) {
+    console.error("Legacy background assets could not be migrated.", error);
+  }
+}
+
+async function hydrateBackgroundAssets() {
+  let didHydrate = false;
+  if (!state.settings.homeBackground && state.settings.homeBackgroundAssetId) {
+    try {
+      const asset = await getSettingsAssetRecord(state.settings.homeBackgroundAssetId);
+      if (asset?.dataUrl) {
+        state.settings.homeBackground = asset.dataUrl;
+        didHydrate = true;
+      }
+    } catch (error) {
+      console.error("Home background asset could not be restored.", error);
+    }
+  }
+
+  if (!state.settings.subjectsBackground && state.settings.subjectsBackgroundAssetId) {
+    try {
+      const asset = await getSettingsAssetRecord(state.settings.subjectsBackgroundAssetId);
+      if (asset?.dataUrl) {
+        state.settings.subjectsBackground = asset.dataUrl;
+        didHydrate = true;
+      }
+    } catch (error) {
+      console.error("Subjects background asset could not be restored.", error);
+    }
+  }
+
+  if (didHydrate) {
+    applyBackgrounds();
+    renderCurrentView();
+  }
+}
+
 function applyBackgrounds() {
   elements.homeView.style.backgroundImage = state.settings.homeBackground
     ? `url("${state.settings.homeBackground}")`
@@ -1352,11 +1472,23 @@ function applyBackgrounds() {
   elements.subjectsView.style.backgroundImage = state.settings.subjectsBackground
     ? `url("${state.settings.subjectsBackground}")`
     : "";
-  elements.homeView.style.backgroundColor = "#ffffff";
-  elements.subjectsView.style.backgroundColor = "#ffffff";
+  elements.homeView.style.backgroundColor = state.settings.homeBackgroundColor || "#ffffff";
+  elements.subjectsView.style.backgroundColor = state.settings.subjectsBackgroundColor || "#ffffff";
+  elements.homeView.style.backgroundRepeat = state.settings.homeBackground ? "repeat" : "no-repeat";
+  elements.subjectsView.style.backgroundRepeat = state.settings.subjectsBackground ? "repeat" : "no-repeat";
+  elements.homeView.style.backgroundSize = state.settings.homeBackground ? "auto" : "";
+  elements.subjectsView.style.backgroundSize = state.settings.subjectsBackground ? "auto" : "";
+  elements.homeView.style.backgroundPosition = "top left";
+  elements.subjectsView.style.backgroundPosition = "top left";
   document.documentElement.style.setProperty("--custom-heading-color", state.settings.headingColor || "#111111");
   if (elements.headingColourInput) {
     elements.headingColourInput.value = state.settings.headingColor || "#111111";
+  }
+  if (elements.backgroundColourInput) {
+    const targetColor = elements.backgroundHomeCheckbox.checked
+      ? state.settings.homeBackgroundColor || "#ffffff"
+      : state.settings.subjectsBackgroundColor || "#ffffff";
+    elements.backgroundColourInput.value = targetColor;
   }
 }
 
@@ -4786,11 +4918,19 @@ async function handleBackgroundUpload(event) {
 
   try {
     const imageDataUrl = await readFileAsDataUrl(file);
+    const assetWrites = [];
     if (elements.backgroundHomeCheckbox.checked) {
       state.settings.homeBackground = imageDataUrl;
+      state.settings.homeBackgroundAssetId = "home-background";
+      assetWrites.push(putSettingsAssetRecord("home-background", imageDataUrl));
     }
     if (elements.backgroundSubjectsCheckbox.checked) {
       state.settings.subjectsBackground = imageDataUrl;
+      state.settings.subjectsBackgroundAssetId = "subjects-background";
+      assetWrites.push(putSettingsAssetRecord("subjects-background", imageDataUrl));
+    }
+    if (assetWrites.length) {
+      await Promise.all(assetWrites);
     }
     persistSettings();
     applyBackgrounds();
@@ -4808,16 +4948,60 @@ function handleRemoveBackground() {
     return;
   }
 
+  const assetIdsToDelete = [];
   if (elements.backgroundHomeCheckbox.checked) {
     state.settings.homeBackground = "";
+    assetIdsToDelete.push(state.settings.homeBackgroundAssetId);
+    state.settings.homeBackgroundAssetId = "";
   }
   if (elements.backgroundSubjectsCheckbox.checked) {
     state.settings.subjectsBackground = "";
+    assetIdsToDelete.push(state.settings.subjectsBackgroundAssetId);
+    state.settings.subjectsBackgroundAssetId = "";
   }
+
+  deleteSettingsAssetRecords(assetIdsToDelete.filter(Boolean)).catch((error) => {
+    console.error("Background assets could not be deleted.", error);
+  });
 
   persistSettings();
   applyBackgrounds();
   renderCurrentView();
+}
+
+function handleBackgroundColourChange(event) {
+  const nextColor = event.target.value || "#ffffff";
+  if (!elements.backgroundHomeCheckbox.checked && !elements.backgroundSubjectsCheckbox.checked) {
+    window.alert("Select Home and/or Subjects before changing the background colour.");
+    return;
+  }
+
+  if (elements.backgroundHomeCheckbox.checked) {
+    state.settings.homeBackgroundColor = nextColor;
+  }
+  if (elements.backgroundSubjectsCheckbox.checked) {
+    state.settings.subjectsBackgroundColor = nextColor;
+  }
+
+  persistSettings();
+  applyBackgrounds();
+}
+
+function resetBackgroundColour() {
+  if (!elements.backgroundHomeCheckbox.checked && !elements.backgroundSubjectsCheckbox.checked) {
+    window.alert("Select Home and/or Subjects before resetting the background colour.");
+    return;
+  }
+
+  if (elements.backgroundHomeCheckbox.checked) {
+    state.settings.homeBackgroundColor = "#ffffff";
+  }
+  if (elements.backgroundSubjectsCheckbox.checked) {
+    state.settings.subjectsBackgroundColor = "#ffffff";
+  }
+
+  persistSettings();
+  applyBackgrounds();
 }
 
 function handleHeadingColourChange(event) {
@@ -5104,6 +5288,10 @@ elements.readerNextButton.addEventListener("click", () => {
 });
 elements.openDashboardButton.addEventListener("click", handleDashboardOpen);
 elements.removeBackgroundButton.addEventListener("click", handleRemoveBackground);
+elements.backgroundColourInput.addEventListener("input", handleBackgroundColourChange);
+elements.clearBackgroundColourButton.addEventListener("click", resetBackgroundColour);
+elements.backgroundHomeCheckbox.addEventListener("change", applyBackgrounds);
+elements.backgroundSubjectsCheckbox.addEventListener("change", applyBackgrounds);
 elements.headingColourInput.addEventListener("input", handleHeadingColourChange);
 elements.clearHeadingColourButton.addEventListener("click", resetHeadingColour);
 elements.revisionSubjectSelect.addEventListener("change", () => {
@@ -5282,6 +5470,8 @@ document.addEventListener("keydown", (event) => {
 syncUploadOptions();
 syncSignInMode();
 restoreSettings();
+void migrateLegacyBackgroundAssets();
+void hydrateBackgroundAssets();
 restoreSubjects();
 restoreSessionUser();
 render();

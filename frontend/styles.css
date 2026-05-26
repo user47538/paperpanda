@@ -23,6 +23,7 @@
   --box-4: #e8f8ef;
   --box-5: #ffe8ef;
   --custom-heading-color: #111111;
+  --brand-primary: rgb(166, 108, 213);
 }
 
 * {
@@ -84,8 +85,8 @@ button {
 
 .home-card {
   border: 1px solid rgba(17, 17, 17, 0.14);
-  border-radius: 28px;
-  padding: 28px;
+  border-radius: 22px;
+  padding: 22px;
   background: #ffffff;
 }
 
@@ -131,9 +132,9 @@ button {
   min-height: calc(100vh - 72px);
   display: grid;
   grid-template-columns: 1.2fr 0.88fr;
-  gap: 24px;
+  gap: 36px;
   align-items: center;
-  padding: 40px;
+  padding: 56px;
 }
 
 .landing-copy,
@@ -159,8 +160,8 @@ button {
 }
 
 .brand-lockup__logo {
-  width: 68px;
-  height: 68px;
+  width: 60px;
+  height: 60px;
   object-fit: contain;
 }
 
@@ -195,8 +196,8 @@ button {
 }
 
 .landing-copy {
-  border-radius: 28px;
-  padding: 34px;
+  border-radius: 22px;
+  padding: 26px;
   overflow: hidden;
   background: #ffffff;
 }
@@ -206,8 +207,8 @@ button {
 }
 
 .signin-card {
-  border-radius: 28px;
-  padding: 34px;
+  border-radius: 22px;
+  padding: 26px;
   display: grid;
   gap: 18px;
   background: #ffffff;
@@ -220,9 +221,9 @@ button {
 }
 
 .signin-mode-button--active {
-  background: #111111;
+  background: var(--brand-primary);
   color: #ffffff;
-  border-color: #111111;
+  border-color: var(--brand-primary);
 }
 
 .signin-card__eyebrow,
@@ -255,6 +256,20 @@ button {
   text-transform: uppercase;
   letter-spacing: -0.05em;
   color: var(--custom-heading-color);
+}
+
+.landing-panel .brand-lockup__name,
+.landing-panel .landing-copy h1,
+.landing-panel .signin-card h2,
+.landing-panel .signin-card__eyebrow {
+  color: var(--brand-primary);
+}
+
+.landing-panel .brand-lockup__name {
+  font-size: clamp(2.1rem, 4vw, 3rem);
+  font-weight: 500;
+  letter-spacing: -0.06em;
+  text-transform: uppercase;
 }
 
 .subject-tile__title,
@@ -507,6 +522,16 @@ button {
   border: 1px solid #111111;
 }
 
+.landing-panel .primary-button {
+  background: var(--brand-primary);
+  border-color: var(--brand-primary);
+}
+
+.landing-panel .ghost-button {
+  color: var(--brand-primary);
+  border-color: rgba(166, 108, 213, 0.28);
+}
+
 .primary-button--full {
   width: 100%;
 }
@@ -697,8 +722,8 @@ button {
   justify-content: space-between;
   align-items: center;
   gap: 24px;
-  margin-bottom: 32px;
-  padding: 22px 40px 14px;
+  margin-bottom: 28px;
+  padding: 20px 32px 14px;
   border-bottom: 1px solid #1f1c20;
   background: rgba(255, 255, 255, 0.96);
   backdrop-filter: blur(10px);
@@ -754,8 +779,8 @@ button {
 }
 
 .overview-card {
-  border-radius: 24px;
-  padding: 28px;
+  border-radius: 20px;
+  padding: 22px;
   display: grid;
   gap: 12px;
   background: #ffffff;
@@ -839,7 +864,8 @@ button {
   border-radius: 0;
 }
 
-#heading-colour-input {
+#heading-colour-input,
+#background-colour-input {
   width: 100%;
   min-height: 52px;
   border: 1px solid rgba(17, 17, 17, 0.14);
@@ -857,7 +883,7 @@ button {
 .subject-panel,
 .content-panel {
   border-radius: var(--radius-xl);
-  padding: 28px;
+  padding: 22px;
   background: #ffffff;
 }
 
@@ -1014,8 +1040,8 @@ button {
 .reader-card,
 .assessment-card,
 .practice-card {
-  border-radius: 28px;
-  padding: 28px;
+  border-radius: 22px;
+  padding: 22px;
 }
 
 .saved-tests {
