@@ -269,6 +269,27 @@ app.get("/api/revision/catalogue", (request, response) => {
   });
 });
 
+function flattenRevisionQuestions(test) {
+  return (Array.isArray(test?.sections) ? test.sections : []).flatMap((section) =>
+    (Array.isArray(section?.questions) ? section.questions : []).map((question) => ({
+      ...question,
+      sectionTitle: section?.title || "",
+      sectionType: section?.sectionType || ""
+    }))
+  );
+}
+
+function normaliseRevisionResponseMap(value) {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+
+  return Object.entries(value).reduce((result, [key, responseValue]) => {
+    result[String(key)] = String(responseValue || "").trim();
+    return result;
+  }, {});
+}
+
 app.post("/api/ask", async (request, response) => {
   try {
     const { subjectName, question, recentHistory = [], nextAssessment = null, document = null } = request.body || {};
@@ -380,7 +401,7 @@ app.post("/api/revision/generate-test", async (request, response) => {
             {
               type: "input_text",
               text:
-                "You build Australian school revision tests. Return only JSON. Use a NAPLAN-inspired structure: a short stimulus or scenario, a mix of multiple-choice and short-answer questions, then a longer written response. For English, stay closest to NAPLAN reading/language/writing style. For other subjects, adapt that structure to the subject while keeping the question style clear and age-appropriate."
+                "You build Australian school revision tests. Return only JSON. Use a NAPLAN-inspired structure. The test must contain exactly 9 questions total: exactly 5 multiple-choice questions, exactly 3 short-answer questions, and exactly 1 extended-response question. Do not include answers in the instructions. For English, stay closest to NAPLAN reading/language/writing style. For other subjects, adapt that structure to the subject while keeping the question style clear and age-appropriate. Every question must include an id, marks, skill, and answerGuide. Every multiple-choice question must include exactly 4 options and a correctOption value that matches one option exactly."
             }
           ]
         },
@@ -400,6 +421,7 @@ app.post("/api/revision/generate-test", async (request, response) => {
                   syllabusEntry: revisionEntry,
                   outputSchema: {
                     title: "string",
+                    subjectId: "string",
                     subjectName: "string",
                     grade: "string",
                     focus: "string",
@@ -413,10 +435,12 @@ app.post("/api/revision/generate-test", async (request, response) => {
                         stimulusText: "string",
                         questions: [
                           {
+                            id: "string",
                             number: "number",
                             type: "multiple-choice | short-answer | extended-response",
                             prompt: "string",
                             options: ["string"],
+                            correctOption: "string",
                             answerGuide: "string",
                             marks: "number",
                             skill: "string"
@@ -442,13 +466,195 @@ app.post("/api/revision/generate-test", async (request, response) => {
     });
 
     const parsed = extractResponseJson(responsePayload);
+    const questions = flattenRevisionQuestions(parsed);
+    const multipleChoiceCount = questions.filter((question) => String(question.type || "").toLowerCase() === "multiple-choice").length;
+    const shortAnswerCount = questions.filter((question) => String(question.type || "").toLowerCase() === "short-answer").length;
+    const extendedResponseCount = questions.filter((question) => String(question.type || "").toLowerCase() === "extended-response").length;
+    if (multipleChoiceCount !== 5 || shortAnswerCount !== 3 || extendedResponseCount !== 1) {
+      response.status(500).json({
+        error: "Revision test generation did not return the required question structure. Please try again."
+      });
+      return;
+    }
+
     response.json({
       catalogueEntry: revisionEntry,
-      test: parsed
+      test: {
+        ...parsed,
+        subjectId: parsed?.subjectId || subjectId
+      }
     });
   } catch (error) {
     response.status(500).json({
       error: error instanceof Error ? error.message : "Revision test generation failed."
+    });
+  }
+});
+
+app.post("/api/revision/submit-test", async (request, response) => {
+  try {
+    const test = request.body?.test;
+    const responsesByQuestionId = normaliseRevisionResponseMap(request.body?.responses);
+    const subjectId = String(test?.subjectId || "").trim();
+    const grade = String(test?.grade || "").trim();
+
+    if (!test || !subjectId || !grade) {
+      response.status(400).json({ error: "test, grade, and subjectId are required." });
+      return;
+    }
+
+    const revisionEntry = getRevisionEntry(grade, subjectId);
+    if (!revisionEntry) {
+      response.status(404).json({ error: "No revision catalogue entry exists for that grade and subject." });
+      return;
+    }
+
+    const questions = flattenRevisionQuestions(test);
+    if (!questions.length) {
+      response.status(400).json({ error: "The submitted test does not contain any questions." });
+      return;
+    }
+
+    const autoMarkedFeedback = [];
+    const openResponseQuestions = [];
+    let totalScore = 0;
+    let totalAvailable = 0;
+
+    questions.forEach((question) => {
+      const questionId = String(question.id || `q${question.number || ""}`).trim();
+      const studentAnswer = String(responsesByQuestionId[questionId] || "").trim();
+      const marks = Number(question.marks || 0);
+      totalAvailable += marks;
+
+      if (String(question.type || "").toLowerCase() === "multiple-choice") {
+        const correctOption = String(question.correctOption || "").trim();
+        const isCorrect = Boolean(studentAnswer) && studentAnswer === correctOption;
+        const score = isCorrect ? marks : 0;
+        totalScore += score;
+        autoMarkedFeedback.push({
+          id: questionId,
+          number: question.number,
+          type: question.type,
+          marks,
+          score,
+          feedback: isCorrect
+            ? "Correct. You selected the strongest option."
+            : `Not correct. A stronger answer would choose: ${correctOption || "the best supported option"}.`,
+          answerGuide: question.answerGuide || "",
+          studentAnswer
+        });
+        return;
+      }
+
+      openResponseQuestions.push({
+        id: questionId,
+        number: question.number,
+        type: question.type,
+        prompt: question.prompt,
+        marks,
+        skill: question.skill,
+        answerGuide: question.answerGuide,
+        studentAnswer
+      });
+    });
+
+    let aiMarkedFeedback = [];
+    if (openResponseQuestions.length) {
+      const responsePayload = await callOpenAiJson("responses", {
+        model: "gpt-4o-mini",
+        input: [
+          {
+            role: "system",
+            content: [
+              {
+                type: "input_text",
+                text:
+                  "You are marking Australian school revision responses. Return only JSON. Mark fairly and briefly. Reward what is correct, explain the main gap, and give one practical next step. Use the provided answer guide and marks only. Do not invent extra criteria."
+              }
+            ]
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "input_text",
+                text: JSON.stringify(
+                  {
+                    subject: revisionEntry.subjectName,
+                    grade,
+                    syllabusEntry: revisionEntry,
+                    questions: openResponseQuestions,
+                    outputSchema: {
+                      questionFeedback: [
+                        {
+                          id: "string",
+                          score: "number",
+                          feedback: "string",
+                          answerGuide: "string"
+                        }
+                      ],
+                      overallFeedback: "string"
+                    }
+                  },
+                  null,
+                  2
+                )
+              }
+            ]
+          }
+        ],
+        text: {
+          format: {
+            type: "json_object"
+          }
+        },
+        max_output_tokens: 2500
+      });
+
+      const parsed = extractResponseJson(responsePayload);
+      aiMarkedFeedback = Array.isArray(parsed?.questionFeedback) ? parsed.questionFeedback : [];
+      openResponseQuestions.forEach((question) => {
+        const matchedFeedback = aiMarkedFeedback.find((item) => String(item.id || "") === question.id);
+        totalScore += Number(matchedFeedback?.score || 0);
+      });
+
+      response.json({
+        overallFeedback:
+          parsed?.overallFeedback ||
+          "Your test has been marked. Review the feedback under each question to see what to improve.",
+        totalScore,
+        totalAvailable,
+        questionFeedback: [
+          ...autoMarkedFeedback,
+          ...openResponseQuestions.map((question) => {
+            const matchedFeedback = aiMarkedFeedback.find((item) => String(item.id || "") === question.id);
+            return {
+              id: question.id,
+              number: question.number,
+              type: question.type,
+              marks: question.marks,
+              score: Number(matchedFeedback?.score || 0),
+              feedback:
+                matchedFeedback?.feedback ||
+                "No feedback was returned for this answer. Try expanding your response and resubmitting.",
+              answerGuide: matchedFeedback?.answerGuide || question.answerGuide || "",
+              studentAnswer: question.studentAnswer
+            };
+          })
+        ].sort((left, right) => Number(left.number || 0) - Number(right.number || 0))
+      });
+      return;
+    }
+
+    response.json({
+      overallFeedback: "Your test has been marked.",
+      totalScore,
+      totalAvailable,
+      questionFeedback: autoMarkedFeedback.sort((left, right) => Number(left.number || 0) - Number(right.number || 0))
+    });
+  } catch (error) {
+    response.status(500).json({
+      error: error instanceof Error ? error.message : "Revision test submission failed."
     });
   }
 });

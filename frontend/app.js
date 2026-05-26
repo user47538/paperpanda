@@ -385,6 +385,8 @@ const state = {
   revisionTextTitle: "",
   revisionSelectedNoteIds: [],
   generatedRevisionTest: null,
+  revisionResponses: {},
+  revisionSubmission: null,
   upcomingModalOpen: false,
   upcomingModalMode: "upcoming",
   pendingFiles: [],
@@ -435,6 +437,7 @@ const elements = {
   settingsView: document.getElementById("settings-view"),
   subjectsView: document.getElementById("subjects-view"),
   taskView: document.getElementById("task-view"),
+  revisionView: document.getElementById("revision-view"),
   documentsToReadCount: document.getElementById("documents-to-read-count"),
   documentsToReadSummary: document.getElementById("documents-to-read-summary"),
   documentsToReadProgress: document.getElementById("documents-to-read-progress"),
@@ -465,8 +468,6 @@ const elements = {
   revisionStatus: document.getElementById("revision-status"),
   revisionSummary: document.getElementById("revision-summary"),
   revisionSkills: document.getElementById("revision-skills"),
-  revisionResources: document.getElementById("revision-resources"),
-  revisionGeneratedTest: document.getElementById("revision-generated-test"),
   signoutButton: document.getElementById("signout-button"),
   upcomingAssessmentsButton: document.getElementById("upcoming-assessments-button"),
   upcomingAssessmentCount: document.getElementById("upcoming-assessment-count"),
@@ -559,7 +560,15 @@ const elements = {
   taskWorkStatus: document.getElementById("task-work-status"),
   saveTaskWorkButton: document.getElementById("save-task-work-button"),
   saveTaskFilesButton: document.getElementById("save-task-files-button"),
-  closeTaskViewButton: document.getElementById("close-task-view-button")
+  closeTaskViewButton: document.getElementById("close-task-view-button"),
+  revisionViewTitle: document.getElementById("revision-view-title"),
+  revisionTestHeading: document.getElementById("revision-test-heading"),
+  revisionTestMeta: document.getElementById("revision-test-meta"),
+  revisionTestContent: document.getElementById("revision-test-content"),
+  submitRevisionTestButton: document.getElementById("submit-revision-test-button"),
+  revisionTestStatus: document.getElementById("revision-test-status"),
+  revisionFeedback: document.getElementById("revision-feedback"),
+  closeRevisionViewButton: document.getElementById("close-revision-view-button")
 };
 
 function normaliseAccountKey(value) {
@@ -1360,6 +1369,7 @@ function showLanding() {
 
   elements.appShell.classList.add("hidden");
   elements.taskView.classList.add("hidden");
+  elements.revisionView.classList.add("hidden");
   elements.landingPanel.classList.remove("hidden");
   state.selectedDocumentId = null;
   state.currentView = "home";
@@ -1396,13 +1406,19 @@ function getAllHomeworkBundles() {
   );
 }
 
+function getAllDocumentBundles(subject) {
+  return getDocumentBundlesByFilter(subject, () => true);
+}
+
 function getUnreadDocumentMetrics() {
-  const allDocuments = state.subjects.flatMap((subject) => subject.documents || []);
-  const unreadDocuments = allDocuments.filter((documentRecord) => !documentRecord.reviewed);
+  const allDocumentBundles = state.subjects.flatMap((subject) => getAllDocumentBundles(subject));
+  const unreadDocumentBundles = allDocumentBundles.filter((documentBundle) => !documentBundle.reviewed);
   return {
-    total: allDocuments.length,
-    unread: unreadDocuments.length,
-    progress: allDocuments.length ? (allDocuments.length - unreadDocuments.length) / allDocuments.length : 0
+    total: allDocumentBundles.length,
+    unread: unreadDocumentBundles.length,
+    progress: allDocumentBundles.length
+      ? (allDocumentBundles.length - unreadDocumentBundles.length) / allDocumentBundles.length
+      : 0
   };
 }
 
@@ -1447,7 +1463,7 @@ function renderOverview() {
 
   elements.documentsToReadCount.textContent = String(unreadDocumentMetrics.unread);
   elements.documentsToReadSummary.textContent = unreadDocumentMetrics.total
-    ? `${unreadDocumentMetrics.total - unreadDocumentMetrics.unread} of ${unreadDocumentMetrics.total} documents have been marked read or listened to.`
+    ? `${unreadDocumentMetrics.total - unreadDocumentMetrics.unread} of ${unreadDocumentMetrics.total} whole documents have been marked read or listened to.`
     : "No documents have been uploaded yet.";
   setProgressBar(elements.documentsToReadProgress, unreadDocumentMetrics.progress);
 
@@ -1475,11 +1491,12 @@ function renderOverview() {
 }
 
 function renderCurrentView() {
-  elements.appShell.classList.toggle("hidden", state.currentView === "task");
+  elements.appShell.classList.toggle("hidden", state.currentView === "task" || state.currentView === "revision");
   elements.homeView.classList.toggle("hidden", state.currentView !== "home");
   elements.settingsView.classList.toggle("hidden", state.currentView !== "settings");
   elements.subjectsView.classList.toggle("hidden", state.currentView !== "subjects");
   elements.taskView.classList.toggle("hidden", state.currentView !== "task");
+  elements.revisionView.classList.toggle("hidden", state.currentView !== "revision");
 }
 
 function clipText(value, maxLength = 9000) {
@@ -1716,7 +1733,115 @@ function getDocumentsForRevisionEntry(entry) {
     state.subjects.find((subject) => subject.id === entry.subjectId) ||
     state.subjects.find((subject) => subject.name.toLowerCase() === String(entry.subjectName || "").toLowerCase());
 
-  return matchingSubject ? getSortedDocuments(matchingSubject) : [];
+  return matchingSubject ? getAllDocumentBundles(matchingSubject) : [];
+}
+
+function getRevisionQuestionId(question, fallbackIndex = 0) {
+  return String(question?.id || `q${question?.number || fallbackIndex + 1}`);
+}
+
+function getRevisionSections() {
+  return Array.isArray(state.generatedRevisionTest?.sections) ? state.generatedRevisionTest.sections : [];
+}
+
+function getFlattenedRevisionQuestions() {
+  return getRevisionSections().flatMap((section, sectionIndex) =>
+    (Array.isArray(section?.questions) ? section.questions : []).map((question, questionIndex) => ({
+      ...question,
+      sectionTitle: section?.title || "",
+      sectionType: section?.sectionType || "",
+      id: getRevisionQuestionId(question, sectionIndex * 20 + questionIndex)
+    }))
+  );
+}
+
+function openRevisionTestView() {
+  state.currentView = "revision";
+  renderCurrentView();
+  renderRevisionTestView();
+  window.requestAnimationFrame(() => {
+    elements.revisionView.scrollIntoView({ block: "start", inline: "nearest" });
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  });
+}
+
+function buildRevisionQuestionInput(question) {
+  const questionId = getRevisionQuestionId(question);
+  const savedResponse = state.revisionResponses[questionId] || "";
+  const questionType = String(question.type || "").toLowerCase();
+  if (questionType === "multiple-choice") {
+    return `
+      <div class="revision-test-question-options revision-test-question-options--interactive">
+        ${(Array.isArray(question.options) ? question.options : [])
+          .map(
+            (option, optionIndex) => `
+              <label class="revision-option">
+                <input
+                  type="radio"
+                  name="${escapeHtml(questionId)}"
+                  value="${escapeHtml(option)}"
+                  data-revision-question-id="${escapeHtml(questionId)}"
+                  ${savedResponse === option ? "checked" : ""}
+                />
+                <span>${String.fromCharCode(65 + optionIndex)}. ${escapeHtml(option)}</span>
+              </label>
+            `
+          )
+          .join("")}
+      </div>
+    `;
+  }
+
+  return `
+    <textarea
+      class="reader-editor revision-response-editor ${questionType === "extended-response" ? "revision-response-editor--extended" : ""}"
+      data-revision-question-id="${escapeHtml(questionId)}"
+      placeholder="${questionType === "extended-response" ? "Write your full response here..." : "Write a short response here..."}"
+    >${escapeHtml(savedResponse)}</textarea>
+  `;
+}
+
+function renderRevisionSubmissionFeedback() {
+  const submission = state.revisionSubmission;
+  if (!submission) {
+    elements.revisionFeedback.classList.add("hidden");
+    elements.revisionFeedback.innerHTML = "";
+    return;
+  }
+
+  const feedbackById = new Map(
+    (Array.isArray(submission.questionFeedback) ? submission.questionFeedback : []).map((item) => [String(item.id || ""), item])
+  );
+
+  elements.revisionFeedback.classList.remove("hidden");
+  elements.revisionFeedback.innerHTML = `
+    <div class="revision-feedback__summary">
+      <p class="eyebrow">Feedback</p>
+      <h3>${escapeHtml(`Score ${submission.totalScore || 0} / ${submission.totalAvailable || 0}`)}</h3>
+      <p>${escapeHtml(submission.overallFeedback || "Your test has been marked.")}</p>
+    </div>
+    <div class="revision-feedback__list">
+      ${getFlattenedRevisionQuestions()
+        .map((question) => {
+          const questionId = getRevisionQuestionId(question);
+          const feedback = feedbackById.get(questionId);
+          if (!feedback) {
+            return "";
+          }
+          return `
+            <article class="revision-feedback__item">
+              <div class="revision-feedback__item-header">
+                <strong>Q${escapeHtml(question.number || "")}</strong>
+                <span class="revision-test-question-type">${escapeHtml(`${feedback.score || 0} / ${feedback.marks || 0}`)}</span>
+              </div>
+              <p>${escapeHtml(feedback.feedback || "")}</p>
+              ${feedback.answerGuide ? `<p class="revision-summary"><strong>What a strong answer should include:</strong> ${escapeHtml(feedback.answerGuide)}</p>` : ""}
+            </article>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
 }
 
 function syncRevisionSelection() {
@@ -1762,6 +1887,8 @@ async function loadRevisionCatalogue(force = false) {
     state.revisionCatalogue = Array.isArray(payload?.entries) ? payload.entries : [];
     state.revisionCatalogueLoadedGrade = grade;
     state.generatedRevisionTest = null;
+    state.revisionResponses = {};
+    state.revisionSubmission = null;
     syncRevisionSelection();
     renderRevisionPanel();
     elements.revisionStatus.textContent = state.revisionCatalogue.length
@@ -1776,47 +1903,47 @@ async function loadRevisionCatalogue(force = false) {
   }
 }
 
-function renderRevisionGeneratedTest() {
+function renderRevisionTestView() {
   const test = state.generatedRevisionTest;
   if (!test) {
-    elements.revisionGeneratedTest.textContent = "Create a test to see the generated sections and questions here.";
+    elements.revisionViewTitle.textContent = "Revision test";
+    elements.revisionTestHeading.textContent = "Generated test";
+    elements.revisionTestMeta.innerHTML = `<p class="revision-summary">Create a test from the home page to work on it here.</p>`;
+    elements.revisionTestContent.innerHTML = "Create a test from the home page to work on it here.";
+    elements.submitRevisionTestButton.disabled = true;
+    elements.revisionTestStatus.textContent = "";
+    renderRevisionSubmissionFeedback();
     return;
   }
 
-  const sections = Array.isArray(test.sections) ? test.sections : [];
-  elements.revisionGeneratedTest.innerHTML = `
-    <div class="revision-test-header">
-      <p class="eyebrow">Generated test</p>
-      <h4>${escapeHtml(test.title || `${test.subjectName || "Revision"} test`)}</h4>
-      <p class="revision-summary">${escapeHtml(test.instructions || "")}</p>
-      <span class="revision-test-meta">${escapeHtml(`${test.grade || ""} ${test.subjectName || ""} · ${test.estimatedMinutes || 0} mins`)}</span>
-    </div>
+  elements.revisionViewTitle.textContent = test.title || `${test.subjectName || "Revision"} test`;
+  elements.revisionTestHeading.textContent = test.title || `${test.subjectName || "Revision"} test`;
+  elements.revisionTestMeta.innerHTML = `
+    <p class="revision-summary">${escapeHtml(test.instructions || "")}</p>
+    <p class="revision-test-meta">${escapeHtml(`${test.grade || ""} ${test.subjectName || ""} · ${test.estimatedMinutes || 0} mins`)}</p>
+  `;
+  elements.revisionTestContent.innerHTML = `
     <div class="revision-test-section-list">
-      ${sections
+      ${getRevisionSections()
         .map(
-          (section) => `
+          (section, sectionIndex) => `
             <section class="revision-test-section">
               <p class="eyebrow">${escapeHtml(section.sectionType || "section")}</p>
-              <h4>${escapeHtml(section.title || "Section")}</h4>
+              <h4>${escapeHtml(section.title || `Section ${sectionIndex + 1}`)}</h4>
               ${section.stimulusTitle ? `<p><strong>${escapeHtml(section.stimulusTitle)}</strong></p>` : ""}
               ${section.stimulusText ? `<p class="revision-summary">${escapeHtml(section.stimulusText)}</p>` : ""}
               <div class="revision-test-question-list">
                 ${(Array.isArray(section.questions) ? section.questions : [])
                   .map(
-                    (question) => `
+                    (question, questionIndex) => `
                       <article class="revision-test-question">
-                        <p><strong>Q${escapeHtml(question.number || "")}.</strong> ${escapeHtml(question.prompt || "")}</p>
-                        ${
-                          Array.isArray(question.options) && question.options.length
-                            ? `<ol class="revision-test-question-options">${question.options
-                                .map((option) => `<li>${escapeHtml(option)}</li>`)
-                                .join("")}</ol>`
-                            : ""
-                        }
-                        <span class="revision-test-question-type">${escapeHtml(
-                          `${question.type || "question"} · ${question.marks || 0} marks · ${question.skill || ""}`
-                        )}</span>
-                        ${question.answerGuide ? `<p class="revision-summary">Answer guide: ${escapeHtml(question.answerGuide)}</p>` : ""}
+                        <div class="revision-test-question__header">
+                          <p><strong>Q${escapeHtml(question.number || questionIndex + 1)}.</strong> ${escapeHtml(question.prompt || "")}</p>
+                          <span class="revision-test-question-type">${escapeHtml(
+                            `${question.type || "question"} · ${question.marks || 0} marks · ${question.skill || ""}`
+                          )}</span>
+                        </div>
+                        ${buildRevisionQuestionInput(question)}
                       </article>
                     `
                   )
@@ -1828,6 +1955,19 @@ function renderRevisionGeneratedTest() {
         .join("")}
     </div>
   `;
+  elements.submitRevisionTestButton.disabled = false;
+  elements.revisionTestStatus.textContent = state.revisionSubmission ? "Submitted. Review your feedback below." : "";
+  elements.revisionTestContent.querySelectorAll("[data-revision-question-id]").forEach((field) => {
+    const questionId = field.dataset.revisionQuestionId;
+    const eventName = field.matches("input[type='radio']") ? "change" : "input";
+    field.addEventListener(eventName, () => {
+      if (!questionId) {
+        return;
+      }
+      state.revisionResponses[questionId] = field.value;
+    });
+  });
+  renderRevisionSubmissionFeedback();
 }
 
 function renderRevisionPanel() {
@@ -1835,7 +1975,7 @@ function renderRevisionPanel() {
 
   elements.revisionGradeCopy.textContent = `PaperPanda is using ${formatGradeLabel(
     state.studentGrade
-  )} curriculum guidance and practice resources to build this revision test.`;
+  )} curriculum guidance to build this revision test.`;
 
   elements.revisionSubjectSelect.innerHTML = state.revisionCatalogue.length
     ? state.revisionCatalogue
@@ -1873,10 +2013,8 @@ function renderRevisionPanel() {
   elements.revisionNotesSelect.disabled = !revisionDocuments.length;
 
   if (!selectedEntry) {
-    elements.revisionSummary.textContent = "Select a subject to load the curriculum overview, tested skills and practice resources.";
+    elements.revisionSummary.textContent = "Select a subject to load the curriculum overview and tested skills.";
     elements.revisionSkills.innerHTML = "";
-    elements.revisionResources.innerHTML = "";
-    renderRevisionGeneratedTest();
     return;
   }
 
@@ -1887,23 +2025,6 @@ function renderRevisionPanel() {
   elements.revisionSkills.innerHTML = (selectedEntry.skillsTested || [])
     .map((skill) => `<span class="revision-skill-chip">${escapeHtml(skill)}</span>`)
     .join("");
-  elements.revisionResources.innerHTML = `
-    <p class="eyebrow">Stored backend resources</p>
-    <div class="revision-resource-list">
-      ${(selectedEntry.resources || [])
-        .map(
-          (resource) => `
-            <article class="revision-resource-card">
-              <p><a href="${escapeHtml(resource.url)}" target="_blank" rel="noreferrer">${escapeHtml(resource.label)}</a></p>
-              <p class="revision-summary">${escapeHtml(resource.note || "")}</p>
-              <span class="revision-resource-type">${escapeHtml(resource.type || "resource")}</span>
-            </article>
-          `
-        )
-        .join("")}
-    </div>
-  `;
-  renderRevisionGeneratedTest();
 }
 
 async function handleCreateRevisionTest() {
@@ -1934,13 +2055,46 @@ async function handleCreateRevisionTest() {
       notes: selectedNotes
     });
     state.generatedRevisionTest = payload?.test || null;
-    renderRevisionGeneratedTest();
+    state.revisionResponses = {};
+    state.revisionSubmission = null;
     elements.revisionStatus.textContent = "Revision test created.";
+    renderRevisionTestView();
+    openRevisionTestView();
   } catch (error) {
     elements.revisionStatus.textContent =
       error instanceof Error ? `Revision test failed: ${error.message}` : "Revision test failed.";
   } finally {
     elements.createRevisionTestButton.disabled = false;
+  }
+}
+
+async function handleSubmitRevisionTest() {
+  if (!state.generatedRevisionTest) {
+    elements.revisionTestStatus.textContent = "Create a test first.";
+    return;
+  }
+
+  const missingResponses = getFlattenedRevisionQuestions().filter((question) => !String(state.revisionResponses[question.id] || "").trim());
+  if (missingResponses.length) {
+    elements.revisionTestStatus.textContent = `Finish all questions before submitting. ${missingResponses.length} response${missingResponses.length === 1 ? "" : "s"} still need an answer.`;
+    return;
+  }
+
+  elements.submitRevisionTestButton.disabled = true;
+  elements.revisionTestStatus.textContent = "Submitting test for feedback...";
+  try {
+    const payload = await requestApi("/api/revision/submit-test", {
+      test: state.generatedRevisionTest,
+      responses: state.revisionResponses
+    });
+    state.revisionSubmission = payload;
+    elements.revisionTestStatus.textContent = "Submitted. Review your feedback below.";
+    renderRevisionSubmissionFeedback();
+  } catch (error) {
+    elements.revisionTestStatus.textContent =
+      error instanceof Error ? `Revision test submission failed: ${error.message}` : "Revision test submission failed.";
+  } finally {
+    elements.submitRevisionTestButton.disabled = false;
   }
 }
 
@@ -4640,6 +4794,8 @@ function saveAccountSettings() {
   elements.welcomeHeading.textContent = `Welcome back, ${state.studentName}`;
   elements.settingsStatus.textContent = "Account saved.";
   state.generatedRevisionTest = null;
+  state.revisionResponses = {};
+  state.revisionSubmission = null;
   void loadRevisionCatalogue(true);
 }
 
@@ -4700,6 +4856,9 @@ function render() {
   }
   if (state.currentView === "task") {
     renderTaskView();
+  }
+  if (state.currentView === "revision") {
+    renderRevisionTestView();
   }
 }
 
@@ -4808,11 +4967,15 @@ elements.clearHeadingColourButton.addEventListener("click", resetHeadingColour);
 elements.revisionSubjectSelect.addEventListener("change", () => {
   state.revisionSelectedSubjectId = elements.revisionSubjectSelect.value;
   state.generatedRevisionTest = null;
+  state.revisionResponses = {};
+  state.revisionSubmission = null;
   renderRevisionPanel();
 });
 elements.revisionTopicSelect.addEventListener("change", () => {
   state.revisionSelectedTopic = elements.revisionTopicSelect.value;
   state.generatedRevisionTest = null;
+  state.revisionResponses = {};
+  state.revisionSubmission = null;
   renderRevisionPanel();
 });
 elements.revisionTextInput.addEventListener("input", () => {
@@ -4824,6 +4987,7 @@ elements.revisionNotesSelect.addEventListener("change", () => {
     .filter(Boolean);
 });
 elements.createRevisionTestButton.addEventListener("click", handleCreateRevisionTest);
+elements.submitRevisionTestButton.addEventListener("click", handleSubmitRevisionTest);
 elements.navHomeButton.addEventListener("click", () => {
   state.currentView = "home";
   render();
@@ -4863,6 +5027,10 @@ elements.saveAccountSettingsButton.addEventListener("click", saveAccountSettings
 elements.savePasswordSettingsButton.addEventListener("click", savePasswordSettings);
 elements.closeTaskViewButton.addEventListener("click", () => {
   state.currentView = "subjects";
+  render();
+});
+elements.closeRevisionViewButton.addEventListener("click", () => {
+  state.currentView = "home";
   render();
 });
 elements.saveTaskWorkButton.addEventListener("click", saveTaskWorkspace);

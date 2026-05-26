@@ -213,23 +213,10 @@
                 <button type="button" class="primary-button" id="create-revision-test-button">Create test</button>
               </div>
               <div class="upload-status" id="revision-status"></div>
-            </section>
-
-            <section class="home-card home-card--revision-output">
-              <div class="section-heading">
-                <div>
-                  <p class="eyebrow">Curriculum</p>
-                  <h3>Revision resources</h3>
-                </div>
-              </div>
               <div class="revision-summary" id="revision-summary">
-                Select a subject to load the curriculum overview, tested skills and practice resources.
+                Select a subject to load the curriculum overview and tested skills.
               </div>
               <div class="revision-skills" id="revision-skills"></div>
-              <div class="revision-resources" id="revision-resources"></div>
-              <div class="revision-generated-test" id="revision-generated-test">
-                Create a test to see the generated sections and questions here.
-              </div>
             </section>
           </section>
         </section>
@@ -463,6 +450,43 @@
               <button type="button" class="ghost-button" id="save-task-files-button">Save to files</button>
             </div>
             <div class="upload-status" id="task-work-status"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="task-view hidden" id="revision-view">
+        <header class="topbar">
+          <div class="topbar__brand-block">
+            <div class="brand-lockup brand-lockup--topbar">
+              <img src="/paperpanda-logo.png" alt="PaperPanda logo" class="brand-lockup__logo brand-lockup__logo--small" />
+              <div class="brand-lockup__copy">
+                <span class="brand-lockup__name brand-lockup__name--topbar">PaperPanda</span>
+                <span class="brand-lockup__tag">Revision test</span>
+              </div>
+            </div>
+            <h2 id="revision-view-title">Revision test</h2>
+          </div>
+          <div class="topbar__actions">
+            <button type="button" class="ghost-button" id="close-revision-view-button">Back to home</button>
+          </div>
+        </header>
+        <div class="task-view__shell task-view__shell--single">
+          <section class="reader-card reader-card--wide">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Revision test</p>
+                <h3 id="revision-test-heading">Generated test</h3>
+              </div>
+            </div>
+            <div class="revision-test-meta-block" id="revision-test-meta"></div>
+            <div class="revision-generated-test revision-generated-test--interactive" id="revision-test-content">
+              Create a test from the home page to work on it here.
+            </div>
+            <div class="reader-actions reader-actions--revision">
+              <button type="button" class="primary-button" id="submit-revision-test-button">Submit test</button>
+            </div>
+            <div class="upload-status" id="revision-test-status"></div>
+            <div class="revision-feedback hidden" id="revision-feedback"></div>
           </section>
         </div>
       </section>
