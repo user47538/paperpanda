@@ -865,6 +865,8 @@ button {
   display: grid;
   align-content: start;
   gap: 24px;
+  position: relative;
+  overflow: visible;
 }
 
 .section-heading {
@@ -948,13 +950,13 @@ button {
   align-items: flex-end;
   justify-content: space-between;
   gap: 18px;
-  margin-bottom: 0;
-  padding: 18px 0;
+  margin: -28px -28px 0;
+  padding: 22px 28px 18px;
   border-bottom: 1px solid #d9d6d2;
   position: sticky;
-  top: 88px;
-  z-index: 16;
-  background: rgba(255, 255, 255, 0.96);
+  top: 78px;
+  z-index: 30;
+  background: rgba(255, 255, 255, 0.98);
   backdrop-filter: blur(8px);
 }
 
@@ -1014,6 +1016,46 @@ button {
 .practice-card {
   border-radius: 28px;
   padding: 28px;
+}
+
+.saved-tests {
+  margin-top: 24px;
+  padding-top: 22px;
+  border-top: 1px solid #e2ddd6;
+}
+
+.section-heading--compact {
+  margin-bottom: 14px;
+}
+
+.saved-tests__list {
+  display: grid;
+  gap: 10px;
+}
+
+.saved-test-button {
+  width: 100%;
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(17, 17, 17, 0.1);
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.saved-test-button__title {
+  font-family: var(--font-display);
+  font-size: 0.98rem;
+  color: var(--custom-heading-color);
+}
+
+.saved-test-button__meta {
+  color: #7a7267;
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .documents-card {
@@ -1845,7 +1887,11 @@ button {
   .subject-header {
     flex-direction: column;
     align-items: flex-start;
-    top: 64px;
+    top: 60px;
+    margin-left: -18px;
+    margin-right: -18px;
+    padding-left: 18px;
+    padding-right: 18px;
   }
 
   .subject-header__actions,

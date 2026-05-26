@@ -387,6 +387,8 @@ const state = {
   generatedRevisionTest: null,
   revisionResponses: {},
   revisionSubmission: null,
+  revisionViewMode: "draft",
+  activeSavedRevisionTestId: "",
   upcomingModalOpen: false,
   upcomingModalMode: "upcoming",
   pendingFiles: [],
@@ -505,6 +507,7 @@ const elements = {
   askButton: document.getElementById("ask-button"),
   askContext: document.getElementById("ask-context"),
   askResponse: document.getElementById("ask-response"),
+  savedTestsList: document.getElementById("saved-tests-list"),
   readerCard: document.getElementById("reader-card"),
   readerTitle: document.getElementById("reader-title"),
   readerContent: document.getElementById("reader-content"),
@@ -566,6 +569,7 @@ const elements = {
   revisionTestMeta: document.getElementById("revision-test-meta"),
   revisionTestContent: document.getElementById("revision-test-content"),
   submitRevisionTestButton: document.getElementById("submit-revision-test-button"),
+  saveRevisionTestButton: document.getElementById("save-revision-test-button"),
   revisionTestStatus: document.getElementById("revision-test-status"),
   revisionFeedback: document.getElementById("revision-feedback"),
   closeRevisionViewButton: document.getElementById("close-revision-view-button")
@@ -626,7 +630,8 @@ function createBaseSubjects() {
     documents: [],
     assessments: [],
     watch: [],
-    askHistory: []
+    askHistory: [],
+    savedRevisionTests: []
   }));
 }
 
@@ -636,7 +641,8 @@ function createInitialSubjectsForAccount(account) {
     documents: [],
     assessments: [],
     watch: [],
-    askHistory: []
+    askHistory: [],
+    savedRevisionTests: []
   }));
 }
 
@@ -1165,6 +1171,9 @@ function hydrateStoredSubject(subject, index) {
     assessments: Array.isArray(subject.assessments) ? subject.assessments.map(normaliseAssessment) : [],
     watch: Array.isArray(subject.watch) ? subject.watch : [],
     askHistory: Array.isArray(subject.askHistory) ? subject.askHistory : [],
+    savedRevisionTests: Array.isArray(subject.savedRevisionTests)
+      ? subject.savedRevisionTests.map(normaliseSavedRevisionTest)
+      : [],
     practice: Array.isArray(subject.practice)
       ? subject.practice
       : structuredClone(subjectTemplateSeed[index]?.practice || [])
@@ -1214,6 +1223,18 @@ function normaliseAssessment(assessment) {
     linkedDocumentIds: Array.isArray(assessment.linkedDocumentIds) ? assessment.linkedDocumentIds : [],
     completed: Boolean(assessment.completed),
     workNotes: assessment.workNotes || ""
+  };
+}
+
+function normaliseSavedRevisionTest(testRecord) {
+  return {
+    id: testRecord?.id || createId(),
+    savedAt: testRecord?.savedAt || new Date().toISOString(),
+    title: testRecord?.title || "Saved revision test",
+    subjectId: testRecord?.subjectId || "",
+    test: testRecord?.test || null,
+    responses: testRecord?.responses && typeof testRecord.responses === "object" ? testRecord.responses : {},
+    submission: testRecord?.submission || null
   };
 }
 
@@ -1765,6 +1786,7 @@ function buildRevisionQuestionInput(question) {
   const questionId = getRevisionQuestionId(question);
   const savedResponse = state.revisionResponses[questionId] || "";
   const questionType = String(question.type || "").toLowerCase();
+  const isLocked = Boolean(state.revisionSubmission) || state.revisionViewMode === "saved";
   if (questionType === "multiple-choice") {
     return `
       <div class="revision-test-question-options revision-test-question-options--interactive">
@@ -1778,6 +1800,7 @@ function buildRevisionQuestionInput(question) {
                   value="${escapeHtml(option)}"
                   data-revision-question-id="${escapeHtml(questionId)}"
                   ${savedResponse === option ? "checked" : ""}
+                  ${isLocked ? "disabled" : ""}
                 />
                 <span>${String.fromCharCode(65 + optionIndex)}. ${escapeHtml(option)}</span>
               </label>
@@ -1793,6 +1816,7 @@ function buildRevisionQuestionInput(question) {
       class="reader-editor revision-response-editor ${questionType === "extended-response" ? "revision-response-editor--extended" : ""}"
       data-revision-question-id="${escapeHtml(questionId)}"
       placeholder="${questionType === "extended-response" ? "Write your full response here..." : "Write a short response here..."}"
+      ${isLocked ? "disabled" : ""}
     >${escapeHtml(savedResponse)}</textarea>
   `;
 }
@@ -1831,6 +1855,12 @@ function renderRevisionSubmissionFeedback() {
                 <span class="revision-test-question-type">${escapeHtml(`${feedback.score || 0} / ${feedback.marks || 0}`)}</span>
               </div>
               <p>${escapeHtml(feedback.feedback || "")}</p>
+              ${
+                String(feedback.type || "").toLowerCase() === "multiple-choice"
+                  ? `<p class="revision-summary"><strong>You selected:</strong> ${escapeHtml(feedback.studentAnswer || "No option selected")}</p>
+                     <p class="revision-summary"><strong>Correct answer:</strong> ${escapeHtml(feedback.correctOption || "No answer recorded")}</p>`
+                  : ""
+              }
               ${feedback.answerGuide ? `<p class="revision-summary"><strong>What a strong answer should include:</strong> ${escapeHtml(feedback.answerGuide)}</p>` : ""}
             </article>
           `;
@@ -1885,6 +1915,8 @@ async function loadRevisionCatalogue(force = false) {
     state.generatedRevisionTest = null;
     state.revisionResponses = {};
     state.revisionSubmission = null;
+    state.revisionViewMode = "draft";
+    state.activeSavedRevisionTestId = "";
     syncRevisionSelection();
     renderRevisionPanel();
     elements.revisionStatus.textContent = state.revisionCatalogue.length
@@ -1907,6 +1939,7 @@ function renderRevisionTestView() {
     elements.revisionTestMeta.innerHTML = `<p class="revision-summary">Create a test from the home page to work on it here.</p>`;
     elements.revisionTestContent.innerHTML = "Create a test from the home page to work on it here.";
     elements.submitRevisionTestButton.disabled = true;
+    elements.saveRevisionTestButton.disabled = true;
     elements.revisionTestStatus.textContent = "";
     renderRevisionSubmissionFeedback();
     return;
@@ -1951,8 +1984,13 @@ function renderRevisionTestView() {
         .join("")}
     </div>
   `;
-  elements.submitRevisionTestButton.disabled = false;
-  elements.revisionTestStatus.textContent = state.revisionSubmission ? "Submitted. Review your feedback below." : "";
+  elements.submitRevisionTestButton.disabled = Boolean(state.revisionSubmission) || state.revisionViewMode === "saved";
+  elements.saveRevisionTestButton.disabled = !state.revisionSubmission || state.revisionViewMode === "saved";
+  elements.revisionTestStatus.textContent = state.revisionSubmission
+    ? state.revisionViewMode === "saved"
+      ? "Saved test loaded."
+      : "Submitted. Review your feedback below."
+    : "";
   elements.revisionTestContent.querySelectorAll("[data-revision-question-id]").forEach((field) => {
     const questionId = field.dataset.revisionQuestionId;
     const eventName = field.matches("input[type='radio']") ? "change" : "input";
@@ -1960,7 +1998,7 @@ function renderRevisionTestView() {
       if (!questionId) {
         return;
       }
-      state.revisionResponses[questionId] = field.value;
+    state.revisionResponses[questionId] = field.value;
     });
   });
   renderRevisionSubmissionFeedback();
@@ -2053,6 +2091,8 @@ async function handleCreateRevisionTest() {
     state.generatedRevisionTest = payload?.test || null;
     state.revisionResponses = {};
     state.revisionSubmission = null;
+    state.revisionViewMode = "draft";
+    state.activeSavedRevisionTestId = "";
     elements.revisionStatus.textContent = "Revision test created.";
     renderRevisionTestView();
     openRevisionTestView();
@@ -2373,6 +2413,90 @@ function renderAskContext() {
     : "No document selected for Ask yet.";
   elements.askResponse.textContent =
     historyMarkup || "Ask a question about the selected subject or document.";
+}
+
+function renderSavedRevisionTests() {
+  const subject = getSelectedSubject();
+  const savedTests = Array.isArray(subject?.savedRevisionTests) ? [...subject.savedRevisionTests] : [];
+  if (!savedTests.length) {
+    elements.savedTestsList.innerHTML = `<div class="empty-state empty-state--compact">No saved tests for this subject yet.</div>`;
+    return;
+  }
+
+  savedTests.sort((left, right) => new Date(right.savedAt || 0).getTime() - new Date(left.savedAt || 0).getTime());
+  elements.savedTestsList.innerHTML = savedTests
+    .map(
+      (savedTest) => `
+        <button type="button" class="saved-test-button" data-open-saved-test="${savedTest.id}">
+          <span class="saved-test-button__title">${escapeHtml(savedTest.title)}</span>
+          <span class="saved-test-button__meta">${escapeHtml(formatDate(savedTest.savedAt))}</span>
+        </button>
+      `
+    )
+    .join("");
+
+  elements.savedTestsList.querySelectorAll("[data-open-saved-test]").forEach((button) => {
+    button.addEventListener("click", () => {
+      openSavedRevisionTest(button.dataset.openSavedTest);
+    });
+  });
+}
+
+function saveCurrentRevisionTest() {
+  const selectedEntry = getRevisionSubjectEntry();
+  if (!selectedEntry) {
+    elements.revisionTestStatus.textContent = "Select a revision subject first.";
+    return;
+  }
+
+  if (!state.generatedRevisionTest || !state.revisionSubmission) {
+    elements.revisionTestStatus.textContent = "Submit the test before saving it.";
+    return;
+  }
+
+  const subject =
+    state.subjects.find((item) => item.id === selectedEntry.subjectId) ||
+    state.subjects.find((item) => item.name.toLowerCase() === String(selectedEntry.subjectName || "").toLowerCase());
+  if (!subject) {
+    elements.revisionTestStatus.textContent = "The subject for this test could not be found.";
+    return;
+  }
+
+  subject.savedRevisionTests = Array.isArray(subject.savedRevisionTests) ? subject.savedRevisionTests : [];
+  const savedTest = normaliseSavedRevisionTest({
+    id: createId(),
+    savedAt: new Date().toISOString(),
+    title: state.generatedRevisionTest.title || `${selectedEntry.subjectName} revision test`,
+    subjectId: selectedEntry.subjectId,
+    test: structuredClone(state.generatedRevisionTest),
+    responses: structuredClone(state.revisionResponses),
+    submission: structuredClone(state.revisionSubmission)
+  });
+  subject.savedRevisionTests.unshift(savedTest);
+  state.activeSavedRevisionTestId = savedTest.id;
+  state.revisionViewMode = "saved";
+  persistSubjects();
+  renderSavedRevisionTests();
+  renderRevisionTestView();
+  elements.revisionTestStatus.textContent = "Test saved to this subject.";
+}
+
+function openSavedRevisionTest(savedTestId) {
+  const subject = getSelectedSubject();
+  const savedTest = Array.isArray(subject?.savedRevisionTests)
+    ? subject.savedRevisionTests.find((item) => item.id === savedTestId)
+    : null;
+  if (!savedTest) {
+    return;
+  }
+
+  state.revisionSelectedSubjectId = subject.id;
+  state.generatedRevisionTest = structuredClone(savedTest.test);
+  state.revisionResponses = structuredClone(savedTest.responses || {});
+  state.revisionSubmission = structuredClone(savedTest.submission || null);
+  state.revisionViewMode = "saved";
+  state.activeSavedRevisionTestId = savedTest.id;
+  openRevisionTestView();
 }
 
 function renderReaderToolbar() {
@@ -4811,6 +4935,8 @@ function saveAccountSettings() {
   state.generatedRevisionTest = null;
   state.revisionResponses = {};
   state.revisionSubmission = null;
+  state.revisionViewMode = "draft";
+  state.activeSavedRevisionTestId = "";
   void loadRevisionCatalogue(true);
 }
 
@@ -4863,6 +4989,7 @@ function render() {
   renderPendingUpload();
   renderDocuments();
   renderAskContext();
+  renderSavedRevisionTests();
   renderAssessments();
   renderPractice();
   renderWatchList();
@@ -4984,6 +5111,8 @@ elements.revisionSubjectSelect.addEventListener("change", () => {
   state.generatedRevisionTest = null;
   state.revisionResponses = {};
   state.revisionSubmission = null;
+  state.revisionViewMode = "draft";
+  state.activeSavedRevisionTestId = "";
   renderRevisionPanel();
 });
 elements.revisionTopicSelect.addEventListener("change", () => {
@@ -4991,6 +5120,8 @@ elements.revisionTopicSelect.addEventListener("change", () => {
   state.generatedRevisionTest = null;
   state.revisionResponses = {};
   state.revisionSubmission = null;
+  state.revisionViewMode = "draft";
+  state.activeSavedRevisionTestId = "";
   renderRevisionPanel();
 });
 elements.revisionTextInput.addEventListener("input", () => {
@@ -5003,6 +5134,7 @@ elements.revisionNotesSelect.addEventListener("change", () => {
 });
 elements.createRevisionTestButton.addEventListener("click", handleCreateRevisionTest);
 elements.submitRevisionTestButton.addEventListener("click", handleSubmitRevisionTest);
+elements.saveRevisionTestButton.addEventListener("click", saveCurrentRevisionTest);
 elements.navHomeButton.addEventListener("click", () => {
   state.currentView = "home";
   render();

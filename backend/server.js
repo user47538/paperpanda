@@ -537,11 +537,13 @@ app.post("/api/revision/submit-test", async (request, response) => {
           type: question.type,
           marks,
           score,
+          isCorrect,
           feedback: isCorrect
             ? "Correct. You selected the strongest option."
             : `Not correct. A stronger answer would choose: ${correctOption || "the best supported option"}.`,
           answerGuide: question.answerGuide || "",
-          studentAnswer
+          studentAnswer,
+          correctOption
         });
         return;
       }
