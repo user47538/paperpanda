@@ -5284,12 +5284,22 @@ function render() {
   }
 }
 
+function signInToAccount(account) {
+  state.studentName = account.name;
+  state.currentUserEmail = account.email;
+  state.studentGrade = normaliseGrade(account.grade);
+  persistSession(account.email);
+  restoreSubjectsForAccount(account);
+  openDashboard("home");
+}
+
 function handleDashboardOpen() {
   const studentName = elements.studentNameInput.value.trim();
   const studentGrade = normaliseGrade(elements.studentGradeSelect.value);
   const studentEmail = elements.studentEmailInput.value.trim().toLowerCase();
   const password = elements.studentPasswordInput.value;
   const confirmPassword = elements.studentPasswordConfirmInput.value;
+  const existingAccount = findAccountByEmail(studentEmail);
 
   elements.signInStatus.textContent = "";
 
@@ -5299,6 +5309,15 @@ function handleDashboardOpen() {
   }
 
   if (state.authMode === "create") {
+    if (existingAccount) {
+      if (existingAccount.password !== password) {
+        elements.signInStatus.textContent = "That email already has an account. Use the correct password to sign in.";
+        return;
+      }
+      signInToAccount(existingAccount);
+      return;
+    }
+
     if (!studentName) {
       elements.signInStatus.textContent = "Enter a student name.";
       return;
@@ -5324,27 +5343,16 @@ function handleDashboardOpen() {
       grade: studentGrade
     });
     saveAccounts(accounts);
-    state.studentName = studentName;
-    state.currentUserEmail = studentEmail;
-    state.studentGrade = studentGrade;
-    persistSession(studentEmail);
-    restoreSubjectsForAccount({ name: studentName, email: studentEmail, grade: studentGrade });
-    openDashboard("home");
+    signInToAccount({ name: studentName, email: studentEmail, password, grade: studentGrade });
     return;
   }
 
-  const account = findAccountByEmail(studentEmail);
-  if (!account || account.password !== password) {
+  if (!existingAccount || existingAccount.password !== password) {
     elements.signInStatus.textContent = "That email or password is incorrect.";
     return;
   }
 
-  state.studentName = account.name;
-  state.currentUserEmail = account.email;
-  state.studentGrade = normaliseGrade(account.grade);
-  persistSession(account.email);
-  restoreSubjectsForAccount(account);
-  openDashboard("home");
+  signInToAccount(existingAccount);
 }
 
 elements.askButton.addEventListener("click", handleAsk);
