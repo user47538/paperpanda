@@ -381,11 +381,30 @@ async function parsePdfBufferWithOcrFallback(buffer) {
     (sparsePages === pdfData.pages.length || getMeaningfulPdfText(pdfData.fullText).length < pdfData.pages.length * 30);
 
   if (!needsOcrFallback) {
-    return pdfData;
+    return {
+      ...pdfData,
+      ocrAttempted: false,
+      ocrUsed: false,
+      ocrError: ""
+    };
   }
 
-  const ocrPages = await ocrPdfPagesWithOpenAi(pdfData.pages);
-  return rebuildPdfTextIndexes(ocrPages);
+  try {
+    const ocrPages = await ocrPdfPagesWithOpenAi(pdfData.pages);
+    return {
+      ...rebuildPdfTextIndexes(ocrPages),
+      ocrAttempted: true,
+      ocrUsed: true,
+      ocrError: ""
+    };
+  } catch (error) {
+    return {
+      ...pdfData,
+      ocrAttempted: true,
+      ocrUsed: false,
+      ocrError: error instanceof Error ? error.message : "OCR failed."
+    };
+  }
 }
 
 app.get("/health", (_request, response) => {

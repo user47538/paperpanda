@@ -4205,7 +4205,12 @@ async function extractPdfData(file) {
   if (shouldUseBackendPdfOcr(pdfData)) {
     const formData = new FormData();
     formData.append("file", file, file.name);
-    return requestApiFormData("/api/upload/pdf", formData);
+    try {
+      return await requestApiFormData("/api/upload/pdf", formData);
+    } catch (error) {
+      console.warn("Backend OCR PDF processing failed; using browser-extracted PDF content instead.", error);
+      return pdfData;
+    }
   }
 
   return pdfData;
