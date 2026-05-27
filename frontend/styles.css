@@ -723,7 +723,8 @@ button {
   align-items: flex-end;
   gap: 24px;
   margin-bottom: 28px;
-  padding: 20px 32px 14px;
+  min-height: 136px;
+  padding: 20px 32px 18px;
   border-bottom: 1px solid #1f1c20;
   background: rgba(255, 255, 255, 0.96);
   backdrop-filter: blur(10px);
@@ -988,7 +989,7 @@ button {
   padding: 10px 0 16px;
   border-bottom: 1px solid #d9d6d2;
   position: sticky;
-  top: 108px;
+  top: 136px;
   z-index: 25;
   background: rgba(255, 255, 255, 0.99);
   backdrop-filter: blur(8px);
@@ -1458,7 +1459,7 @@ button {
 #homework-section,
 #watch-section,
 #assessments-section {
-  scroll-margin-top: 124px;
+  scroll-margin-top: 172px;
 }
 
 .assessment-item,
@@ -1657,7 +1658,7 @@ button {
 .modal {
   position: fixed;
   inset: 0;
-  z-index: 20;
+  z-index: 200;
   display: grid;
   place-items: center;
   padding: 24px;
