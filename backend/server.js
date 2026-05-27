@@ -178,6 +178,126 @@ function extractPdfPageText(items) {
   return lines.join("\n");
 }
 
+function getMeaningfulPdfText(text) {
+  return String(text || "")
+    .replace(/^Page\s+\d+\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function shouldOcrPdfPage(page) {
+  return getMeaningfulPdfText(page?.text).length < 40;
+}
+
+function rebuildPdfTextIndexes(pages) {
+  let fullText = "";
+  let currentIndex = 0;
+  const rebuiltPages = pages.map((page) => {
+    const text = String(page?.text || "").trim();
+    if (!text) {
+      return {
+        ...page,
+        text: "",
+        startIndex: currentIndex,
+        endIndex: currentIndex
+      };
+    }
+
+    const startIndex = currentIndex;
+    fullText += `${fullText ? "\n\n" : ""}${text}`;
+    currentIndex = fullText.length + 2;
+    return {
+      ...page,
+      text,
+      startIndex,
+      endIndex: startIndex + text.length
+    };
+  });
+
+  return {
+    fullText,
+    pages: rebuiltPages
+  };
+}
+
+async function ocrPdfPagesWithOpenAi(pages) {
+  requireOpenAiKey();
+  const pagesNeedingOcr = pages.filter((page) => shouldOcrPdfPage(page));
+  if (!pagesNeedingOcr.length) {
+    return pages;
+  }
+
+  const ocrByPageNumber = new Map();
+  const chunkSize = 3;
+
+  for (let index = 0; index < pagesNeedingOcr.length; index += chunkSize) {
+    const chunk = pagesNeedingOcr.slice(index, index + chunkSize);
+    const responsePayload = await callOpenAiJson("responses", {
+      model: "gpt-4o-mini",
+      input: [
+        {
+          role: "system",
+          content: [
+            {
+              type: "input_text",
+              text:
+                "You extract worksheet text from school PDF page images. Return only JSON. Read all visible text carefully. Preserve headings, labels, numbered questions, and answer lines where readable. Do not summarise. If a page has little or no readable text, return an empty string for that page."
+            }
+          ]
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text:
+                "Return a JSON object with one key, pageTranscripts. Its value must be an array of objects with pageNumber and text. Keep each page's text separate."
+            },
+            ...chunk.flatMap((page) => [
+              {
+                type: "input_text",
+                text: `Page ${page.pageNumber}`
+              },
+              {
+                type: "input_image",
+                image_url: page.imageUrl,
+                detail: "high"
+              }
+            ])
+          ]
+        }
+      ],
+      text: {
+        format: {
+          type: "json_object"
+        }
+      },
+      max_output_tokens: 4000
+    });
+
+    const parsed = extractResponseJson(responsePayload);
+    const transcripts = Array.isArray(parsed?.pageTranscripts) ? parsed.pageTranscripts : [];
+    transcripts.forEach((entry) => {
+      const pageNumber = Number(entry?.pageNumber);
+      const transcriptText = String(entry?.text || "").trim();
+      if (Number.isFinite(pageNumber)) {
+        ocrByPageNumber.set(pageNumber, transcriptText);
+      }
+    });
+  }
+
+  return pages.map((page) => {
+    const ocrText = String(ocrByPageNumber.get(page.pageNumber) || "").trim();
+    if (!ocrText) {
+      return page;
+    }
+    return {
+      ...page,
+      text: `Page ${page.pageNumber}\n${ocrText}`.trim()
+    };
+  });
+}
+
 class NodeCanvasFactory {
   create(width, height) {
     const canvas = createCanvas(Math.ceil(width), Math.ceil(height));
@@ -251,6 +371,21 @@ async function parsePdfBuffer(buffer) {
     fullText,
     pages
   };
+}
+
+async function parsePdfBufferWithOcrFallback(buffer) {
+  const pdfData = await parsePdfBuffer(buffer);
+  const sparsePages = pdfData.pages.filter((page) => shouldOcrPdfPage(page)).length;
+  const needsOcrFallback =
+    sparsePages > 0 &&
+    (sparsePages === pdfData.pages.length || getMeaningfulPdfText(pdfData.fullText).length < pdfData.pages.length * 30);
+
+  if (!needsOcrFallback) {
+    return pdfData;
+  }
+
+  const ocrPages = await ocrPdfPagesWithOpenAi(pdfData.pages);
+  return rebuildPdfTextIndexes(ocrPages);
 }
 
 app.get("/health", (_request, response) => {
@@ -668,7 +803,7 @@ app.post("/api/upload/pdf", upload.single("file"), async (request, response) => 
       return;
     }
 
-    const pdfData = await parsePdfBuffer(request.file.buffer);
+    const pdfData = await parsePdfBufferWithOcrFallback(request.file.buffer);
     response.json(pdfData);
   } catch (error) {
     response.status(500).json({

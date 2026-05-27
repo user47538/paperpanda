@@ -4134,6 +4134,23 @@ function extractPdfPageText(items) {
   return lines.join("\n");
 }
 
+function getMeaningfulPdfText(text) {
+  return String(text || "")
+    .replace(/^Page\s+\d+\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function shouldUseBackendPdfOcr(pdfData) {
+  const pages = Array.isArray(pdfData?.pages) ? pdfData.pages : [];
+  if (!pages.length) {
+    return false;
+  }
+
+  const sparsePages = pages.filter((page) => getMeaningfulPdfText(page.text).length < 40).length;
+  return sparsePages > 0 && (sparsePages === pages.length || getMeaningfulPdfText(pdfData.fullText).length < pages.length * 30);
+}
+
 async function renderPdfPageToDataUrl(page) {
   const viewport = page.getViewport({ scale: 1.25 });
   const canvas = document.createElement("canvas");
@@ -4180,10 +4197,18 @@ async function extractPdfData(file) {
     }
   }
 
-  return {
+  const pdfData = {
     fullText,
     pages
   };
+
+  if (shouldUseBackendPdfOcr(pdfData)) {
+    const formData = new FormData();
+    formData.append("file", file, file.name);
+    return requestApiFormData("/api/upload/pdf", formData);
+  }
+
+  return pdfData;
 }
 
 async function loadPdfJs() {
