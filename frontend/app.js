@@ -730,14 +730,22 @@ function getSelectedSubject() {
   return state.subjects.find((subject) => subject.id === state.selectedSubjectId);
 }
 
+function isHomeworkDocument(documentRecord) {
+  return Boolean(documentRecord?.flags?.homework);
+}
+
+function getVisibleSubjectDocuments(subject) {
+  return getSortedDocuments(subject).filter((documentRecord) => !isHomeworkDocument(documentRecord));
+}
+
 function getSelectedDocument() {
   const subject = getSelectedSubject();
-  return subject?.documents.find((doc) => doc.id === state.selectedDocumentId) || null;
+  return getVisibleSubjectDocuments(subject || { documents: [] }).find((doc) => doc.id === state.selectedDocumentId) || null;
 }
 
 function getAskDocument() {
   const subject = getSelectedSubject();
-  return subject?.documents.find((doc) => doc.id === state.askDocumentId) || null;
+  return getVisibleSubjectDocuments(subject || { documents: [] }).find((doc) => doc.id === state.askDocumentId) || null;
 }
 
 function getUploadSubject() {
@@ -1341,7 +1349,7 @@ function restoreSubjectsForAccount(account) {
     state.selectedSubjectId = state.subjects[0]?.id || "";
   }
   const selectedSubject = state.subjects.find((subject) => subject.id === state.selectedSubjectId);
-  const firstDocumentId = getSortedDocuments(selectedSubject || { documents: [] })[0]?.id || null;
+  const firstDocumentId = getVisibleSubjectDocuments(selectedSubject || { documents: [] })[0]?.id || null;
   state.selectedDocumentId = firstDocumentId;
   state.askDocumentId = firstDocumentId;
   state.selectedDocumentIds = [];
@@ -1557,7 +1565,7 @@ function getAllHomeworkBundles() {
 }
 
 function getAllDocumentBundles(subject) {
-  return getDocumentBundlesByFilter(subject, () => true);
+  return getDocumentBundlesByFilter(subject, (documentRecord) => !isHomeworkDocument(documentRecord));
 }
 
 function getUnreadDocumentMetrics() {
@@ -1847,8 +1855,8 @@ function renderSubjectList() {
       state.expandedDocumentGroups = {};
       state.watchExpanded = false;
       state.documentsExpanded = false;
-      state.selectedDocumentId = getSortedDocuments(subject)[0]?.id || null;
-      state.askDocumentId = getSortedDocuments(subject)[0]?.id || null;
+      state.selectedDocumentId = getVisibleSubjectDocuments(subject)[0]?.id || null;
+      state.askDocumentId = getVisibleSubjectDocuments(subject)[0]?.id || null;
       elements.askInput.value = "";
       render();
     });
@@ -2532,7 +2540,7 @@ function getSelectedDocumentIndex() {
   if (!subject || !selectedDocument) {
     return -1;
   }
-  return getSortedDocuments(subject).findIndex((documentRecord) => documentRecord.id === selectedDocument.id);
+  return getVisibleSubjectDocuments(subject).findIndex((documentRecord) => documentRecord.id === selectedDocument.id);
 }
 
 function selectAdjacentDocument(direction) {
@@ -2541,7 +2549,7 @@ function selectAdjacentDocument(direction) {
   if (!subject || selectedIndex === -1) {
     return;
   }
-  const sortedDocuments = getSortedDocuments(subject);
+  const sortedDocuments = getVisibleSubjectDocuments(subject);
   const nextDocument = sortedDocuments[selectedIndex + direction];
   if (!nextDocument) {
     return;
@@ -2552,7 +2560,7 @@ function selectAdjacentDocument(direction) {
 }
 
 function renderDocumentBulkActions(subject) {
-  const documentIds = subject.documents.map((documentRecord) => documentRecord.id);
+  const documentIds = getVisibleSubjectDocuments(subject).map((documentRecord) => documentRecord.id);
   state.selectedDocumentIds = state.selectedDocumentIds.filter((documentId) => documentIds.includes(documentId));
   const allSelected = Boolean(documentIds.length) && state.selectedDocumentIds.length === documentIds.length;
   elements.documentsSelectAllButton.disabled = !documentIds.length;
@@ -2666,7 +2674,7 @@ function openSavedRevisionTest(savedTestId) {
 function renderReaderToolbar() {
   const selectedDocument = getSelectedDocument();
   const selectedIndex = getSelectedDocumentIndex();
-  const documentCount = getSelectedSubject()?.documents.length || 0;
+  const documentCount = getVisibleSubjectDocuments(getSelectedSubject() || { documents: [] }).length || 0;
   const hasDocument = Boolean(selectedDocument);
 
   elements.readerPreviousButton.disabled = !hasDocument || selectedIndex <= 0;
@@ -2737,7 +2745,9 @@ function renderDocuments() {
     return;
   }
 
-  if (!subject.documents.length) {
+  const sortedDocuments = getVisibleSubjectDocuments(subject);
+
+  if (!sortedDocuments.length) {
     elements.documentsBody.innerHTML = `
       <tr>
         <td colspan="5">
@@ -2755,10 +2765,8 @@ function renderDocuments() {
     return;
   }
 
-  const sortedDocuments = getSortedDocuments(subject);
   const unreadDocuments = sortedDocuments.filter((document) => !document.reviewed);
   const reviewedDocuments = sortedDocuments.filter((document) => document.reviewed);
-  const groupedDocuments = getDocumentGroups(subject);
   const unreadGroups = getDocumentGroupsFromDocuments(unreadDocuments);
   const reviewedGroups = getDocumentGroupsFromDocuments(reviewedDocuments);
 
@@ -3194,10 +3202,10 @@ function deleteDocuments(documentIds) {
   subject.assessments = subject.assessments.filter((assessment) => assessment.linkedDocumentIds.length || !assessment.autoCreated);
   state.selectedDocumentIds = state.selectedDocumentIds.filter((documentId) => !uniqueDocumentIds.includes(documentId));
   if (uniqueDocumentIds.includes(state.selectedDocumentId)) {
-    state.selectedDocumentId = getSortedDocuments(subject)[0]?.id || null;
+    state.selectedDocumentId = getVisibleSubjectDocuments(subject)[0]?.id || null;
   }
   if (uniqueDocumentIds.includes(state.askDocumentId)) {
-    state.askDocumentId = getSortedDocuments(subject)[0]?.id || null;
+    state.askDocumentId = getVisibleSubjectDocuments(subject)[0]?.id || null;
   }
   syncAutoWatchForSubject(subject);
   persistSubjects();
@@ -4859,7 +4867,7 @@ async function processFiles(fileList) {
     }
 
     persistSubjects();
-    state.selectedDocumentId = getSortedDocuments(subject)[0]?.id || null;
+    state.selectedDocumentId = getVisibleSubjectDocuments(subject)[0]?.id || null;
     elements.documentUpload.value = "";
     clearUploadOptions();
     render();
@@ -5453,10 +5461,11 @@ elements.documentsToggleButton.addEventListener("click", () => {
 });
 elements.documentsSelectAllButton.addEventListener("click", () => {
   const subject = getSelectedSubject();
-  if (!subject?.documents.length) {
+  const visibleDocuments = getVisibleSubjectDocuments(subject || { documents: [] });
+  if (!visibleDocuments.length) {
     return;
   }
-  const allDocumentIds = subject.documents.map((documentRecord) => documentRecord.id);
+  const allDocumentIds = visibleDocuments.map((documentRecord) => documentRecord.id);
   const allSelected = state.selectedDocumentIds.length === allDocumentIds.length;
   state.selectedDocumentIds = allSelected ? [] : allDocumentIds;
   renderDocuments();
