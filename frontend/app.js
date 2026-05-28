@@ -2689,6 +2689,8 @@ function renderDocumentGroupRows(group, { reviewedSection = false } = {}) {
   const isExpanded = Boolean(state.expandedDocumentGroups[group.id]);
   const visibleDocuments =
     group.isPageGroup && !isExpanded ? [group.documents[0]] : group.documents;
+  const groupDocumentIds = group.documents.map((documentRecord) => documentRecord.id);
+  const groupSelected = groupDocumentIds.every((documentId) => state.selectedDocumentIds.includes(documentId));
   const dateCellMarkup = group.isPageGroup
     ? `
       <button type="button" class="documents-date-button" data-document-group-toggle="${group.id}">
@@ -2702,6 +2704,20 @@ function renderDocumentGroupRows(group, { reviewedSection = false } = {}) {
     .map(
       (document, index) => `
         <tr class="${document.id === state.selectedDocumentId ? "is-selected" : ""}${state.selectedDocumentIds.includes(document.id) ? " is-bulk-selected" : ""}${reviewedSection ? " documents-row--reviewed" : ""}">
+          ${
+            index === 0
+              ? `<td rowspan="${visibleDocuments.length}">
+                  <label class="document-select-toggle">
+                    <input
+                      type="checkbox"
+                      data-document-select-group="${group.id}"
+                      ${groupSelected ? "checked" : ""}
+                    />
+                    <span>Select</span>
+                  </label>
+                </td>`
+              : ""
+          }
           ${
             index === 0
               ? `<td rowspan="${visibleDocuments.length}">${dateCellMarkup}</td>`
@@ -2750,7 +2766,7 @@ function renderDocuments() {
   if (!sortedDocuments.length) {
     elements.documentsBody.innerHTML = `
       <tr>
-        <td colspan="5">
+        <td colspan="6">
           <div class="empty-state">
             No documents uploaded for this subject yet. Add worksheets, rubrics, or weekly notes.
           </div>
@@ -2779,23 +2795,24 @@ function renderDocuments() {
   }
 
   const visibleUnreadGroups = state.documentsExpanded ? unreadGroups : unreadGroups.slice(0, 6);
+  const combinedGroupMap = new Map([...visibleUnreadGroups, ...reviewedGroups].map((group) => [group.id, group]));
   const rowsMarkup = [
     `
       <tr class="documents-section-row">
-        <td colspan="5">Newly uploaded</td>
+        <td colspan="6">Newly uploaded</td>
       </tr>
     `,
     visibleUnreadGroups.length
       ? visibleUnreadGroups.map((group) => renderDocumentGroupRows(group)).join("")
       : `
         <tr class="documents-empty-row">
-          <td colspan="5"><div class="empty-state">No new documents waiting to be read.</div></td>
+          <td colspan="6"><div class="empty-state">No new documents waiting to be read.</div></td>
         </tr>
       `,
     reviewedGroups.length
       ? `
         <tr class="documents-section-row documents-section-row--reviewed">
-          <td colspan="5">Read / listened</td>
+          <td colspan="6">Read / listened</td>
         </tr>
         ${reviewedGroups.map((group) => renderDocumentGroupRows(group, { reviewedSection: true })).join("")}
       `
@@ -2824,6 +2841,27 @@ function renderDocuments() {
       state.selectedDocumentId = documentRecord.id;
       renderDocuments();
       scrollReaderIntoView();
+    });
+  });
+
+  elements.documentsBody.querySelectorAll("[data-document-select-group]").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      const groupId = checkbox.dataset.documentSelectGroup;
+      if (!groupId) {
+        return;
+      }
+      const group = combinedGroupMap.get(groupId);
+      if (!group) {
+        return;
+      }
+      const groupIds = group.documents.map((documentRecord) => documentRecord.id);
+      if (checkbox.checked) {
+        state.selectedDocumentIds = [...new Set([...state.selectedDocumentIds, ...groupIds])];
+      } else {
+        const groupIdSet = new Set(groupIds);
+        state.selectedDocumentIds = state.selectedDocumentIds.filter((documentId) => !groupIdSet.has(documentId));
+      }
+      renderDocuments();
     });
   });
 
@@ -5517,7 +5555,7 @@ elements.documentsDeleteSelectedButton.addEventListener("click", () => {
   if (!confirmed) {
     return;
   }
-  deleteDocuments(state.selectedDocumentIds);
+  deleteDocuments([...state.selectedDocumentIds]);
 });
 elements.watchToggleButton.addEventListener("click", () => {
   state.watchExpanded = !state.watchExpanded;

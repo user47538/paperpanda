@@ -1229,6 +1229,19 @@ button {
   font-size: 0.9rem;
 }
 
+.document-select-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.document-select-toggle span {
+  display: none;
+}
+
+.document-select-toggle input,
 .document-review-toggle input {
   width: 16px;
   height: 16px;
