@@ -377,7 +377,7 @@ const state = {
   askResponseSpeaking: false,
   expandedDocumentGroups: {},
   attachmentModalOpen: false,
-  activeAttachmentAssessment: null,
+  activeAttachmentTarget: null,
   expandedAttachmentGroups: {},
   editAssessmentModalOpen: false,
   activeEditAssessment: null,
@@ -1742,7 +1742,7 @@ function buildHomeHomeworkCardMarkup({ subject, bundle }, index) {
   const chips = [
     bundle.documents[0]?.type || "Class notes",
     bundle.documents.length > 1 ? `${bundle.documents.length} pages` : bundle.documents[0]?.pageNumber ? "1 page" : bundle.documents[0]?.type || "Note",
-    bundle.workNotes ? "Writing started" : "Needs a draft"
+    getBundleWorkNotes(bundle) ? "Writing started" : "Needs a draft"
   ];
 
   return `
@@ -2519,10 +2519,10 @@ function renderDockContext() {
           .map((bundle) =>
             createDockTileMarkup({
               title: bundle.title,
-              meta: bundle.workNotes ? "Writing started" : "Needs a first draft",
+              meta: getBundleWorkNotes(bundle) ? "Writing started" : "Needs a first draft",
               tint: "peach",
               emoji: "✍️",
-              tag: bundle.workNotes ? "Now" : "Todo",
+              tag: getBundleWorkNotes(bundle) ? "Now" : "Todo",
               active: !bundle.workNotes
             })
           )
@@ -3053,8 +3053,64 @@ function buildDocumentBundleFromDocuments(documents) {
       .map((documentRecord) => String(documentRecord.content || "").trim())
       .filter(Boolean)
       .join("\n\n"),
-    workNotes: sortedDocuments.find((documentRecord) => documentRecord.workNotes)?.workNotes || "",
+    workNotes:
+      firstDocument.flags?.homeworkDraft ||
+      firstDocument.workNotes ||
+      sortedDocuments.find((documentRecord) => documentRecord.workNotes)?.workNotes ||
+      "",
     reviewed: sortedDocuments.every((documentRecord) => documentRecord.reviewed)
+  };
+}
+
+function getBundlePrimaryDocument(bundle) {
+  return Array.isArray(bundle?.documents) && bundle.documents.length ? bundle.documents[0] : null;
+}
+
+function getBundleStoredLinkedDocumentIds(bundle) {
+  const primaryDocument = getBundlePrimaryDocument(bundle);
+  return Array.isArray(primaryDocument?.flags?.linkedDocumentIds) ? [...new Set(primaryDocument.flags.linkedDocumentIds)] : [];
+}
+
+function setBundleStoredLinkedDocumentIds(bundle, linkedDocumentIds) {
+  const primaryDocument = getBundlePrimaryDocument(bundle);
+  if (!primaryDocument) {
+    return;
+  }
+  primaryDocument.flags = {
+    ...(primaryDocument.flags || {}),
+    linkedDocumentIds: [...new Set(linkedDocumentIds)]
+  };
+}
+
+function getBundleStoredTaskSteps(bundle) {
+  const primaryDocument = getBundlePrimaryDocument(bundle);
+  return Array.isArray(primaryDocument?.flags?.aiTaskSteps) ? primaryDocument.flags.aiTaskSteps.filter(Boolean) : [];
+}
+
+function setBundleStoredTaskSteps(bundle, steps) {
+  const primaryDocument = getBundlePrimaryDocument(bundle);
+  if (!primaryDocument) {
+    return;
+  }
+  primaryDocument.flags = {
+    ...(primaryDocument.flags || {}),
+    aiTaskSteps: steps
+  };
+}
+
+function getBundleWorkNotes(bundle) {
+  const primaryDocument = getBundlePrimaryDocument(bundle);
+  return primaryDocument?.flags?.homeworkDraft || primaryDocument?.workNotes || bundle?.workNotes || "";
+}
+
+function setBundleWorkNotes(bundle, value) {
+  const primaryDocument = getBundlePrimaryDocument(bundle);
+  if (!primaryDocument) {
+    return;
+  }
+  primaryDocument.flags = {
+    ...(primaryDocument.flags || {}),
+    homeworkDraft: value
   };
 }
 
@@ -3735,7 +3791,6 @@ function renderReader() {
     const reviewToggle = document.getElementById("reader-reviewed-toggle");
     saveButton.addEventListener("click", () => {
       selectedDocument.content = editor.value;
-      selectedDocument.workNotes = editor.value;
       syncAutoWatchForSubject(getSelectedSubject());
       persistSubjects();
       elements.uploadStatus.textContent = "Homework edits saved.";
@@ -3953,7 +4008,7 @@ function attachAssessmentActionHandlers(container, subject) {
       }
 
       if (button.dataset.assessmentAction === "attach") {
-        openAttachNotesModal(subject.id, assessmentId);
+        openAttachNotesModal({ kind: "assessment", subjectId: subject.id, assessmentId });
       }
 
       if (button.dataset.assessmentAction === "edit") {
@@ -3971,8 +4026,8 @@ function attachAssessmentActionHandlers(container, subject) {
   });
 }
 
-function openAttachNotesModal(subjectId, assessmentId) {
-  state.activeAttachmentAssessment = { subjectId, assessmentId };
+function openAttachNotesModal(target) {
+  state.activeAttachmentTarget = target;
   state.attachmentModalOpen = true;
   elements.attachNotesModal.classList.remove("hidden");
   elements.attachNotesModal.setAttribute("aria-hidden", "false");
@@ -3981,100 +4036,132 @@ function openAttachNotesModal(subjectId, assessmentId) {
 
 function closeAttachNotesModal() {
   state.attachmentModalOpen = false;
-  state.activeAttachmentAssessment = null;
+  state.activeAttachmentTarget = null;
   state.expandedAttachmentGroups = {};
   elements.attachNotesModal.classList.add("hidden");
   elements.attachNotesModal.setAttribute("aria-hidden", "true");
 }
 
 function renderAttachNotesModal() {
-  const context = state.activeAttachmentAssessment;
+  const context = state.activeAttachmentTarget;
   if (!context) {
-    elements.attachNotesList.innerHTML = `<div class="empty-state">Select an assessment first.</div>`;
+    elements.attachNotesList.innerHTML = `<div class="empty-state">Select a task first.</div>`;
     return;
   }
 
   const subject = state.subjects.find((item) => item.id === context.subjectId);
-  const assessment = subject?.assessments.find((item) => item.id === context.assessmentId);
-  if (!subject || !assessment) {
-    elements.attachNotesList.innerHTML = `<div class="empty-state">This assessment is no longer available.</div>`;
+  if (!subject) {
+    elements.attachNotesList.innerHTML = `<div class="empty-state">This task is no longer available.</div>`;
     return;
   }
 
-  elements.attachNotesSummary.textContent = `${assessment.componentTask || assessment.title} · ${assessment.linkedDocumentIds.length} page${assessment.linkedDocumentIds.length === 1 ? "" : "s"} attached`;
+  let attachedDocumentIds = [];
+  let summaryLabel = "";
+  let excludedGroupId = "";
+
+  if (context.kind === "assessment") {
+    const assessment = subject.assessments.find((item) => item.id === context.assessmentId);
+    if (!assessment) {
+      elements.attachNotesList.innerHTML = `<div class="empty-state">This assessment is no longer available.</div>`;
+      return;
+    }
+    attachedDocumentIds = assessment.linkedDocumentIds || [];
+    const bundleCount = getLinkedDocumentBundles(subject, attachedDocumentIds).length;
+    summaryLabel = `${assessment.componentTask || assessment.title} · ${bundleCount} document${bundleCount === 1 ? "" : "s"} attached`;
+  } else if (context.kind === "homework") {
+    const homeworkBundle = findHomeworkBundle(subject, context.bundleId);
+    if (!homeworkBundle) {
+      elements.attachNotesList.innerHTML = `<div class="empty-state">This homework task is no longer available.</div>`;
+      return;
+    }
+    attachedDocumentIds = getBundleStoredLinkedDocumentIds(homeworkBundle);
+    const bundleCount = getLinkedDocumentBundles(subject, attachedDocumentIds).filter((bundle) => bundle.id !== homeworkBundle.id).length;
+    summaryLabel = `${homeworkBundle.title} · ${bundleCount} document${bundleCount === 1 ? "" : "s"} attached`;
+    excludedGroupId = homeworkBundle.id;
+  } else {
+    elements.attachNotesList.innerHTML = `<div class="empty-state">This task type is not supported yet.</div>`;
+    return;
+  }
+
+  elements.attachNotesSummary.textContent = summaryLabel;
 
   if (!subject.documents.length) {
     elements.attachNotesList.innerHTML = `<div class="empty-state">Upload documents to this subject before attaching notes.</div>`;
     return;
   }
 
-  const groups = getDocumentGroups(subject);
+  const groups = getDocumentGroups(subject).filter((group) => group.id !== excludedGroupId);
+  if (!groups.length) {
+    elements.attachNotesList.innerHTML = `<div class="empty-state">No other documents are available to attach yet.</div>`;
+    return;
+  }
   elements.attachNotesList.innerHTML = groups
     .map((group) => {
-      const isExpanded = Boolean(state.expandedAttachmentGroups[group.id]);
-      const visibleDocuments = group.isPageGroup && !isExpanded ? [group.documents[0]] : group.documents;
+      const groupDocumentIds = group.documents.map((documentRecord) => documentRecord.id);
+      const isSelected = groupDocumentIds.every((documentId) => attachedDocumentIds.includes(documentId));
+      const previewDocument = group.documents[0];
       return `
         <section class="attach-notes-group">
-          <button type="button" class="attach-notes-group__toggle" data-attach-group-toggle="${group.id}">
-            <strong>${escapeHtml(group.added)}</strong>
-            <span>${group.isPageGroup ? `${group.documents.length} pages` : `${group.documents.length} file${group.documents.length === 1 ? "" : "s"}`} · ${isExpanded ? "Hide" : "Show all"}</span>
-          </button>
-          <div class="attach-notes-pages">
-            ${visibleDocuments
-              .map(
-                (documentRecord) => `
-                  <article class="attach-notes-page">
-                    ${
-                      documentRecord.previewImageUrl
-                        ? `<img class="attach-notes-page__preview" src="${escapeHtml(documentRecord.previewImageUrl)}" alt="${escapeHtml(documentRecord.title)} preview" />`
-                        : `<div class="empty-state">No preview available</div>`
-                    }
-                    <div class="attach-notes-page__body">
-                      <label class="attach-notes-page__select">
-                        <input type="checkbox" data-attach-document-id="${documentRecord.id}" ${assessment.linkedDocumentIds.includes(documentRecord.id) ? "checked" : ""} />
-                        <span>${escapeHtml(documentRecord.title)}</span>
-                      </label>
-                      <div class="attach-notes-page__meta">
-                        ${escapeHtml(documentRecord.type)}${documentRecord.pageNumber ? ` · Page ${documentRecord.pageNumber}` : ""}
-                      </div>
-                    </div>
-                  </article>
-                `
-              )
-              .join("")}
-          </div>
+          <article class="attach-notes-page">
+            ${
+              previewDocument?.previewImageUrl
+                ? `<img class="attach-notes-page__preview" src="${escapeHtml(previewDocument.previewImageUrl)}" alt="${escapeHtml(previewDocument.title)} preview" />`
+                : `<div class="empty-state">No preview available</div>`
+            }
+            <div class="attach-notes-page__body">
+              <label class="attach-notes-page__select">
+                <input type="checkbox" data-attach-group-id="${group.id}" ${isSelected ? "checked" : ""} />
+                <span>${escapeHtml(group.title)}</span>
+              </label>
+              <div class="attach-notes-page__meta">
+                ${escapeHtml(group.type)} · ${group.documents.length} ${group.documents.length === 1 ? "page" : "pages"} · Added ${escapeHtml(group.added)}
+              </div>
+            </div>
+          </article>
         </section>
       `;
     })
     .join("");
 
-  elements.attachNotesList.querySelectorAll("[data-attach-group-toggle]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const groupId = button.dataset.attachGroupToggle;
+  elements.attachNotesList.querySelectorAll("[data-attach-group-id]").forEach((checkbox) => {
+    checkbox.addEventListener("change", (event) => {
+      const groupId = event.target.dataset.attachGroupId;
       if (!groupId) {
         return;
       }
-      state.expandedAttachmentGroups[groupId] = !state.expandedAttachmentGroups[groupId];
-      renderAttachNotesModal();
-    });
-  });
-
-  elements.attachNotesList.querySelectorAll("[data-attach-document-id]").forEach((checkbox) => {
-    checkbox.addEventListener("change", (event) => {
-      const documentId = event.target.dataset.attachDocumentId;
-      if (!documentId) {
+      const selectedGroup = groups.find((group) => group.id === groupId);
+      if (!selectedGroup) {
         return;
       }
+      const selectedGroupIds = selectedGroup.documents.map((documentRecord) => documentRecord.id);
+      let nextIds = [...attachedDocumentIds];
       if (event.target.checked) {
-        if (!assessment.linkedDocumentIds.includes(documentId)) {
-          assessment.linkedDocumentIds.push(documentId);
-        }
+        nextIds = [...new Set([...nextIds, ...selectedGroupIds])];
       } else {
-        assessment.linkedDocumentIds = assessment.linkedDocumentIds.filter((id) => id !== documentId);
+        const removeSet = new Set(selectedGroupIds);
+        nextIds = nextIds.filter((id) => !removeSet.has(id));
+      }
+
+      if (context.kind === "assessment") {
+        const assessment = subject.assessments.find((item) => item.id === context.assessmentId);
+        if (!assessment) {
+          return;
+        }
+        assessment.linkedDocumentIds = nextIds;
+      } else if (context.kind === "homework") {
+        const homeworkBundle = findHomeworkBundle(subject, context.bundleId);
+        if (!homeworkBundle) {
+          return;
+        }
+        setBundleStoredLinkedDocumentIds(homeworkBundle, nextIds);
       }
       persistSubjects();
       renderAssessments();
+      renderPractice();
       renderUpcomingModal();
+      if (state.activeTask) {
+        renderTaskView();
+      }
       renderAttachNotesModal();
     });
   });
@@ -4286,14 +4373,17 @@ function estimateTaskMinutes(text) {
 }
 
 function buildHomeworkTaskSteps(homeworkBundle) {
-  const workLength = String(homeworkBundle.workNotes || "").trim().length;
+  const workLength = String(getBundleWorkNotes(homeworkBundle) || "").trim().length;
   const baseTitle = getBaseDocumentTitle(homeworkBundle) || homeworkBundle.title;
-  const lines = [
-    `Listen to ${baseTitle} (Panda reads aloud)`,
-    "Underline one keyword per section as you go",
-    "Write one clear sentence describing each key idea",
-    "Check your workbook answer and mark it complete"
-  ];
+  const storedSteps = getBundleStoredTaskSteps(homeworkBundle);
+  const lines = storedSteps.length
+    ? storedSteps
+    : [
+        `Listen to ${baseTitle} (Panda reads aloud)`,
+        "Underline one keyword per section as you go",
+        "Write one clear sentence describing each key idea",
+        "Check your workbook answer and mark it complete"
+      ];
   const completedCount = workLength > 260 ? 4 : workLength > 170 ? 3 : workLength > 80 ? 2 : workLength > 20 ? 1 : 0;
   return lines.map((label, index) => ({
     number: index + 1,
@@ -4306,7 +4396,7 @@ function buildHomeworkTaskSteps(homeworkBundle) {
 function buildAssessmentTaskStages(assessment, linkedDocumentBundles) {
   const workLength = String(assessment.workNotes || "").trim().length;
   const linkedTitles = linkedDocumentBundles.slice(0, 2).map((bundle) => bundle.title);
-  const stageDefinitions = [
+  const fallbackDefinitions = [
     {
       title: "Plan",
       items: [
@@ -4343,6 +4433,33 @@ function buildAssessmentTaskStages(assessment, linkedDocumentBundles) {
       doneCount: assessment.completed ? 1 : 0
     }
   ];
+  const storedStages = Array.isArray(assessment.aiTaskStages)
+    ? assessment.aiTaskStages.filter((stage) => stage?.title && Array.isArray(stage.items) && stage.items.length)
+    : [];
+  const stageDefinitions = storedStages.length
+    ? storedStages.map((stage) => ({
+        title: stage.title,
+        items: stage.items,
+        doneCount: 0
+      }))
+    : fallbackDefinitions;
+
+  if (storedStages.length) {
+    const totalItems = stageDefinitions.reduce((sum, stage) => sum + stage.items.length, 0);
+    let remainingDone = assessment.completed
+      ? totalItems
+      : workLength > 320
+        ? Math.max(1, Math.round(totalItems * 0.75))
+        : workLength > 180
+          ? Math.max(1, Math.round(totalItems * 0.5))
+          : workLength > 90
+            ? Math.max(1, Math.round(totalItems * 0.25))
+            : 0;
+    stageDefinitions.forEach((stage) => {
+      stage.doneCount = Math.min(stage.items.length, remainingDone);
+      remainingDone = Math.max(0, remainingDone - stage.doneCount);
+    });
+  }
 
   const firstIncompleteStageIndex = stageDefinitions.findIndex((stage) => stage.doneCount < stage.items.length);
 
@@ -4353,6 +4470,92 @@ function buildAssessmentTaskStages(assessment, linkedDocumentBundles) {
     doneCount: Math.min(stage.doneCount, stage.items.length),
     active: stageIndex === (firstIncompleteStageIndex === -1 ? stageDefinitions.length - 1 : firstIncompleteStageIndex)
   }));
+}
+
+function parseChecklistLines(answer, { max = 4 } = {}) {
+  return String(answer || "")
+    .split(/\n+/)
+    .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "").trim())
+    .filter((line) => line && !/^panda\b/i.test(line) && !/^sure\b/i.test(line))
+    .slice(0, max);
+}
+
+function parseAssessmentStages(answer) {
+  const lines = String(answer || "")
+    .split(/\n+/)
+    .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "").trim())
+    .filter(Boolean)
+    .slice(0, 4);
+  return lines
+    .map((line, index) => {
+      const [titlePart, itemsPart] = line.includes(":") ? line.split(/:\s*/, 2) : [`Stage ${index + 1}`, line];
+      const items = String(itemsPart || "")
+        .split(/\s*;\s*/)
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .slice(0, 4);
+      if (!items.length) {
+        return null;
+      }
+      return {
+        title: titlePart.trim() || `Stage ${index + 1}`,
+        items
+      };
+    })
+    .filter(Boolean);
+}
+
+async function simplifyHomeworkBundle(homeworkBundle, subject) {
+  const prompt = [
+    "Break this homework into exactly 4 checkbox steps.",
+    "Return only 4 lines, one step per line, with no intro or explanation.",
+    `Homework title: ${homeworkBundle.title}`,
+    clipText(homeworkBundle.content || "", 1800)
+  ].filter(Boolean).join("\n\n");
+  const answer = await requestAskAnswer(prompt, subject, {
+    title: homeworkBundle.title,
+    type: "Homework",
+    content: [homeworkBundle.content || "", getBundleWorkNotes(homeworkBundle) || ""].filter(Boolean).join("\n\n")
+  });
+  const nextSteps = parseChecklistLines(answer, { max: 4 });
+  if (nextSteps.length) {
+    setBundleStoredTaskSteps(homeworkBundle, nextSteps);
+    persistSubjects();
+  }
+  state.taskAskResponse = answer;
+  state.taskAskStatus = "";
+  renderPractice();
+  if (state.activeTask?.kind === "homework" && state.activeTask.id === homeworkBundle.id) {
+    renderTaskView();
+  } else {
+    renderDockContext();
+  }
+}
+
+async function simplifyAssessmentTask(assessment, subject) {
+  const linkedDocumentBundles = getLinkedDocumentBundles(subject, assessment.linkedDocumentIds);
+  const prompt = [
+    "Break this assessment into exactly 4 stages.",
+    "Return exactly 4 lines using the format \"Stage title: item one; item two; item three\".",
+    `Assessment: ${assessment.componentTask || assessment.title}`,
+    `Due: ${formatAssessmentDueLabel(assessment.dueDate)}`,
+    clipText(assessment.description || "", 800),
+    ...linkedDocumentBundles.slice(0, 2).map((bundle) => `${bundle.title}\n${clipText(bundle.content || "", 700)}`)
+  ].filter(Boolean).join("\n\n");
+  const answer = await requestAskAnswer(prompt, subject, buildTaskAskDocument(subject, {
+    kind: "assessment",
+    assessment,
+    linkedDocumentBundles
+  }));
+  const nextStages = parseAssessmentStages(answer);
+  if (nextStages.length) {
+    assessment.aiTaskStages = nextStages;
+    persistSubjects();
+  }
+  state.taskAskResponse = answer;
+  state.taskAskStatus = "";
+  renderAssessments();
+  renderTaskView();
 }
 
 function buildTaskAskDocument(subject, taskContext) {
@@ -4375,7 +4578,7 @@ function buildTaskAskDocument(subject, taskContext) {
   return {
     title: taskContext.homeworkBundle.title,
     type: "Homework",
-    content: [taskContext.homeworkBundle.content || "", taskContext.homeworkBundle.workNotes || ""].filter(Boolean).join("\n\n")
+    content: [taskContext.homeworkBundle.content || "", getBundleWorkNotes(taskContext.homeworkBundle) || ""].filter(Boolean).join("\n\n")
   };
 }
 
@@ -4440,24 +4643,82 @@ function bindTaskPopupActions(config) {
   });
 
   document.querySelectorAll("[data-task-ask-prompt]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
+      const action = button.dataset.taskAction;
+      const subject = getSelectedSubject();
+      if (!subject) {
+        return;
+      }
+      if (action === "simplify-homework") {
+        const homeworkBundle = findHomeworkBundle(subject, config.taskId);
+        if (!homeworkBundle) {
+          return;
+        }
+        state.taskAskStatus = "Breaking this into steps...";
+        renderTaskView();
+        try {
+          await simplifyHomeworkBundle(homeworkBundle, subject);
+        } catch (error) {
+          state.taskAskStatus = error instanceof Error ? `Ask Panda failed: ${error.message}` : "Ask Panda failed.";
+          renderTaskView();
+        }
+        return;
+      }
+      if (action === "simplify-assessment") {
+        const assessment = subject.assessments.find((item) => item.id === config.taskId);
+        if (!assessment) {
+          return;
+        }
+        state.taskAskStatus = "Breaking this into stages...";
+        renderTaskView();
+        try {
+          await simplifyAssessmentTask(assessment, subject);
+        } catch (error) {
+          state.taskAskStatus = error instanceof Error ? `Ask Panda failed: ${error.message}` : "Ask Panda failed.";
+          renderTaskView();
+        }
+        return;
+      }
       handleTaskAsk(button.dataset.taskAskPrompt || "");
     });
   });
 
+  document.querySelectorAll(".task-note-drop").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (config.taskKind === "assessment") {
+        openAttachNotesModal({ kind: "assessment", subjectId: state.selectedSubjectId, assessmentId: config.taskId });
+        return;
+      }
+      if (config.taskKind === "homework") {
+        openAttachNotesModal({ kind: "homework", subjectId: state.selectedSubjectId, bundleId: config.taskId });
+      }
+    });
+  });
+
   document.getElementById("task-read-aloud-button")?.addEventListener("click", () => {
+    const taskAudioContext = `task:${config.taskKind}:${config.taskId}`;
+    if (currentAudioContext === taskAudioContext) {
+      stopListening();
+      renderTaskView();
+      return;
+    }
     const textToRead = config.readAloudText || config.title;
     speakTextWithOpenAi(textToRead, {
-      context: "ask",
+      context: taskAudioContext,
       statusMessages: {
         preparing: "Preparing task audio...",
         playing: "Reading task aloud...",
         error: "Task audio playback failed."
       }
-    }).catch((error) => {
-      state.taskAskStatus = error instanceof Error ? `Listen failed: ${error.message}` : "Listen failed.";
-      renderTaskView();
-    });
+    })
+      .then(() => {
+        renderTaskView();
+      })
+      .catch((error) => {
+        state.taskAskStatus = error instanceof Error ? `Listen failed: ${error.message}` : "Listen failed.";
+        renderTaskView();
+      });
+    renderTaskView();
   });
 }
 
@@ -4483,6 +4744,7 @@ function renderTaskView() {
     const questionPrompt = `Based on ${assessment.componentTask || assessment.title}, generate a short practice question set I can use to prepare.`;
     const studyPlanPrompt = `Suggest a short study plan for ${assessment.componentTask || assessment.title} before ${formatAssessmentDueLabel(assessment.dueDate)}.`;
     const simplifyPrompt = `Simplify this assessment task into plain student-friendly steps: ${assessment.componentTask || assessment.title}. ${assessment.description || ""}`;
+    const isReadingTask = currentAudioContext === `task:assessment:${assessment.id}`;
     elements.saveTaskWorkButton.textContent = "Save draft";
     elements.closeTaskViewButton.textContent = "Back to subjects";
     elements.taskSourceContent.innerHTML = `
@@ -4506,7 +4768,7 @@ function renderTaskView() {
                 <strong>Panda broke the task description into ${stageCards.length} stages.</strong>
                 <span>Tick each as you go.</span>
               </div>
-              <button type="button" class="ghost-button ghost-button--dark" id="task-read-aloud-button">Read all</button>
+              <button type="button" class="ghost-button ghost-button--dark" id="task-read-aloud-button">${isReadingTask ? "Stop" : "Read all"}</button>
             </div>
             <div class="task-stage-list">
               ${stageCards
@@ -4583,7 +4845,7 @@ function renderTaskView() {
                 <h3>Ask Panda about this</h3>
               </div>
               <div class="task-panda-card__actions">
-                <button type="button" class="task-panda-pill" data-task-ask-prompt="${escapeHtml(simplifyPrompt)}">Simplify the task description</button>
+                <button type="button" class="task-panda-pill" data-task-action="simplify-assessment" data-task-ask-prompt="${escapeHtml(simplifyPrompt)}">Simplify this task</button>
                 <button type="button" class="task-panda-pill" data-task-ask-prompt="${escapeHtml(questionPrompt)}">Generate a practice test</button>
                 <button type="button" class="task-panda-pill" data-task-ask-prompt="${escapeHtml(studyPlanPrompt)}">Suggest a study plan</button>
               </div>
@@ -4598,6 +4860,8 @@ function renderTaskView() {
       </article>
     `;
     bindTaskPopupActions({
+      taskKind: "assessment",
+      taskId: assessment.id,
       linkedDocumentBundles,
       readAloudText: [assessment.componentTask || assessment.title, assessment.description || "", workEditorValue].filter(Boolean).join(". ")
     });
@@ -4614,6 +4878,8 @@ function renderTaskView() {
     const simplifyPrompt = `Rewrite this homework in simpler words for a student: ${homeworkBundle.title}. ${clipText(homeworkBundle.content || "", 1600)}`;
     const starterPrompt = `Write one strong starter sentence for this homework response: ${homeworkBundle.title}. ${clipText(homeworkBundle.content || "", 1600)}`;
     const quizPrompt = `Quiz me on this homework topic with 3 quick questions: ${homeworkBundle.title}.`;
+    const linkedHomeworkNotes = getLinkedDocumentBundles(subject, getBundleStoredLinkedDocumentIds(homeworkBundle)).filter((bundle) => bundle.id !== homeworkBundle.id);
+    const isReadingTask = currentAudioContext === `task:homework:${homeworkBundle.id}`;
     elements.saveTaskWorkButton.textContent = "Save draft";
     elements.closeTaskViewButton.textContent = "Back to subjects";
     elements.taskSourceContent.innerHTML = `
@@ -4629,12 +4895,12 @@ function renderTaskView() {
         <div class="task-popup__layout task-popup__layout--homework">
           <div class="task-popup__main">
             <section class="task-audio-card">
-              <button type="button" class="task-audio-card__play" id="task-read-aloud-button">▶</button>
+              <button type="button" class="task-audio-card__play" id="task-read-aloud-button">${isReadingTask ? "■" : "▶"}</button>
               <div class="task-audio-card__copy">
                 <strong>Read task aloud</strong>
                 <span>~${minutes} minutes · Panda voice · 1.0x</span>
               </div>
-              <button type="button" class="task-audio-card__action" data-task-ask-prompt="${escapeHtml(simplifyPrompt)}">Simplify</button>
+              <button type="button" class="task-audio-card__action" data-task-action="simplify-homework" data-task-ask-prompt="${escapeHtml(simplifyPrompt)}">Simplify this task</button>
             </section>
             <div class="task-steps-head">
               <div class="task-panda-inline">
@@ -4666,7 +4932,7 @@ function renderTaskView() {
                   <h3>Workbook response</h3>
                 </div>
               </div>
-                  <textarea id="task-work-editor" class="reader-editor task-popup__editor" placeholder="Write your homework answer here...">${escapeHtml(existingDraft || homeworkBundle.workNotes || "")}</textarea>
+                  <textarea id="task-work-editor" class="reader-editor task-popup__editor" placeholder="Write your homework answer here...">${escapeHtml(existingDraft || getBundleWorkNotes(homeworkBundle) || "")}</textarea>
                 </section>
           </div>
           <aside class="task-popup__side">
@@ -4678,20 +4944,24 @@ function renderTaskView() {
                 </div>
               </div>
               <div class="task-note-list">
-                ${homeworkBundle.documents
-                  .map(
-                    (documentItem, index) => `
+                ${
+                  linkedHomeworkNotes.length
+                    ? linkedHomeworkNotes
+                      .map(
+                        (documentItem, index) => `
                       <button type="button" class="task-note-row task-note-row--${["mint", "sky", "lilac", "peach"][index % 4]}" data-task-note-id="${documentItem.id}">
                         <span class="task-note-row__icon">📕</span>
                         <span class="task-note-row__copy">
                           <strong>${escapeHtml(documentItem.title)}</strong>
-                          <span>${escapeHtml(documentItem.reviewed ? "60% read" : "New")}</span>
+                          <span>${escapeHtml(documentItem.documents.length === 1 ? "1 page" : `${documentItem.documents.length} pages`)}</span>
                         </span>
                         <span class="task-note-row__chevron">›</span>
                       </button>
                     `
-                  )
-                  .join("")}
+                      )
+                      .join("")
+                    : '<div class="empty-state empty-state--compact">No supporting notes attached yet.</div>'
+                }
                 <button type="button" class="task-note-drop">+ Drop a document</button>
               </div>
             </section>
@@ -4701,7 +4971,7 @@ function renderTaskView() {
                 <h3>Ask Panda</h3>
               </div>
               <div class="task-panda-card__actions">
-                <button type="button" class="task-panda-pill" data-task-ask-prompt="${escapeHtml(simplifyPrompt)}">Simpler wording</button>
+                <button type="button" class="task-panda-pill" data-task-action="simplify-homework" data-task-ask-prompt="${escapeHtml(simplifyPrompt)}">Simplify this task</button>
                 <button type="button" class="task-panda-pill" data-task-ask-prompt="${escapeHtml(starterPrompt)}">Give me a starter sentence</button>
                 <button type="button" class="task-panda-pill" data-task-ask-prompt="${escapeHtml(quizPrompt)}">Quiz me on the phases</button>
               </div>
@@ -4712,8 +4982,10 @@ function renderTaskView() {
       </article>
     `;
     bindTaskPopupActions({
-      linkedDocumentBundles: homeworkBundle.documents.map((documentItem) => buildDocumentBundleFromDocuments([documentItem])).filter(Boolean),
-      readAloudText: [homeworkBundle.title, homeworkBundle.content || "", homeworkBundle.workNotes || ""].filter(Boolean).join(". ")
+      taskKind: "homework",
+      taskId: homeworkBundle.id,
+      linkedDocumentBundles: linkedHomeworkNotes,
+      readAloudText: [homeworkBundle.title, homeworkBundle.content || "", getBundleWorkNotes(homeworkBundle) || ""].filter(Boolean).join(". ")
     });
   }
 }
@@ -4742,9 +5014,7 @@ function saveTaskWorkspace() {
     if (!homeworkBundle) {
       return;
     }
-    homeworkBundle.documents.forEach((documentItem) => {
-      documentItem.workNotes = taskWorkEditor.value;
-    });
+    setBundleWorkNotes(homeworkBundle, taskWorkEditor.value);
   }
 
   persistSubjects();
@@ -4888,7 +5158,7 @@ function renderAssessments() {
             <span>${escapeHtml(assessment.componentTask || assessment.title)}</span>
           </div>
         </div>
-        <div class="practice-copy">${assessment.linkedDocumentIds.length} note page${assessment.linkedDocumentIds.length === 1 ? "" : "s"} attached.</div>
+        <div class="practice-copy">${getLinkedDocumentBundles(subject, assessment.linkedDocumentIds).length} attached document${getLinkedDocumentBundles(subject, assessment.linkedDocumentIds).length === 1 ? "" : "s"}.</div>
         ${getAssessmentActionsMarkup(assessment.id, assessment.completed)}
       `;
 
@@ -5104,6 +5374,7 @@ function renderPractice() {
   const readPrompt = `Read this homework aloud and help me understand the instructions: ${focusBundle.title}`;
   const simplifyPrompt = `Simplify the homework task and explain it in smaller steps: ${focusBundle.title}\n\n${focusBundle.content || ""}`;
   const focusDocument = focusBundle.documents[0] || null;
+  const isReadingHomework = currentAudioContext === `task:homework:${focusBundle.id}`;
 
   elements.practiceList.innerHTML = `
     <article class="homework-focus-card">
@@ -5116,8 +5387,8 @@ function renderPractice() {
       </div>
       <div class="homework-focus-card__chips">
         <span class="homework-focus-card__chip">${escapeHtml(`${focusBundle.documents[0]?.type || "Class notes"} · ${focusBundle.documents.length > 1 ? `${focusBundle.documents.length} pp` : "linked note"}`)}</span>
-        <span class="homework-focus-card__chip homework-focus-card__chip--mint">~${estimateTaskMinutes(focusBundle.content || focusBundle.workNotes)} min</span>
-        <span class="homework-focus-card__chip homework-focus-card__chip--lilac">${escapeHtml(focusBundle.workNotes ? "Workbook submission" : "Need a first draft")}</span>
+        <span class="homework-focus-card__chip homework-focus-card__chip--mint">~${estimateTaskMinutes(focusBundle.content || getBundleWorkNotes(focusBundle))} min</span>
+        <span class="homework-focus-card__chip homework-focus-card__chip--lilac">${escapeHtml(getBundleWorkNotes(focusBundle) ? "Workbook submission" : "Need a first draft")}</span>
       </div>
       <div class="homework-focus-card__panda-row">
         <div>
@@ -5140,8 +5411,8 @@ function renderPractice() {
           .join("")}
       </div>
       <div class="homework-focus-card__actions">
-        <button type="button" class="primary-button primary-button--dark" data-homework-readaloud="${focusBundle.id}">▶ Read task aloud</button>
-        <button type="button" class="ghost-button ghost-button--peach" data-homework-simplify="${focusBundle.id}">↯ Simplify wording</button>
+        <button type="button" class="primary-button primary-button--dark" data-homework-readaloud="${focusBundle.id}">${isReadingHomework ? "■ Stop reading" : "▶ Read task aloud"}</button>
+        <button type="button" class="ghost-button ghost-button--peach" data-homework-simplify="${focusBundle.id}">↯ Simplify this task</button>
         <button type="button" class="ghost-button ghost-button--mint" data-open-homework-reader="${focusBundle.id}">📖 Open in Reader</button>
       </div>
     </article>
@@ -5158,7 +5429,7 @@ function renderPractice() {
               <button type="button" class="task-stack-item task-stack-item--${["yellow", "lilac"][index % 2]}" data-open-homework="${bundle.id}">
                 <span class="task-stack-item__eyebrow">${escapeHtml(`${getSubjectShortCode(subject.name)} · HW`)}</span>
                 <strong>${escapeHtml(bundle.title)}</strong>
-                <span>${escapeHtml(bundle.workNotes ? "Writing started" : "Needs a draft")}</span>
+                <span>${escapeHtml(getBundleWorkNotes(bundle) ? "Writing started" : "Needs a draft")}</span>
               </button>
             `
           )
@@ -5176,28 +5447,44 @@ function renderPractice() {
   });
   elements.practiceList.querySelectorAll("[data-homework-readaloud]").forEach((button) => {
     button.addEventListener("click", () => {
-      speakTextWithOpenAi([focusBundle.title, focusBundle.content || "", focusBundle.workNotes || ""].filter(Boolean).join(". "), {
-        context: "ask",
+      const audioContext = `task:homework:${focusBundle.id}`;
+      if (currentAudioContext === audioContext) {
+        stopListening();
+        renderPractice();
+        return;
+      }
+      speakTextWithOpenAi([focusBundle.title, focusBundle.content || "", getBundleWorkNotes(focusBundle) || ""].filter(Boolean).join(". "), {
+        context: audioContext,
         statusMessages: {
           preparing: "Preparing homework audio...",
           playing: "Reading homework...",
           error: "Homework audio failed."
         }
-      }).catch((error) => {
-        console.error("Homework audio failed.", error);
-      });
+      })
+        .then(() => {
+          renderPractice();
+        })
+        .catch((error) => {
+          console.error("Homework audio failed.", error);
+          renderPractice();
+        });
+      renderPractice();
     });
   });
-  document.querySelectorAll("[data-homework-simplify]").forEach((button) => {
+  elements.practiceList.querySelectorAll("[data-homework-simplify]").forEach((button) => {
     button.addEventListener("click", async () => {
-      if (!focusDocument) {
+      const subject = getSelectedSubject();
+      if (!focusDocument || !subject) {
         return;
       }
-      state.askDocumentId = focusDocument.id;
-      elements.askInput.value = simplifyPrompt;
-      state.activeSubjectTab = "homework";
-      renderAskContext();
-      await handleAsk();
+      state.taskAskStatus = "Breaking this into steps...";
+      renderPractice();
+      try {
+        await simplifyHomeworkBundle(focusBundle, subject);
+      } catch (error) {
+        state.taskAskStatus = error instanceof Error ? `Ask Panda failed: ${error.message}` : "Ask Panda failed.";
+      }
+      renderPractice();
     });
   });
   elements.practiceList.querySelectorAll("[data-open-homework-reader]").forEach((button) => {
