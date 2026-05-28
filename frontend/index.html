@@ -91,6 +91,18 @@
         </header>
 
         <section class="home-view" id="home-view">
+          <section class="hero-band hero-band--home" id="home-hero">
+            <div class="hero-band__copy">
+              <p class="eyebrow" id="home-hero-date">Wednesday · 28 May 2026</p>
+              <h1 id="home-hero-title">Hey Mia. <span>3 things</span></h1>
+              <p class="hero-band__subtitle" id="home-hero-subtitle">today — and 6 days until Cell Biology.</p>
+            </div>
+            <div class="hero-band__actions">
+              <button type="button" class="ghost-button" id="open-upload-modal-button">Upload</button>
+              <button type="button" class="ghost-button" id="open-upcoming-from-hero-button">Calendar</button>
+            </div>
+          </section>
+
           <section class="overview-band overview-band--triple">
             <article class="overview-card overview-card--metric">
               <div class="overview-card__body">
@@ -288,11 +300,136 @@
         </section>
 
         <section class="workspace-grid hidden" id="subjects-view">
-          <aside class="workspace-sidebar">
-            <section class="subject-panel">
-              <div class="subject-list" id="subject-list"></div>
+          <section class="workspace-main">
+            <section class="hero-band hero-band--subjects" id="subjects-hero">
+              <div class="hero-band__copy">
+                <p class="eyebrow" id="subjects-hero-date">Wednesday · 28 May 2026</p>
+                <h1 id="subjects-hero-title">Hey Mia. <span>14 pages</span></h1>
+                <p class="hero-band__subtitle" id="subjects-hero-subtitle">to finish in Cell Biology — Lesson 4.</p>
+              </div>
+              <div class="hero-band__actions">
+                <button type="button" class="ghost-button" id="subject-hero-upload-button">Upload</button>
+              </div>
             </section>
 
+            <section class="subject-panel subject-panel--row">
+              <div class="subject-list subject-list--row" id="subject-list"></div>
+            </section>
+
+            <div class="subject-header" id="subject-header"></div>
+
+            <section class="reading-viewer">
+              <div class="reading-viewer__header">
+                <div class="reading-viewer__tabs" id="subject-tabs">
+                  <button type="button" class="viewer-tab is-active" data-viewer-tab="reader">
+                    Reader <span class="vt-ct" id="tab-count-reader">0</span>
+                  </button>
+                  <button type="button" class="viewer-tab" data-viewer-tab="homework">
+                    Homework <span class="vt-ct" id="tab-count-homework">0</span>
+                  </button>
+                  <button type="button" class="viewer-tab" data-viewer-tab="watch">
+                    Watch <span class="vt-ct" id="tab-count-watch">0</span>
+                  </button>
+                  <button type="button" class="viewer-tab" data-viewer-tab="assessments">
+                    Assessments <span class="vt-ct" id="tab-count-assessments">0</span>
+                  </button>
+                </div>
+                <div class="reading-viewer__meta" id="reading-viewer-meta">Year 7</div>
+              </div>
+
+              <div class="reading-viewer__body">
+                <section class="viewer-panel viewer-panel--reader" id="viewer-panel-reader">
+                  <div class="reader-layout">
+                    <section class="documents-card" id="documents-section">
+                      <div class="section-heading section-heading--stacked">
+                        <div>
+                          <p class="eyebrow">Resources</p>
+                          <h3>Documents</h3>
+                        </div>
+                      </div>
+                      <div class="documents-table-wrap">
+                        <table class="documents-table">
+                          <thead>
+                            <tr>
+                              <th>Select</th>
+                              <th>Added</th>
+                              <th>Title</th>
+                              <th>Type</th>
+                              <th>Read</th>
+                              <th>Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody id="documents-body"></tbody>
+                        </table>
+                      </div>
+                      <div class="documents-footer">
+                        <div class="documents-bulk-actions">
+                          <button type="button" class="ghost-button" id="documents-select-all-button">Select all</button>
+                          <button type="button" class="ghost-button ghost-button--danger" id="documents-delete-selected-button">Delete selected</button>
+                        </div>
+                        <button type="button" class="ghost-button hidden" id="documents-toggle-button">Show all documents</button>
+                      </div>
+                    </section>
+
+                    <section class="reader-card" id="reader-section">
+                      <div class="section-heading section-heading--reader">
+                        <div>
+                          <p class="eyebrow">Read and listen</p>
+                          <h3 id="reader-title">Document reader</h3>
+                        </div>
+                      </div>
+                      <div class="reader-content" id="reader-content">
+                        Choose a document from the table to read it here.
+                      </div>
+                    </section>
+                  </div>
+                </section>
+
+                <section class="viewer-panel hidden" id="viewer-panel-homework">
+                  <section class="practice-card" id="homework-section">
+                    <div class="section-heading">
+                      <div>
+                        <p class="eyebrow">Homework</p>
+                        <h3>Homework</h3>
+                      </div>
+                    </div>
+                    <div id="practice-list" class="practice-list"></div>
+                  </section>
+                </section>
+
+                <section class="viewer-panel hidden" id="viewer-panel-watch">
+                  <section class="practice-card" id="watch-section">
+                    <div class="section-heading">
+                      <div>
+                        <p class="eyebrow">Watch</p>
+                        <h3>Watch</h3>
+                      </div>
+                      <button type="button" class="ghost-button" id="watch-rescan-button">Rescan links</button>
+                    </div>
+                    <div class="upload-status" id="watch-status"></div>
+                    <div id="watch-list" class="practice-list"></div>
+                    <div class="documents-footer">
+                      <button type="button" class="ghost-button hidden" id="watch-toggle-button">Load more</button>
+                    </div>
+                  </section>
+                </section>
+
+                <section class="viewer-panel hidden" id="viewer-panel-assessments">
+                  <section class="assessment-card" id="assessments-section">
+                    <div class="section-heading">
+                      <div>
+                        <p class="eyebrow">Deadlines</p>
+                        <h3>Assessment Schedule</h3>
+                      </div>
+                    </div>
+                    <div id="assessment-list" class="assessment-list"></div>
+                  </section>
+                </section>
+              </div>
+            </section>
+          </section>
+
+          <aside class="workspace-dock">
             <section class="saved-tests card-stack-card">
               <div class="section-heading section-heading--stacked section-heading--compact">
                 <div>
@@ -338,89 +475,16 @@
                 Pick a subject and ask a question to see guided support here.
               </div>
             </aside>
+            <section class="dock-context-card" id="dock-context-card">
+              <div class="section-heading section-heading--stacked section-heading--compact">
+                <div>
+                  <p class="eyebrow">Context</p>
+                  <h3 id="dock-context-title">Linked here from notes</h3>
+                </div>
+              </div>
+              <div id="dock-context-body" class="dock-context-body"></div>
+            </section>
           </aside>
-
-          <section class="content-panel">
-            <div class="subject-header" id="subject-header"></div>
-
-            <section class="documents-card" id="documents-section">
-              <div class="section-heading section-heading--stacked">
-                <div>
-                  <p class="eyebrow">Resources</p>
-                  <h3>Documents</h3>
-                </div>
-              </div>
-              <div class="documents-table-wrap">
-                <table class="documents-table">
-                  <thead>
-                    <tr>
-                      <th>Select</th>
-                      <th>Added</th>
-                      <th>Title</th>
-                      <th>Type</th>
-                      <th>Read</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody id="documents-body"></tbody>
-                </table>
-              </div>
-              <div class="documents-footer">
-                <div class="documents-bulk-actions">
-                  <button type="button" class="ghost-button" id="documents-select-all-button">Select all</button>
-                  <button type="button" class="ghost-button ghost-button--danger" id="documents-delete-selected-button">Delete selected</button>
-                </div>
-                <button type="button" class="ghost-button hidden" id="documents-toggle-button">Show all documents</button>
-              </div>
-            </section>
-
-            <section class="reader-card" id="reader-section">
-              <div class="section-heading section-heading--reader">
-                <div>
-                  <p class="eyebrow">Read and listen</p>
-                  <h3 id="reader-title">Document reader</h3>
-                </div>
-              </div>
-              <div class="reader-content" id="reader-content">
-                Choose a document from the table to read it here.
-              </div>
-            </section>
-
-            <section class="practice-card" id="homework-section">
-              <div class="section-heading">
-                <div>
-                  <p class="eyebrow">Homework</p>
-                  <h3>Homework</h3>
-                </div>
-              </div>
-              <div id="practice-list" class="practice-list"></div>
-            </section>
-
-            <section class="practice-card" id="watch-section">
-              <div class="section-heading">
-                <div>
-                  <p class="eyebrow">Watch</p>
-                  <h3>Watch</h3>
-                </div>
-                <button type="button" class="ghost-button" id="watch-rescan-button">Rescan links</button>
-              </div>
-              <div class="upload-status" id="watch-status"></div>
-              <div id="watch-list" class="practice-list"></div>
-              <div class="documents-footer">
-                <button type="button" class="ghost-button hidden" id="watch-toggle-button">Load more</button>
-              </div>
-            </section>
-
-            <section class="assessment-card" id="assessments-section">
-              <div class="section-heading">
-                <div>
-                  <p class="eyebrow">Deadlines</p>
-                  <h3>Assessment Schedule</h3>
-                </div>
-              </div>
-              <div id="assessment-list" class="assessment-list"></div>
-            </section>
-          </section>
         </section>
       </main>
 

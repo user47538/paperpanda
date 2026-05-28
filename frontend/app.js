@@ -13,7 +13,7 @@ const sessionStorageKey = "studylift-session";
 const subjectsStorageKey = "paperpanda-subjects-by-account";
 const settingsStorageKey = "studylift-settings";
 const uiVersionStorageKey = "paperpanda-ui-version";
-const currentUiVersion = "2026-05-28-design-handoff-voice-ask";
+const currentUiVersion = "2026-05-28-design-handoff-structure";
 const previewDatabaseName = "paperpanda-assets";
 const previewStoreName = "document-previews";
 const settingsAssetStoreName = "settings-assets";
@@ -368,6 +368,7 @@ const state = {
   studentGrade: defaultGrade,
   authMode: "signin",
   selectedSubjectId: subjectSeed[0].id,
+  activeSubjectTab: "reader",
   selectedDocumentId: null,
   askDocumentId: null,
   listeningDocumentId: null,
@@ -446,8 +447,16 @@ const elements = {
   navSubjectsButton: document.getElementById("nav-subjects-button"),
   navSettingsButton: document.getElementById("nav-settings-button"),
   homeView: document.getElementById("home-view"),
+  homeHeroDate: document.getElementById("home-hero-date"),
+  homeHeroTitle: document.getElementById("home-hero-title"),
+  homeHeroSubtitle: document.getElementById("home-hero-subtitle"),
+  openUpcomingFromHeroButton: document.getElementById("open-upcoming-from-hero-button"),
   settingsView: document.getElementById("settings-view"),
   subjectsView: document.getElementById("subjects-view"),
+  subjectsHeroDate: document.getElementById("subjects-hero-date"),
+  subjectsHeroTitle: document.getElementById("subjects-hero-title"),
+  subjectsHeroSubtitle: document.getElementById("subjects-hero-subtitle"),
+  subjectHeroUploadButton: document.getElementById("subject-hero-upload-button"),
   taskView: document.getElementById("task-view"),
   revisionView: document.getElementById("revision-view"),
   documentsToReadCount: document.getElementById("documents-to-read-count"),
@@ -489,6 +498,16 @@ const elements = {
   upcomingNextDue: document.getElementById("upcoming-next-due"),
   subjectList: document.getElementById("subject-list"),
   subjectHeader: document.getElementById("subject-header"),
+  subjectTabs: document.getElementById("subject-tabs"),
+  tabCountReader: document.getElementById("tab-count-reader"),
+  tabCountHomework: document.getElementById("tab-count-homework"),
+  tabCountWatch: document.getElementById("tab-count-watch"),
+  tabCountAssessments: document.getElementById("tab-count-assessments"),
+  readingViewerMeta: document.getElementById("reading-viewer-meta"),
+  viewerPanelReader: document.getElementById("viewer-panel-reader"),
+  viewerPanelHomework: document.getElementById("viewer-panel-homework"),
+  viewerPanelWatch: document.getElementById("viewer-panel-watch"),
+  viewerPanelAssessments: document.getElementById("viewer-panel-assessments"),
   documentsBody: document.getElementById("documents-body"),
   documentsToggleButton: document.getElementById("documents-toggle-button"),
   documentsSelectAllButton: document.getElementById("documents-select-all-button"),
@@ -522,6 +541,8 @@ const elements = {
   askContext: document.getElementById("ask-context"),
   askResponse: document.getElementById("ask-response"),
   savedTestsList: document.getElementById("saved-tests-list"),
+  dockContextTitle: document.getElementById("dock-context-title"),
+  dockContextBody: document.getElementById("dock-context-body"),
   readerCard: document.getElementById("reader-card"),
   readerTitle: document.getElementById("reader-title"),
   readerContent: document.getElementById("reader-content"),
@@ -1676,6 +1697,9 @@ function renderCurrentView() {
   elements.subjectsView.classList.toggle("hidden", state.currentView !== "subjects");
   elements.taskView.classList.toggle("hidden", state.currentView !== "task");
   elements.revisionView.classList.toggle("hidden", state.currentView !== "revision");
+  elements.navHomeButton.classList.toggle("is-active", state.currentView === "home");
+  elements.navSubjectsButton.classList.toggle("is-active", state.currentView === "subjects");
+  elements.navSettingsButton.classList.toggle("is-active", state.currentView === "settings");
 }
 
 function clipText(value, maxLength = 9000) {
@@ -1982,8 +2006,132 @@ function currentDateKey() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
 
+function formatHeroDate(date = new Date()) {
+  return new Intl.DateTimeFormat("en-AU", {
+    weekday: "long",
+    day: "numeric",
+    month: "short",
+    year: "numeric"
+  }).format(date).replace(",", " ·");
+}
+
+function getSubjectShortCode(subjectName) {
+  const words = String(subjectName || "")
+    .replace(/&/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!words.length) {
+    return "PP";
+  }
+  if (words.length === 1) {
+    return words[0].slice(0, 2).toUpperCase();
+  }
+  return `${words[0][0] || ""}${words[1][0] || ""}`.toUpperCase();
+}
+
+function getSubjectTabCounts(subject) {
+  return {
+    reader: getVisibleSubjectDocuments(subject).length,
+    homework: getHomeworkBundles(subject).length,
+    watch: Array.isArray(subject.watch) ? subject.watch.length : 0,
+    assessments: (subject.assessments || []).filter((assessment) => !assessment.completed).length
+  };
+}
+
+function getSubjectHeroCopy(subject, tab) {
+  const visibleDocuments = getVisibleSubjectDocuments(subject);
+  const selectedDocument = getSelectedDocument();
+  const nextAssessment = getNextSubjectAssessment(subject);
+  const homeworkBundles = getHomeworkBundles(subject);
+  const watchCount = Array.isArray(subject.watch) ? subject.watch.length : 0;
+  const activeAssessments = (subject.assessments || []).filter((assessment) => !assessment.completed);
+
+  if (tab === "reader") {
+    const pageCount = selectedDocument?.uploadGroupId
+      ? subject.documents.filter((documentRecord) => documentRecord.uploadGroupId === selectedDocument.uploadGroupId).length
+      : selectedDocument?.pageNumber
+        ? 1
+        : visibleDocuments.length;
+    return {
+      big: `${pageCount || visibleDocuments.length || 0} ${pageCount === 1 ? "page" : "pages"}`,
+      rest: selectedDocument ? `to finish in ${selectedDocument.title}.` : "ready to read in this subject."
+    };
+  }
+
+  if (tab === "homework") {
+    return {
+      big: `${homeworkBundles.length} ${homeworkBundles.length === 1 ? "thing" : "things"}`,
+      rest: homeworkBundles.length
+        ? "today — Panda can break the first one into steps."
+        : "today — no homework is waiting in this subject."
+    };
+  }
+
+  if (tab === "watch") {
+    return {
+      big: `${watchCount} ${watchCount === 1 ? "video" : "videos"}`,
+      rest: watchCount
+        ? "linked from your class notes this week."
+        : "linked from your class notes so far."
+    };
+  }
+
+  if (nextAssessment?.dueDateObject) {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const daysUntil = Math.max(0, Math.ceil((nextAssessment.dueDateObject.getTime() - now.getTime()) / 86400000));
+    return {
+      big: `${daysUntil} ${daysUntil === 1 ? "day" : "days"}`,
+      rest: `until ${nextAssessment.componentTask || nextAssessment.title}.`
+    };
+  }
+
+  return {
+    big: `${activeAssessments.length} ${activeAssessments.length === 1 ? "assessment" : "assessments"}`,
+    rest: activeAssessments.length ? "active in this subject right now." : "active in this subject right now."
+  };
+}
+
+function createDockTileMarkup({ title, meta = "", tint = "bg", emoji = "" } = {}) {
+  return `
+    <div class="dock-tile dock-tile--${escapeHtml(tint)}">
+      ${emoji ? `<span class="dock-tile__emoji">${escapeHtml(emoji)}</span>` : ""}
+      <div class="dock-tile__copy">
+        <strong>${escapeHtml(title)}</strong>
+        ${meta ? `<span>${escapeHtml(meta)}</span>` : ""}
+      </div>
+    </div>
+  `;
+}
+
 function getTodayAskHistory(subject) {
   return (subject.askHistory || []).filter((entry) => entry.dateKey === currentDateKey());
+}
+
+function renderHomeHero() {
+  const unreadDocumentMetrics = getUnreadDocumentMetrics();
+  const homeworkMetrics = getHomeworkMetrics();
+  const assessmentMetrics = getAssessmentProgressMetrics();
+  const totalThings = unreadDocumentMetrics.unread + homeworkMetrics.remaining + assessmentMetrics.upcoming;
+  const nextEntry = getUpcomingAssessmentEntries()[0] || getAssessmentEntries().find((entry) => entry.dueDateObject);
+
+  elements.homeHeroDate.textContent = formatHeroDate();
+  elements.homeHeroTitle.innerHTML = `Hey ${escapeHtml(state.studentName || "there")}. <span>${totalThings} things</span>`;
+  elements.homeHeroSubtitle.textContent = nextEntry
+    ? `today — and ${formatAssessmentDueLabel(nextEntry.assessment.dueDate)} until ${nextEntry.assessment.componentTask || nextEntry.assessment.title}.`
+    : "today — your study space is ready for the next upload.";
+}
+
+function renderSubjectsHero() {
+  const subject = getSelectedSubject();
+  if (!subject) {
+    return;
+  }
+
+  const heroCopy = getSubjectHeroCopy(subject, state.activeSubjectTab);
+  elements.subjectsHeroDate.textContent = formatHeroDate();
+  elements.subjectsHeroTitle.innerHTML = `Hey ${escapeHtml(state.studentName || "there")}. <span>${escapeHtml(heroCopy.big)}</span>`;
+  elements.subjectsHeroSubtitle.textContent = heroCopy.rest;
 }
 
 function renderSubjectList() {
@@ -2001,7 +2149,12 @@ function renderSubjectList() {
           class="subject-tile${subject.id === state.selectedSubjectId ? " subject-tile--active" : ""}"
           data-subject-id="${subject.id}"
         >
+          <span class="subject-tile__code">${escapeHtml(getSubjectShortCode(subject.name))}</span>
           <span class="subject-tile__title">${escapeHtml(subject.name)}</span>
+          <span class="subject-tile__meta">
+            <span>${escapeHtml(`${getSubjectTabCounts(subject).reader} docs`)}</span>
+            <span>${escapeHtml(`${getSubjectTabCounts(subject).homework} homework`)}</span>
+          </span>
         </button>
       `
     )
@@ -2015,6 +2168,7 @@ function renderSubjectList() {
       }
 
       state.selectedSubjectId = subject.id;
+      state.activeSubjectTab = "reader";
       state.selectedDocumentIds = [];
       state.expandedDocumentGroups = {};
       state.watchExpanded = false;
@@ -2033,30 +2187,145 @@ function renderSubjectHeader() {
     return;
   }
 
+  const counts = getSubjectTabCounts(subject);
+  const activeTabLabel = {
+    reader: `${counts.reader} document${counts.reader === 1 ? "" : "s"}`,
+    homework: `${counts.homework} homework item${counts.homework === 1 ? "" : "s"}`,
+    watch: `${counts.watch} watch link${counts.watch === 1 ? "" : "s"}`,
+    assessments: `${counts.assessments} active assessment${counts.assessments === 1 ? "" : "s"}`
+  }[state.activeSubjectTab];
+
   elements.subjectHeader.innerHTML = `
     <div class="subject-header__title">
       <p class="eyebrow">Current subject</p>
       <h3>${escapeHtml(subject.name)}</h3>
+      <p class="subject-header__meta">${escapeHtml(`${formatGradeLabel(state.studentGrade)} · ${activeTabLabel}`)}</p>
     </div>
     <div class="subject-header__actions">
-      <div class="subject-header__nav">
-        <button type="button" class="subject-nav-button" data-subject-section="documents-section">Documents</button>
-        <button type="button" class="subject-nav-button" data-subject-section="reader-section">Read</button>
-        <button type="button" class="subject-nav-button" data-subject-section="homework-section">Homework</button>
-        <button type="button" class="subject-nav-button" data-subject-section="assessments-section">Assessments</button>
-        <button type="button" class="subject-nav-button" data-subject-section="watch-section">Watch</button>
-      </div>
+      <span class="subject-header__summary">${escapeHtml(subject.focus || "Reading, guidance, and due dates in one place.")}</span>
       <button type="button" class="ghost-button" id="subject-upload-button">Upload</button>
     </div>
   `;
   document.getElementById("subject-upload-button")?.addEventListener("click", openUploadModal);
-  elements.subjectHeader.querySelectorAll("[data-subject-section]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const targetId = button.dataset.subjectSection;
-      const target = targetId ? document.getElementById(targetId) : null;
-      target?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
+}
+
+function renderSubjectTabs() {
+  const subject = getSelectedSubject();
+  if (!subject) {
+    return;
+  }
+
+  const counts = getSubjectTabCounts(subject);
+  elements.tabCountReader.textContent = String(counts.reader);
+  elements.tabCountHomework.textContent = String(counts.homework);
+  elements.tabCountWatch.textContent = String(counts.watch);
+  elements.tabCountAssessments.textContent = String(counts.assessments);
+  elements.readingViewerMeta.textContent = `${subject.name} · ${formatGradeLabel(state.studentGrade)}`;
+
+  const panelMap = {
+    reader: elements.viewerPanelReader,
+    homework: elements.viewerPanelHomework,
+    watch: elements.viewerPanelWatch,
+    assessments: elements.viewerPanelAssessments
+  };
+
+  Object.entries(panelMap).forEach(([tabName, panel]) => {
+    panel?.classList.toggle("hidden", tabName !== state.activeSubjectTab);
   });
+
+  elements.subjectTabs?.querySelectorAll("[data-viewer-tab]").forEach((button) => {
+    const isActive = button.dataset.viewerTab === state.activeSubjectTab;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+  });
+}
+
+function renderDockContext() {
+  const subject = getSelectedSubject();
+  if (!subject) {
+    elements.dockContextTitle.textContent = "Context";
+    elements.dockContextBody.innerHTML = `<div class="empty-state empty-state--compact">Choose a subject to see study context here.</div>`;
+    return;
+  }
+
+  let title = "Context";
+  let bodyMarkup = "";
+
+  if (state.activeSubjectTab === "reader") {
+    const selectedDocument = getSelectedDocument();
+    const askDocument = getAskDocument();
+    title = "Linked here from notes";
+    if (selectedDocument) {
+      const pageCount = selectedDocument.uploadGroupId
+        ? subject.documents.filter((documentRecord) => documentRecord.uploadGroupId === selectedDocument.uploadGroupId).length
+        : 1;
+      bodyMarkup += createDockTileMarkup({
+        title: selectedDocument.title,
+        meta: `${selectedDocument.type} · ${pageCount} ${pageCount === 1 ? "page" : "pages"}`,
+        tint: "sky",
+        emoji: "📘"
+      });
+    }
+    if (askDocument && askDocument.id !== selectedDocument?.id) {
+      bodyMarkup += createDockTileMarkup({
+        title: `Ask is focused on ${askDocument.title}`,
+        meta: "Question context",
+        tint: "lilac",
+        emoji: "💬"
+      });
+    }
+    if (!bodyMarkup) {
+      bodyMarkup = `<div class="empty-state empty-state--compact">Select a document and its reading context will appear here.</div>`;
+    }
+  } else if (state.activeSubjectTab === "homework") {
+    title = "Today's stack";
+    const homeworkBundles = getHomeworkBundles(subject).slice(0, 3);
+    bodyMarkup = homeworkBundles.length
+      ? homeworkBundles
+          .map((bundle) =>
+            createDockTileMarkup({
+              title: bundle.title,
+              meta: bundle.workNotes ? "Writing started" : "Needs a first draft",
+              tint: "peach",
+              emoji: "✍️"
+            })
+          )
+          .join("")
+      : `<div class="empty-state empty-state--compact">No homework items are waiting in this subject.</div>`;
+  } else if (state.activeSubjectTab === "watch") {
+    title = "Panda's video notes";
+    const watchItems = Array.isArray(subject.watch) ? subject.watch.slice(0, 3) : [];
+    bodyMarkup = watchItems.length
+      ? watchItems
+          .map((item) =>
+            createDockTileMarkup({
+              title: item.title,
+              meta: item.sourceDocumentTitle ? `Detected from ${item.sourceDocumentTitle}` : "Added to Watch",
+              tint: "mint",
+              emoji: "▶️"
+            })
+          )
+          .join("")
+      : `<div class="empty-state empty-state--compact">No watch links are linked to this subject yet.</div>`;
+  } else {
+    title = "Schedule auto-built";
+    const activeAssessments = (subject.assessments || []).filter((assessment) => !assessment.completed).slice(0, 3);
+    bodyMarkup = activeAssessments.length
+      ? activeAssessments
+          .map((assessment) =>
+            createDockTileMarkup({
+              title: assessment.componentTask || assessment.title,
+              meta: formatAssessmentDueLabel(assessment.dueDate),
+              tint: "yellow",
+              emoji: "🗓️"
+            })
+          )
+          .join("")
+      : `<div class="empty-state empty-state--compact">No active assessments are listed for this subject.</div>`;
+  }
+
+  elements.dockContextTitle.textContent = title;
+  elements.dockContextBody.innerHTML = bodyMarkup;
 }
 
 function renderPendingUpload() {
@@ -2946,7 +3215,8 @@ function renderDocuments() {
     elements.readerContent.textContent = "Upload or select a document to read it here.";
     elements.documentsToggleButton.classList.add("hidden");
     renderDocumentBulkActions(subject);
-    renderReaderToolbar();
+    renderSubjectsHero();
+    renderDockContext();
     return;
   }
 
@@ -3090,6 +3360,8 @@ function renderDocuments() {
 
   renderDocumentBulkActions(subject);
   renderReader();
+  renderSubjectsHero();
+  renderDockContext();
 }
 
 function renderWatchList() {
@@ -3103,6 +3375,7 @@ function renderWatchList() {
   if (!watchItems.length) {
     elements.watchList.innerHTML = `<div class="empty-state">No WATCH items for this subject yet.</div>`;
     elements.watchToggleButton.classList.add("hidden");
+    renderDockContext();
     return;
   }
 
@@ -3155,6 +3428,8 @@ function renderWatchList() {
       }
     });
   });
+
+  renderDockContext();
 }
 
 function handleWatchRescan() {
@@ -3929,6 +4204,8 @@ function renderAssessments() {
 
   if (!selectedEntries.length) {
     elements.assessmentList.innerHTML = `<div class="empty-state">No assessments for ${escapeHtml(selectedSubject.name)} yet.</div>`;
+    renderSubjectsHero();
+    renderDockContext();
     return;
   }
 
@@ -3994,6 +4271,9 @@ function renderAssessments() {
 
     elements.assessmentList.appendChild(wrapper);
   });
+
+  renderSubjectsHero();
+  renderDockContext();
 }
 
 function renderUpcomingModal() {
@@ -4176,6 +4456,8 @@ function renderPractice() {
   const homeworkBundles = getHomeworkBundles(subject);
   if (!homeworkBundles.length) {
     elements.practiceList.innerHTML = `<div class="empty-state">No homework items for this subject yet.</div>`;
+    renderSubjectsHero();
+    renderDockContext();
     return;
   }
 
@@ -4198,6 +4480,9 @@ function renderPractice() {
       openTaskView({ kind: "homework", id: button.dataset.openHomework });
     });
   });
+
+  renderSubjectsHero();
+  renderDockContext();
 }
 
 async function handleAsk() {
@@ -5506,9 +5791,12 @@ function render() {
   renderAiConnectionState();
   renderCurrentView();
   renderOverview();
+  renderHomeHero();
   renderRevisionPanel();
   renderSubjectList();
+  renderSubjectsHero();
   renderSubjectHeader();
+  renderSubjectTabs();
   renderPendingUpload();
   renderDocuments();
   renderAskContext();
@@ -5516,6 +5804,7 @@ function render() {
   renderAssessments();
   renderPractice();
   renderWatchList();
+  renderDockContext();
   if (state.attachmentModalOpen) {
     renderAttachNotesModal();
   }
@@ -5678,6 +5967,21 @@ elements.enterSubjectsButton.addEventListener("click", () => {
 });
 elements.openUploadModalButton?.addEventListener("click", openUploadModal);
 elements.openUploadModalSecondary.addEventListener("click", openUploadModal);
+elements.subjectHeroUploadButton?.addEventListener("click", openUploadModal);
+elements.openUpcomingFromHeroButton?.addEventListener("click", openUpcomingModal);
+elements.subjectTabs?.querySelectorAll("[data-viewer-tab]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const nextTab = button.dataset.viewerTab;
+    if (!nextTab || nextTab === state.activeSubjectTab) {
+      return;
+    }
+    state.activeSubjectTab = nextTab;
+    renderSubjectsHero();
+    renderSubjectHeader();
+    renderSubjectTabs();
+    renderDockContext();
+  });
+});
 elements.upcomingAssessmentsButton.addEventListener("click", openUpcomingModal);
 elements.closeUpcomingScrim.addEventListener("click", closeUpcomingModal);
 elements.closeUpcomingButton.addEventListener("click", closeUpcomingModal);
