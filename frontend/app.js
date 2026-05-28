@@ -2092,14 +2092,15 @@ function getSubjectHeroCopy(subject, tab) {
   };
 }
 
-function createDockTileMarkup({ title, meta = "", tint = "bg", emoji = "" } = {}) {
+function createDockTileMarkup({ title, meta = "", tint = "bg", emoji = "", tag = "", active = false } = {}) {
   return `
-    <div class="dock-tile dock-tile--${escapeHtml(tint)}">
+    <div class="dock-tile dock-tile--${escapeHtml(tint)}${active ? " dock-tile--active" : ""}">
       ${emoji ? `<span class="dock-tile__emoji">${escapeHtml(emoji)}</span>` : ""}
       <div class="dock-tile__copy">
         <strong>${escapeHtml(title)}</strong>
         ${meta ? `<span>${escapeHtml(meta)}</span>` : ""}
       </div>
+      ${tag ? `<span class="dock-tile__tag">${escapeHtml(tag)}</span>` : ""}
     </div>
   `;
 }
@@ -2263,7 +2264,8 @@ function renderDockContext() {
         title: selectedDocument.title,
         meta: `${selectedDocument.type} · ${pageCount} ${pageCount === 1 ? "page" : "pages"}`,
         tint: "sky",
-        emoji: "📘"
+        emoji: "📘",
+        tag: "Read"
       });
     }
     if (askDocument && askDocument.id !== selectedDocument?.id) {
@@ -2271,7 +2273,8 @@ function renderDockContext() {
         title: `Ask is focused on ${askDocument.title}`,
         meta: "Question context",
         tint: "lilac",
-        emoji: "💬"
+        emoji: "💬",
+        tag: "Ask"
       });
     }
     if (!bodyMarkup) {
@@ -2287,7 +2290,9 @@ function renderDockContext() {
               title: bundle.title,
               meta: bundle.workNotes ? "Writing started" : "Needs a first draft",
               tint: "peach",
-              emoji: "✍️"
+              emoji: "✍️",
+              tag: bundle.workNotes ? "Now" : "Todo",
+              active: !bundle.workNotes
             })
           )
           .join("")
@@ -2302,7 +2307,8 @@ function renderDockContext() {
               title: item.title,
               meta: item.sourceDocumentTitle ? `Detected from ${item.sourceDocumentTitle}` : "Added to Watch",
               tint: "mint",
-              emoji: "▶️"
+              emoji: "▶️",
+              tag: "Watch"
             })
           )
           .join("")
@@ -2317,7 +2323,8 @@ function renderDockContext() {
               title: assessment.componentTask || assessment.title,
               meta: formatAssessmentDueLabel(assessment.dueDate),
               tint: "yellow",
-              emoji: "🗓️"
+              emoji: "🗓️",
+              tag: "Due"
             })
           )
           .join("")
