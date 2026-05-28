@@ -385,6 +385,8 @@ const state = {
   documentsExpanded: false,
   currentView: "home",
   activeTask: null,
+  taskAskResponse: "",
+  taskAskStatus: "",
   revisionCatalogue: [],
   revisionCatalogueLoadedGrade: "",
   revisionSelectedSubjectId: "",
@@ -4019,6 +4021,8 @@ function openDocumentPopup(documentRecord) {
 function openTaskView(taskConfig) {
   state.activeTask = taskConfig;
   state.currentView = "task";
+  state.taskAskResponse = "";
+  state.taskAskStatus = "";
   elements.taskWorkStatus.textContent = "";
   renderTaskView();
   renderCurrentView();
@@ -4028,9 +4032,210 @@ function openTaskView(taskConfig) {
   });
 }
 
+function getTaskWorkEditor() {
+  return document.getElementById("task-work-editor");
+}
+
+function getDaysUntilText(dateString) {
+  const parsed = parseAssessmentDate(dateString);
+  if (!parsed) {
+    return "Due soon";
+  }
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  const daysUntil = Math.max(0, Math.ceil((parsed.getTime() - now.getTime()) / 86400000));
+  const weekday = new Intl.DateTimeFormat("en-AU", { weekday: "short" }).format(parsed).toUpperCase();
+  return daysUntil === 0 ? `DUE ${weekday} · TODAY` : `DUE ${weekday} · ${daysUntil} ${daysUntil === 1 ? "DAY" : "DAYS"}`;
+}
+
+function estimateTaskMinutes(text) {
+  const wordCount = String(text || "").trim().split(/\s+/).filter(Boolean).length;
+  if (!wordCount) {
+    return 15;
+  }
+  return Math.max(10, Math.min(45, Math.round(wordCount / 20)));
+}
+
+function buildHomeworkTaskSteps(homeworkBundle) {
+  const workLength = String(homeworkBundle.workNotes || "").trim().length;
+  const baseTitle = getBaseDocumentTitle(homeworkBundle) || homeworkBundle.title;
+  const lines = [
+    `Listen to ${baseTitle} (Panda reads aloud)`,
+    "Underline one keyword per section as you go",
+    "Write one clear sentence describing each key idea",
+    "Check your workbook answer and mark it complete"
+  ];
+  const completedCount = workLength > 260 ? 4 : workLength > 170 ? 3 : workLength > 80 ? 2 : workLength > 20 ? 1 : 0;
+  return lines.map((label, index) => ({
+    number: index + 1,
+    label,
+    done: index < completedCount,
+    active: index === Math.min(completedCount, lines.length - 1)
+  }));
+}
+
+function buildAssessmentTaskStages(assessment, linkedDocumentBundles) {
+  const workLength = String(assessment.workNotes || "").trim().length;
+  const linkedTitles = linkedDocumentBundles.slice(0, 2).map((bundle) => bundle.title);
+  const stageDefinitions = [
+    {
+      title: "Plan",
+      items: [
+        "Read teacher task description",
+        assessment.weighting ? `Note weighting and due date (${assessment.weighting})` : "Note weighting and due date"
+      ],
+      doneCount: workLength > 40 ? 2 : 1
+    },
+    {
+      title: "Research",
+      items: [
+        linkedTitles[0] ? `${linkedTitles[0]}` : "Open your lesson notes",
+        linkedTitles[1] ? `${linkedTitles[1]}` : "Pull out 3 strong facts or examples",
+        "List the syllabus points being covered"
+      ],
+      doneCount: linkedDocumentBundles.length ? (workLength > 120 ? 3 : 2) : 1
+    },
+    {
+      title: "Draft",
+      items: [
+        "Write an opening response or plan",
+        "Build the middle with evidence from your notes",
+        "Check key terms and polish your wording"
+      ],
+      doneCount: workLength > 320 ? 3 : workLength > 180 ? 2 : workLength > 90 ? 1 : 0
+    },
+    {
+      title: "Submit",
+      items: [
+        assessment.completed
+          ? `Assessment marked complete for ${formatAssessmentDueLabel(assessment.dueDate)}`
+          : `Sit the task on ${formatAssessmentDueLabel(assessment.dueDate)}`
+      ],
+      doneCount: assessment.completed ? 1 : 0
+    }
+  ];
+
+  const firstIncompleteStageIndex = stageDefinitions.findIndex((stage) => stage.doneCount < stage.items.length);
+
+  return stageDefinitions.map((stage, stageIndex) => ({
+    number: stageIndex + 1,
+    title: stage.title,
+    items: stage.items,
+    doneCount: Math.min(stage.doneCount, stage.items.length),
+    active: stageIndex === (firstIncompleteStageIndex === -1 ? stageDefinitions.length - 1 : firstIncompleteStageIndex)
+  }));
+}
+
+function buildTaskAskDocument(subject, taskContext) {
+  if (taskContext.kind === "assessment") {
+    return {
+      title: taskContext.assessment.componentTask || taskContext.assessment.title,
+      type: "Assessment",
+      content: [
+        taskContext.assessment.description || "",
+        `Distribution: ${formatAssessmentDueLabel(taskContext.assessment.distributionDate || "TBC")}`,
+        `Due: ${formatAssessmentDueLabel(taskContext.assessment.dueDate)}`,
+        `Weighting: ${taskContext.assessment.weighting || "TBC"}`,
+        ...taskContext.linkedDocumentBundles.map((bundle) => `${bundle.title}\n${clipText(bundle.content || "", 1200)}`)
+      ]
+        .filter(Boolean)
+        .join("\n\n")
+    };
+  }
+
+  return {
+    title: taskContext.homeworkBundle.title,
+    type: "Homework",
+    content: [taskContext.homeworkBundle.content || "", taskContext.homeworkBundle.workNotes || ""].filter(Boolean).join("\n\n")
+  };
+}
+
+async function handleTaskAsk(question) {
+  const subject = getSelectedSubject();
+  const activeTask = state.activeTask;
+  if (!subject || !activeTask) {
+    return;
+  }
+
+  let taskContext = null;
+  if (activeTask.kind === "assessment") {
+    const assessment = subject.assessments.find((item) => item.id === activeTask.id);
+    if (!assessment) {
+      return;
+    }
+    taskContext = {
+      kind: "assessment",
+      assessment,
+      linkedDocumentBundles: getLinkedDocumentBundles(subject, assessment.linkedDocumentIds)
+    };
+  } else {
+    const homeworkBundle = findHomeworkBundle(subject, activeTask.id);
+    if (!homeworkBundle) {
+      return;
+    }
+    taskContext = {
+      kind: "homework",
+      homeworkBundle
+    };
+  }
+
+  state.taskAskStatus = "Thinking...";
+  renderTaskView();
+
+  try {
+    const answer = await requestAskAnswer(question, subject, buildTaskAskDocument(subject, taskContext));
+    state.taskAskResponse = answer;
+    state.taskAskStatus = "";
+  } catch (error) {
+    state.taskAskStatus = error instanceof Error ? `Ask Panda failed: ${error.message}` : "Ask Panda failed.";
+  }
+
+  renderTaskView();
+}
+
+function bindTaskPopupActions(config) {
+  document.querySelectorAll("[data-task-close]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.currentView = "subjects";
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-task-note-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const bundle = config.linkedDocumentBundles?.find((item) => item.id === button.dataset.taskNoteId);
+      if (bundle) {
+        openDocumentPopup(bundle);
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-task-ask-prompt]").forEach((button) => {
+    button.addEventListener("click", () => {
+      handleTaskAsk(button.dataset.taskAskPrompt || "");
+    });
+  });
+
+  document.getElementById("task-read-aloud-button")?.addEventListener("click", () => {
+    const textToRead = config.readAloudText || config.title;
+    speakTextWithOpenAi(textToRead, {
+      context: "ask",
+      statusMessages: {
+        preparing: "Preparing task audio...",
+        playing: "Reading task aloud...",
+        error: "Task audio playback failed."
+      }
+    }).catch((error) => {
+      state.taskAskStatus = error instanceof Error ? `Listen failed: ${error.message}` : "Listen failed.";
+      renderTaskView();
+    });
+  });
+}
+
 function renderTaskView() {
   const subject = getSelectedSubject();
   const activeTask = state.activeTask;
+  const existingDraft = getTaskWorkEditor()?.value ?? "";
   if (!subject || !activeTask) {
     return;
   }
@@ -4041,68 +4246,132 @@ function renderTaskView() {
       return;
     }
     const linkedDocumentBundles = getLinkedDocumentBundles(subject, assessment.linkedDocumentIds);
-    const linkedPageCount = assessment.linkedDocumentIds.length;
-    elements.taskViewTitle.textContent = assessment.componentTask || assessment.title;
-    elements.taskSourceTitle.textContent = assessment.componentTask || assessment.title;
+    const stageCards = buildAssessmentTaskStages(assessment, linkedDocumentBundles);
+    const totalCompleted = stageCards.reduce((sum, stage) => sum + stage.doneCount, 0);
+    const totalItems = stageCards.reduce((sum, stage) => sum + stage.items.length, 0);
+    const progressRatio = totalItems ? totalCompleted / totalItems : 0;
+    const workEditorValue = existingDraft || assessment.workNotes || "";
+    const questionPrompt = `Based on ${assessment.componentTask || assessment.title}, generate a short practice question set I can use to prepare.`;
+    const studyPlanPrompt = `Suggest a short study plan for ${assessment.componentTask || assessment.title} before ${formatAssessmentDueLabel(assessment.dueDate)}.`;
+    const simplifyPrompt = `Simplify this assessment task into plain student-friendly steps: ${assessment.componentTask || assessment.title}. ${assessment.description || ""}`;
+    elements.saveTaskWorkButton.textContent = "Save draft";
+    elements.closeTaskViewButton.textContent = "Back to subjects";
     elements.taskSourceContent.innerHTML = `
-      <article class="assessment-item assessment-item--current task-assessment-card">
-        <div class="assessment-item__header">
-          <div class="assessment-item__title-group">
-            <span class="assessment-date">Due ${escapeHtml(formatAssessmentDueLabel(assessment.dueDate))}</span>
-            <h4>${escapeHtml(assessment.componentTask || assessment.title)}</h4>
-            <span class="document-chip assessment-item__subject">${escapeHtml(subject.name)}</span>
+      <article class="task-popup task-popup--assessment">
+        <header class="task-popup__hero task-popup__hero--assessment">
+          <div class="task-popup__countdown">
+            <strong>${escapeHtml(String(Math.max(0, Math.ceil((parseAssessmentDate(assessment.dueDate)?.getTime() - new Date(new Date().setHours(0,0,0,0)).getTime()) / 86400000)) || 0))}</strong>
+            <span>DAYS</span>
           </div>
-          <span class="assessment-item__task">Task ${escapeHtml(assessment.taskNumber || "Uploaded")}</span>
+          <div class="task-popup__hero-copy">
+            <p class="eyebrow">${escapeHtml(`${subject.name} · Assessment · ${assessment.weighting || "TBC"}`)}</p>
+            <h2>${escapeHtml(assessment.componentTask || assessment.title)}</h2>
+            <p class="task-popup__hero-meta">Distributed ${escapeHtml(formatAssessmentDueLabel(assessment.distributionDate || "TBC"))} · Due ${escapeHtml(formatAssessmentDueLabel(assessment.dueDate))} · Task ${escapeHtml(assessment.taskNumber || "Uploaded")}</p>
+          </div>
+          <button type="button" class="task-popup__close" data-task-close aria-label="Close task workspace">×</button>
+        </header>
+        <div class="task-popup__layout task-popup__layout--assessment">
+          <div class="task-popup__main">
+            <div class="task-banner task-banner--mint">
+              <div class="task-banner__copy">
+                <strong>Panda broke the task description into ${stageCards.length} stages.</strong>
+                <span>Tick each as you go.</span>
+              </div>
+              <button type="button" class="ghost-button ghost-button--dark" id="task-read-aloud-button">Read all</button>
+            </div>
+            <div class="task-stage-list">
+              ${stageCards
+                .map(
+                  (stage) => `
+                    <article class="task-stage-card${stage.active ? " task-stage-card--active" : ""}">
+                      <div class="task-stage-card__header">
+                        <div class="task-stage-card__title">
+                          <span class="task-stage-card__number">${stage.number}</span>
+                          <h3>${escapeHtml(stage.title)}</h3>
+                        </div>
+                        <span class="task-stage-card__progress">${stage.doneCount}/${stage.items.length} done</span>
+                      </div>
+                      <div class="task-stage-card__items">
+                        ${stage.items
+                          .map(
+                            (item, itemIndex) => `
+                              <label class="task-check-row${itemIndex < stage.doneCount ? " task-check-row--done" : ""}${stage.active && itemIndex === stage.doneCount ? " task-check-row--focus" : ""}">
+                                <span class="task-check-row__box">${itemIndex < stage.doneCount ? "✓" : ""}</span>
+                                <span>${escapeHtml(item)}</span>
+                              </label>
+                            `
+                          )
+                          .join("")}
+                      </div>
+                    </article>
+                  `
+                )
+                .join("")}
+            </div>
+            <div class="task-draft-card">
+              <div class="section-heading section-heading--stacked section-heading--compact">
+                <div>
+                  <p class="eyebrow">Working draft</p>
+                  <h3>Your response</h3>
+                </div>
+              </div>
+              <textarea id="task-work-editor" class="reader-editor task-popup__editor" placeholder="Start drafting your assessment response here...">${escapeHtml(workEditorValue)}</textarea>
+            </div>
+          </div>
+          <aside class="task-popup__side">
+            <section class="task-notes-card">
+              <div class="section-heading section-heading--stacked section-heading--compact">
+                <div>
+                  <p class="eyebrow">Attached notes · drop documents</p>
+                  <h3>Relevant notes</h3>
+                </div>
+              </div>
+              <div class="task-note-list">
+                ${
+                  linkedDocumentBundles.length
+                    ? linkedDocumentBundles
+                        .map(
+                          (documentBundle, index) => `
+                            <button type="button" class="task-note-row task-note-row--${["peach", "sky", "lilac", "mint"][index % 4]}" data-task-note-id="${documentBundle.id}">
+                              <span class="task-note-row__icon">📕</span>
+                              <span class="task-note-row__copy">
+                                <strong>${escapeHtml(documentBundle.title)}</strong>
+                                <span>${escapeHtml(`${documentBundle.documents.length} ${documentBundle.documents.length === 1 ? "page" : "pages"}`)}</span>
+                              </span>
+                              <span class="task-note-row__chevron">›</span>
+                            </button>
+                          `
+                        )
+                        .join("")
+                    : '<div class="empty-state empty-state--compact">No supporting documents linked yet.</div>'
+                }
+                <button type="button" class="task-note-drop">+ Drop a document</button>
+              </div>
+            </section>
+            <section class="task-panda-card">
+              <div class="task-panda-card__header">
+                <span class="task-panda-card__icon">🐼</span>
+                <h3>Ask Panda about this</h3>
+              </div>
+              <div class="task-panda-card__actions">
+                <button type="button" class="task-panda-pill" data-task-ask-prompt="${escapeHtml(simplifyPrompt)}">Simplify the task description</button>
+                <button type="button" class="task-panda-pill" data-task-ask-prompt="${escapeHtml(questionPrompt)}">Generate a practice test</button>
+                <button type="button" class="task-panda-pill" data-task-ask-prompt="${escapeHtml(studyPlanPrompt)}">Suggest a study plan</button>
+              </div>
+              <div class="task-panda-card__response">${escapeHtml(state.taskAskStatus || state.taskAskResponse || "Use Panda to turn the task into smaller actions or revision questions.")}</div>
+            </section>
+          </aside>
         </div>
-        <div class="assessment-grid">
-          <div class="assessment-fact">
-            <strong>Due date</strong>
-            <span>${escapeHtml(formatAssessmentDueLabel(assessment.dueDate))}</span>
-          </div>
-          <div class="assessment-fact">
-            <strong>Distribution</strong>
-            <span>${escapeHtml(formatAssessmentDueLabel(assessment.distributionDate || "TBC"))}</span>
-          </div>
-          <div class="assessment-fact">
-            <strong>Weighting</strong>
-            <span>${escapeHtml(assessment.weighting || "TBC")}</span>
-          </div>
-          <div class="assessment-fact">
-            <strong>Task</strong>
-            <span>${escapeHtml(assessment.componentTask || assessment.title)}</span>
-          </div>
-        </div>
-        <div class="task-assessment-card__summary">${escapeHtml(assessment.description || `${assessment.componentTask || assessment.title}.`)}</div>
-        <div class="task-relevant-notes">
-          <p class="eyebrow task-relevant-notes__heading">Relevant Notes</p>
-          <div class="task-relevant-notes__list">
-            ${
-              linkedDocumentBundles.length
-                ? linkedDocumentBundles
-                    .map(
-                      (documentBundle) => `
-                        <button type="button" class="ghost-button task-note-chip" data-task-document-id="${documentBundle.id}">
-                          ${escapeHtml(documentBundle.title)}
-                        </button>
-                      `
-                    )
-                    .join("")
-                : '<span class="document-empty">No supporting documents linked yet.</span>'
-            }
-          </div>
-          ${linkedDocumentBundles.length ? `<div class="task-assessment-card__summary">${linkedPageCount} page${linkedPageCount === 1 ? "" : "s"} linked across ${linkedDocumentBundles.length} document${linkedDocumentBundles.length === 1 ? "" : "s"}.</div>` : ""}
-        </div>
+        <footer class="task-progress-footer">
+          <div class="task-progress-bar"><span style="width:${Math.round(progressRatio * 100)}%"></span></div>
+          <span>${escapeHtml(`${totalCompleted} of ${totalItems} stage items complete`)}</span>
+        </footer>
       </article>
     `;
-    elements.taskSourceContent.querySelectorAll("[data-task-document-id]").forEach((button) => {
-      button.addEventListener("click", () => {
-        const documentBundle = linkedDocumentBundles.find((document) => document.id === button.dataset.taskDocumentId);
-        if (documentBundle) {
-          openDocumentPopup(documentBundle);
-        }
-      });
+    bindTaskPopupActions({
+      linkedDocumentBundles,
+      readAloudText: [assessment.componentTask || assessment.title, assessment.description || "", workEditorValue].filter(Boolean).join(". ")
     });
-    elements.taskWorkEditor.value = assessment.workNotes || "";
     return;
   }
 
@@ -4111,26 +4380,123 @@ function renderTaskView() {
     if (!homeworkBundle) {
       return;
     }
-    elements.taskViewTitle.textContent = homeworkBundle.title;
-    elements.taskSourceTitle.textContent = homeworkBundle.title;
+    const steps = buildHomeworkTaskSteps(homeworkBundle);
+    const minutes = estimateTaskMinutes(homeworkBundle.content || "");
+    const simplifyPrompt = `Rewrite this homework in simpler words for a student: ${homeworkBundle.title}. ${clipText(homeworkBundle.content || "", 1600)}`;
+    const starterPrompt = `Write one strong starter sentence for this homework response: ${homeworkBundle.title}. ${clipText(homeworkBundle.content || "", 1600)}`;
+    const quizPrompt = `Quiz me on this homework topic with 3 quick questions: ${homeworkBundle.title}.`;
+    elements.saveTaskWorkButton.textContent = "Save draft";
+    elements.closeTaskViewButton.textContent = "Back to subjects";
     elements.taskSourceContent.innerHTML = `
-      ${homeworkBundle.documents
-        .map((documentItem) =>
-          documentItem.previewImageUrl
-            ? `<img class="reader-preview-image" src="${escapeHtml(documentItem.previewImageUrl)}" alt="${escapeHtml(documentItem.title)} preview" />`
-            : ""
-        )
-        .join("")}
-      <div class="reader-content__text">${escapeHtml(homeworkBundle.content || "").replaceAll("\n", "<br />")}</div>
+      <article class="task-popup task-popup--homework">
+        <header class="task-popup__hero task-popup__hero--homework">
+          <div class="task-popup__hero-icon">✎</div>
+          <div class="task-popup__hero-copy">
+            <p class="eyebrow">${escapeHtml(`${subject.name} · Homework`)} <span class="task-popup__due-pill">${escapeHtml(getDaysUntilText(homeworkBundle.addedAt || new Date().toISOString()))}</span></p>
+            <h2>${escapeHtml(homeworkBundle.title)}</h2>
+          </div>
+          <button type="button" class="task-popup__close" data-task-close aria-label="Close task workspace">×</button>
+        </header>
+        <div class="task-popup__layout task-popup__layout--homework">
+          <div class="task-popup__main">
+            <section class="task-audio-card">
+              <button type="button" class="task-audio-card__play" id="task-read-aloud-button">▶</button>
+              <div class="task-audio-card__copy">
+                <strong>Read task aloud</strong>
+                <span>~${minutes} minutes · Panda voice · 1.0x</span>
+              </div>
+              <button type="button" class="task-audio-card__action" data-task-ask-prompt="${escapeHtml(simplifyPrompt)}">Simplify</button>
+            </section>
+            <div class="task-steps-head">
+              <div class="task-panda-inline">
+                <span class="task-panda-inline__icon">🐼</span>
+                <div>
+                  <strong>PANDA BROKE THIS INTO ${steps.length} STEPS</strong>
+                  <span>Tap any step to mark complete</span>
+                </div>
+              </div>
+              <button type="button" class="task-inline-link" data-task-ask-prompt="${escapeHtml(simplifyPrompt)}">Re-simplify</button>
+            </div>
+            <div class="task-step-list">
+              ${steps
+                .map(
+                  (step) => `
+                    <article class="task-step-card${step.active ? " task-step-card--active" : ""}${step.done ? " task-step-card--done" : ""}">
+                      <span class="task-step-card__check">${step.done ? "✓" : ""}</span>
+                      <span class="task-step-card__label">${escapeHtml(step.label)}</span>
+                      ${step.active ? '<span class="task-step-card__tag">YOU&#39;RE HERE</span>' : ""}
+                    </article>
+                  `
+                )
+                .join("")}
+            </div>
+            <section class="task-summary-card">
+              <div class="section-heading section-heading--stacked section-heading--compact">
+                <div>
+                  <p class="eyebrow">Your summary so far</p>
+                  <h3>Workbook response</h3>
+                </div>
+              </div>
+                  <textarea id="task-work-editor" class="reader-editor task-popup__editor" placeholder="Write your homework answer here...">${escapeHtml(existingDraft || homeworkBundle.workNotes || "")}</textarea>
+                </section>
+          </div>
+          <aside class="task-popup__side">
+            <section class="task-notes-card">
+              <div class="section-heading section-heading--stacked section-heading--compact">
+                <div>
+                  <p class="eyebrow">Attached notes</p>
+                  <h3>Relevant notes</h3>
+                </div>
+              </div>
+              <div class="task-note-list">
+                ${homeworkBundle.documents
+                  .map(
+                    (documentItem, index) => `
+                      <button type="button" class="task-note-row task-note-row--${["mint", "sky", "lilac", "peach"][index % 4]}" data-task-note-id="${documentItem.id}">
+                        <span class="task-note-row__icon">📕</span>
+                        <span class="task-note-row__copy">
+                          <strong>${escapeHtml(documentItem.title)}</strong>
+                          <span>${escapeHtml(documentItem.reviewed ? "60% read" : "New")}</span>
+                        </span>
+                        <span class="task-note-row__chevron">›</span>
+                      </button>
+                    `
+                  )
+                  .join("")}
+                <button type="button" class="task-note-drop">+ Drop a document</button>
+              </div>
+            </section>
+            <section class="task-panda-card task-panda-card--light">
+              <div class="task-panda-card__header">
+                <span class="task-panda-card__icon">🐼</span>
+                <h3>Ask Panda</h3>
+              </div>
+              <div class="task-panda-card__actions">
+                <button type="button" class="task-panda-pill" data-task-ask-prompt="${escapeHtml(simplifyPrompt)}">Simpler wording</button>
+                <button type="button" class="task-panda-pill" data-task-ask-prompt="${escapeHtml(starterPrompt)}">Give me a starter sentence</button>
+                <button type="button" class="task-panda-pill" data-task-ask-prompt="${escapeHtml(quizPrompt)}">Quiz me on the phases</button>
+              </div>
+              <div class="task-panda-card__response">${escapeHtml(state.taskAskStatus || state.taskAskResponse || "Panda can simplify, quiz, or give you a starter sentence for this task.")}</div>
+            </section>
+          </aside>
+        </div>
+      </article>
     `;
-    elements.taskWorkEditor.value = homeworkBundle.workNotes || "";
+    bindTaskPopupActions({
+      linkedDocumentBundles: homeworkBundle.documents.map((documentItem) => buildDocumentBundleFromDocuments([documentItem])).filter(Boolean),
+      readAloudText: [homeworkBundle.title, homeworkBundle.content || "", homeworkBundle.workNotes || ""].filter(Boolean).join(". ")
+    });
   }
 }
 
 function saveTaskWorkspace() {
   const subject = getSelectedSubject();
   const activeTask = state.activeTask;
+  const taskWorkEditor = getTaskWorkEditor();
   if (!subject || !activeTask) {
+    return;
+  }
+  if (!taskWorkEditor) {
     return;
   }
 
@@ -4139,7 +4505,7 @@ function saveTaskWorkspace() {
     if (!assessment) {
       return;
     }
-    assessment.workNotes = elements.taskWorkEditor.value;
+    assessment.workNotes = taskWorkEditor.value;
   }
 
   if (activeTask.kind === "homework") {
@@ -4148,7 +4514,7 @@ function saveTaskWorkspace() {
       return;
     }
     homeworkBundle.documents.forEach((documentItem) => {
-      documentItem.workNotes = elements.taskWorkEditor.value;
+      documentItem.workNotes = taskWorkEditor.value;
     });
   }
 
@@ -4159,7 +4525,11 @@ function saveTaskWorkspace() {
 function saveTaskWorkspaceToFiles() {
   const subject = getSelectedSubject();
   const activeTask = state.activeTask;
+  const taskWorkEditor = getTaskWorkEditor();
   if (!subject || !activeTask) {
+    return;
+  }
+  if (!taskWorkEditor) {
     return;
   }
 
@@ -4173,7 +4543,7 @@ function saveTaskWorkspaceToFiles() {
     title = homeworkBundle?.title || title;
   }
 
-  const exportContent = elements.taskWorkEditor.value || "";
+  const exportContent = taskWorkEditor.value || "";
   const blob = new Blob([exportContent], { type: "text/plain;charset=utf-8" });
   const objectUrl = URL.createObjectURL(blob);
   const link = document.createElement("a");

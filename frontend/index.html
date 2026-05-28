@@ -489,45 +489,18 @@
       </main>
 
       <section class="task-view hidden" id="task-view">
-        <header class="topbar">
-          <div class="topbar__brand-block">
-            <div class="brand-lockup brand-lockup--topbar">
-              <img src="/paperpanda-logo.png" alt="PaperPanda logo" class="brand-lockup__logo brand-lockup__logo--small" />
-              <div class="brand-lockup__copy">
-                <span class="brand-lockup__name brand-lockup__name--topbar">PaperPanda</span>
-                <span class="brand-lockup__tag">Task workspace</span>
+        <div class="task-modal">
+          <div class="task-modal__surface">
+            <div class="task-modal__body" id="task-source-content">Select a task to work on it here.</div>
+            <div class="task-modal__footer">
+              <div class="upload-status" id="task-work-status"></div>
+              <div class="reader-actions task-modal__footer-actions">
+                <button type="button" class="ghost-button" id="save-task-work-button">Save draft</button>
+                <button type="button" class="ghost-button" id="save-task-files-button">Save to files</button>
+                <button type="button" class="primary-button" id="close-task-view-button">Back to subjects</button>
               </div>
             </div>
-            <h2 id="task-view-title">Task workspace</h2>
           </div>
-          <div class="topbar__actions">
-            <button type="button" class="ghost-button" id="close-task-view-button">Back to subjects</button>
-          </div>
-        </header>
-        <div class="task-view__shell">
-          <section class="reader-card">
-            <div class="section-heading">
-              <div>
-                <p class="eyebrow">Task document</p>
-                <h3 id="task-source-title">Assessment document</h3>
-              </div>
-            </div>
-            <div class="reader-content" id="task-source-content">Select a task to work on it here.</div>
-          </section>
-          <section class="practice-card">
-            <div class="section-heading">
-              <div>
-                <p class="eyebrow">Work area</p>
-                <h3>Writing space</h3>
-              </div>
-            </div>
-            <textarea id="task-work-editor" class="reader-editor" placeholder="Start writing here..."></textarea>
-            <div class="reader-actions">
-              <button type="button" class="primary-button" id="save-task-work-button">Save</button>
-              <button type="button" class="ghost-button" id="save-task-files-button">Save to files</button>
-            </div>
-            <div class="upload-status" id="task-work-status"></div>
-          </section>
         </div>
       </section>
 
