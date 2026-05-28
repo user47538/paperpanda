@@ -91,6 +91,18 @@
         </header>
 
         <section class="home-view" id="home-view">
+          <div class="classmates-row">
+            <button type="button" class="classmates-row__avatar">J</button>
+            <button type="button" class="classmates-row__avatar">A</button>
+            <button type="button" class="classmates-row__avatar">L</button>
+            <button type="button" class="classmates-row__avatar classmates-row__avatar--active">S</button>
+            <button type="button" class="classmates-row__avatar">K</button>
+            <button type="button" class="classmates-row__avatar">R</button>
+            <button type="button" class="classmates-row__avatar">T</button>
+            <button type="button" class="classmates-row__avatar">B</button>
+            <span class="classmates-row__add">+ Class</span>
+          </div>
+
           <section class="hero-band hero-band--home" id="home-hero">
             <div class="hero-band__copy">
               <p class="eyebrow" id="home-hero-date">Wednesday · 28 May 2026</p>
@@ -98,145 +110,142 @@
               <p class="hero-band__subtitle" id="home-hero-subtitle">today — and 6 days until Cell Biology.</p>
             </div>
             <div class="hero-band__actions">
-              <button type="button" class="ghost-button" id="open-upload-modal-button">Upload</button>
               <button type="button" class="ghost-button" id="open-upcoming-from-hero-button">Calendar</button>
+              <button type="button" class="primary-button primary-button--dark" id="open-upload-modal-button">+ Upload</button>
             </div>
           </section>
 
-          <section class="overview-band overview-band--triple">
-            <article class="overview-card overview-card--metric">
-              <div class="overview-card__body">
-                <p class="overview-card__label">Documents To Read</p>
-                <strong id="documents-to-read-count">0</strong>
-                <span id="documents-to-read-summary">No unread documents right now.</span>
-              </div>
-              <div class="progress-meter">
-                <span class="progress-meter__bar" id="documents-to-read-progress"></span>
-              </div>
-            </article>
-
-            <article class="overview-card overview-card--metric">
-              <div class="overview-card__body">
-                <p class="overview-card__label">Hometasks To Complete</p>
-                <strong id="homework-to-complete-count">0</strong>
-                <span id="homework-to-complete-summary">No homework tasks waiting.</span>
-              </div>
-              <div class="progress-meter">
-                <span class="progress-meter__bar" id="homework-to-complete-progress"></span>
-              </div>
-            </article>
-
-            <article class="overview-card overview-card--metric">
-              <div class="overview-card__body">
-                <p class="overview-card__label">Assessments Upcoming</p>
-                <strong id="assessments-upcoming-count">0</strong>
-                <span id="assessments-upcoming-summary">No active assessments right now.</span>
-              </div>
-              <div class="progress-meter">
-                <span class="progress-meter__bar" id="assessments-upcoming-progress"></span>
-              </div>
-            </article>
-          </section>
-
-          <section class="overview-band overview-band--single">
-            <button type="button" class="overview-card overview-card--upcoming" id="upcoming-assessments-button">
-              <div class="overview-card__body">
-                <p class="overview-card__label">Upcoming Assessments</p>
-                <strong id="upcoming-assessment-count">0 due in the next fortnight</strong>
-                <span id="upcoming-assessment-summary">Open a due-date summary for the next 14 days.</span>
-              </div>
-              <span class="overview-card__chip" id="upcoming-next-due">No due dates available yet</span>
-            </button>
-          </section>
-
-          <section class="home-grid">
-            <section class="home-card">
-              <div class="section-heading">
-                <div>
-                  <p class="eyebrow">This week</p>
-                  <h3>Upload documents</h3>
+          <div class="home-stage">
+            <section class="home-stage__main">
+              <section class="home-section">
+                <div class="section-heading section-heading--between">
+                  <div>
+                    <p class="eyebrow">Your subjects</p>
+                    <h3>Your subjects</h3>
+                  </div>
+                  <span class="section-heading__aside">Manage</span>
                 </div>
-              </div>
-              <p class="helper-text">Send class notes, homework, assessments, PDFs, and WATCH links to the correct subject from one popup.</p>
-              <button type="button" class="ghost-button" id="open-upload-modal-secondary">Open upload</button>
+                <div class="home-subject-grid" id="home-subject-grid"></div>
+              </section>
+
+              <section class="home-continue-card" id="home-continue-reading-card">
+                <div class="home-continue-card__copy">
+                  <p class="eyebrow">Continue reading</p>
+                  <h3 id="home-current-doc-title">Choose a subject to continue reading.</h3>
+                  <p class="home-continue-card__meta" id="home-current-doc-meta">Upload class notes and they will appear here.</p>
+                  <div class="home-progress-row">
+                    <div class="progress-meter progress-meter--wide">
+                      <span class="progress-meter__bar" id="home-current-doc-progress"></span>
+                    </div>
+                    <span class="home-progress-label" id="home-current-doc-progress-label">0% read</span>
+                  </div>
+                  <div class="home-continue-card__actions">
+                    <button type="button" class="primary-button primary-button--dark" id="home-listen-current-button">Listen from here</button>
+                    <button type="button" class="ghost-button" id="home-open-current-button">Open reader</button>
+                  </div>
+                </div>
+                <div class="home-continue-card__visual" id="home-current-doc-visual">
+                  <div class="home-continue-card__art">
+                    <span class="home-continue-card__pause">❚❚</span>
+                    <span class="home-continue-card__time" id="home-current-doc-duration">1:24 / 3:18</span>
+                  </div>
+                </div>
+              </section>
+
+              <section class="home-section">
+                <div class="section-heading section-heading--between">
+                  <div>
+                    <p class="eyebrow">Today</p>
+                    <h3>Today's homework</h3>
+                  </div>
+                  <span class="section-pill" id="home-homework-count-pill">0 left</span>
+                </div>
+                <div class="home-homework-grid" id="home-homework-list"></div>
+              </section>
+
+              <section class="home-section home-section--customise">
+                <div class="section-heading section-heading--between">
+                  <div>
+                    <p class="eyebrow">Customise</p>
+                    <h3>Customise</h3>
+                  </div>
+                  <button type="button" class="ghost-button ghost-button--small" id="enter-subjects-button">Open subjects</button>
+                </div>
+                <div class="home-customise-panel">
+                  <input type="file" id="background-upload" class="upload-panel__input upload-panel__input--hidden" accept="image/*" />
+                  <div class="background-controls">
+                    <button type="button" class="ghost-button ghost-button--small" id="change-background-button">Change background</button>
+                    <button type="button" class="ghost-button ghost-button--small" id="remove-background-button">Remove background</button>
+                    <label class="upload-option">
+                      <input type="checkbox" id="background-home-checkbox" checked />
+                      <span>Home</span>
+                    </label>
+                    <label class="upload-option">
+                      <input type="checkbox" id="background-subjects-checkbox" />
+                      <span>Subjects</span>
+                    </label>
+                  </div>
+                  <div class="home-customise-panel__fields">
+                    <label class="upload-field">
+                      <span class="upload-field__label">Background colour</span>
+                      <input type="color" id="background-colour-input" value="#ffffff" />
+                    </label>
+                    <label class="upload-field">
+                      <span class="upload-field__label">Heading colour</span>
+                      <input type="color" id="heading-colour-input" value="#111111" />
+                    </label>
+                  </div>
+                  <div class="home-actions">
+                    <button type="button" class="ghost-button ghost-button--small" id="clear-background-colour-button">Reset background colour</button>
+                    <button type="button" class="ghost-button ghost-button--small" id="clear-heading-colour-button">Reset heading colour</button>
+                    <button type="button" class="ghost-button ghost-button--small" id="open-upload-modal-secondary">Open upload</button>
+                  </div>
+                </div>
+              </section>
             </section>
 
-            <section class="home-card">
-              <div class="section-heading">
-                <div>
-                  <p class="eyebrow">Customise</p>
-                  <h3>Customise</h3>
+            <aside class="home-stage__dock">
+              <section class="ask-card ask-card--home" id="home-ask-card">
+                <div class="ask-card__voice-row">
+                  <div class="ask-card__voice-copy">
+                    <p class="eyebrow">Ask Panda</p>
+                    <h3>Ask Panda</h3>
+                    <p class="helper-text">Hold space anywhere to talk.</p>
+                  </div>
+                  <button type="button" class="ask-card__mic-button" id="home-ask-mic-button">🎙</button>
                 </div>
-              </div>
-              <p class="helper-text">Upload a wallpaper from Desktop/Wallpapers, change the background colour, and adjust heading colour across the site.</p>
-              <div class="background-controls">
-                <input type="file" id="background-upload" class="upload-panel__input upload-panel__input--hidden" accept="image/*" />
-                <button type="button" class="ghost-button" id="change-background-button">Change Background</button>
-                <button type="button" class="ghost-button" id="remove-background-button">Remove Background</button>
-                <label class="upload-option">
-                  <input type="checkbox" id="background-home-checkbox" checked />
-                  <span>Home</span>
-                </label>
-                <label class="upload-option">
-                  <input type="checkbox" id="background-subjects-checkbox" />
-                  <span>Subjects</span>
-                </label>
-              </div>
-              <label class="upload-field">
-                <span class="upload-field__label">Background colour</span>
-                <input type="color" id="background-colour-input" value="#ffffff" />
-              </label>
-              <div class="home-actions">
-                <button type="button" class="ghost-button" id="clear-background-colour-button">Reset background colour</button>
-              </div>
-              <label class="upload-field">
-                <span class="upload-field__label">Heading colour</span>
-                <input type="color" id="heading-colour-input" value="#111111" />
-              </label>
-              <div class="home-actions">
-                <button type="button" class="ghost-button" id="clear-heading-colour-button">Reset heading colour</button>
-                <button type="button" class="ghost-button" id="enter-subjects-button">Open subjects</button>
-              </div>
-            </section>
-          </section>
+                <div class="ask-card__prompt" id="home-ask-prompt">Good morning. Want me to start with your reading or homework?</div>
+                <div class="ask-card__quick-actions">
+                  <button type="button" class="ask-quick-action" id="home-ask-read-button">▶ Read me today's homework</button>
+                  <button type="button" class="ask-quick-action" id="home-ask-quiz-button">🎯 Quiz me on yesterday</button>
+                </div>
+              </section>
 
-          <section class="home-grid home-grid--revision">
-            <section class="home-card home-card--revision">
-              <div class="section-heading">
-                <div>
-                  <p class="eyebrow">Revision</p>
-                  <h3>Create revision test</h3>
+              <button type="button" class="home-next-card" id="upcoming-assessments-button">
+                <div class="home-next-card__eyebrow">Next up</div>
+                <div class="home-next-card__count">
+                  <strong id="home-next-up-count">0</strong>
+                  <span>days</span>
                 </div>
-              </div>
-              <p class="helper-text" id="revision-grade-copy">
-                PaperPanda will use the selected school year to pull the right curriculum and practice resources.
-              </p>
-              <label class="upload-field">
-                <span class="upload-field__label">Subject</span>
-                <select id="revision-subject-select" class="upload-select"></select>
-              </label>
-              <label class="upload-field" id="revision-topic-wrap">
-                <span class="upload-field__label">Topic</span>
-                <select id="revision-topic-select" class="upload-select"></select>
-              </label>
-              <label class="upload-field hidden" id="revision-text-wrap">
-                <span class="upload-field__label">English text / novel / film</span>
-                <input type="text" id="revision-text-input" placeholder="e.g. The Giver or persuasive speeches" />
-              </label>
-              <label class="upload-field">
-                <span class="upload-field__label">Notes to include</span>
-                <select id="revision-notes-select" class="upload-select upload-select--notes" multiple></select>
-              </label>
-              <div class="upload-submit-row">
-                <button type="button" class="primary-button" id="create-revision-test-button">Create test</button>
-              </div>
-              <div class="upload-status" id="revision-status"></div>
-              <div class="revision-summary" id="revision-summary">
-                Select a subject to load the curriculum overview and tested skills.
-              </div>
-              <div class="revision-skills" id="revision-skills"></div>
-            </section>
-          </section>
+                <h3 id="home-next-up-title">No upcoming assessment yet</h3>
+                <p id="home-next-up-meta">Open the calendar to review due dates.</p>
+                <span class="home-next-card__cta" id="upcoming-next-due">Open task</span>
+                <span class="home-next-card__summary" id="upcoming-assessment-summary">Open a due-date summary for the next 14 days.</span>
+                <span class="hidden" id="upcoming-assessment-count">0 due in the next fortnight</span>
+              </button>
+
+              <section class="home-watch-card">
+                <div class="section-heading section-heading--between">
+                  <div>
+                    <p class="eyebrow">Watch picks</p>
+                    <h3>Watch picks</h3>
+                  </div>
+                  <span class="section-heading__aside">linked from notes</span>
+                </div>
+                <div class="home-watch-list" id="home-watch-picks-list"></div>
+              </section>
+            </aside>
+          </div>
         </section>
 
         <section class="settings-view hidden" id="settings-view">
@@ -301,6 +310,18 @@
 
         <section class="workspace-grid hidden" id="subjects-view">
           <section class="workspace-main">
+            <div class="classmates-row classmates-row--subjects">
+              <button type="button" class="classmates-row__avatar">J</button>
+              <button type="button" class="classmates-row__avatar">A</button>
+              <button type="button" class="classmates-row__avatar">L</button>
+              <button type="button" class="classmates-row__avatar classmates-row__avatar--active">S</button>
+              <button type="button" class="classmates-row__avatar">K</button>
+              <button type="button" class="classmates-row__avatar">R</button>
+              <button type="button" class="classmates-row__avatar">T</button>
+              <button type="button" class="classmates-row__avatar">B</button>
+              <span class="classmates-row__add">+ Class</span>
+            </div>
+
             <section class="hero-band hero-band--subjects" id="subjects-hero">
               <div class="hero-band__copy">
                 <p class="eyebrow" id="subjects-hero-date">Wednesday · 28 May 2026</p>
@@ -308,7 +329,7 @@
                 <p class="hero-band__subtitle" id="subjects-hero-subtitle">to finish in Cell Biology — Lesson 4.</p>
               </div>
               <div class="hero-band__actions">
-                <button type="button" class="ghost-button" id="subject-hero-upload-button">Upload</button>
+                <button type="button" class="primary-button primary-button--dark" id="subject-hero-upload-button">+ Upload</button>
               </div>
             </section>
 
@@ -386,43 +407,101 @@
                 </section>
 
                 <section class="viewer-panel hidden" id="viewer-panel-homework">
-                  <section class="practice-card" id="homework-section">
-                    <div class="section-heading">
-                      <div>
-                        <p class="eyebrow">Homework</p>
-                        <h3>Homework</h3>
-                      </div>
-                    </div>
+                  <section class="homework-workspace" id="homework-section">
                     <div id="practice-list" class="practice-list"></div>
+                    <aside class="homework-sidebar">
+                      <section class="task-stack-card">
+                        <div class="section-heading section-heading--between section-heading--compact">
+                          <div>
+                            <p class="eyebrow">This week</p>
+                            <h3>Up next this week</h3>
+                          </div>
+                          <span class="section-pill" id="subject-homework-upcoming-count">0</span>
+                        </div>
+                        <div id="subject-homework-upcoming-list" class="subject-side-list"></div>
+                      </section>
+
+                      <section class="revision-builder-card">
+                        <div class="section-heading section-heading--between section-heading--compact">
+                          <div>
+                            <p class="eyebrow">Revision</p>
+                            <h3>Create a test</h3>
+                          </div>
+                          <span class="section-pill" id="subject-revision-grade-pill">Year 7</span>
+                        </div>
+                        <p class="helper-text" id="revision-grade-copy">
+                          PaperPanda is using the selected school year to build this revision test.
+                        </p>
+                        <label class="upload-field">
+                          <span class="upload-field__label">Topic</span>
+                          <select id="revision-subject-select" class="upload-select"></select>
+                        </label>
+                        <label class="upload-field" id="revision-topic-wrap">
+                          <span class="upload-field__label">Focus</span>
+                          <select id="revision-topic-select" class="upload-select"></select>
+                        </label>
+                        <label class="upload-field hidden" id="revision-text-wrap">
+                          <span class="upload-field__label">English text / novel / film</span>
+                          <input type="text" id="revision-text-input" placeholder="e.g. The Giver or persuasive speeches" />
+                        </label>
+                        <div class="revision-notes-card">
+                          <div class="revision-notes-card__label">Notes to include</div>
+                          <select id="revision-notes-select" class="upload-select upload-select--notes" multiple></select>
+                        </div>
+                        <div class="revision-chip-row" id="revision-skills"></div>
+                        <div class="revision-summary" id="revision-summary">
+                          Select a subject to load the curriculum overview and tested skills.
+                        </div>
+                        <div class="upload-submit-row">
+                          <button type="button" class="primary-button" id="create-revision-test-button">Create test</button>
+                        </div>
+                        <div class="upload-status" id="revision-status"></div>
+                      </section>
+                    </aside>
                   </section>
                 </section>
 
                 <section class="viewer-panel hidden" id="viewer-panel-watch">
-                  <section class="practice-card" id="watch-section">
-                    <div class="section-heading">
-                      <div>
-                        <p class="eyebrow">Watch</p>
-                        <h3>Watch</h3>
+                  <section class="watch-workspace" id="watch-section">
+                    <div class="watch-workspace__feature">
+                      <div class="section-heading section-heading--between">
+                        <div>
+                          <p class="eyebrow">Watch</p>
+                          <h3>Watch</h3>
+                        </div>
+                        <button type="button" class="ghost-button" id="watch-rescan-button">Rescan links</button>
                       </div>
-                      <button type="button" class="ghost-button" id="watch-rescan-button">Rescan links</button>
-                    </div>
-                    <div class="upload-status" id="watch-status"></div>
-                    <div id="watch-list" class="practice-list"></div>
-                    <div class="documents-footer">
-                      <button type="button" class="ghost-button hidden" id="watch-toggle-button">Load more</button>
+                      <div class="upload-status" id="watch-status"></div>
+                      <div id="watch-list" class="practice-list"></div>
+                      <div class="documents-footer">
+                        <button type="button" class="ghost-button hidden" id="watch-toggle-button">Load more</button>
+                      </div>
                     </div>
                   </section>
                 </section>
 
                 <section class="viewer-panel hidden" id="viewer-panel-assessments">
-                  <section class="assessment-card" id="assessments-section">
-                    <div class="section-heading">
-                      <div>
-                        <p class="eyebrow">Deadlines</p>
-                        <h3>Assessment Schedule</h3>
+                  <section class="assessment-workspace" id="assessments-section">
+                    <section class="assessment-workspace__hero" id="subject-assessment-hero">
+                      <div class="assessment-workspace__count">
+                        <strong id="subject-next-assessment-days">0</strong>
+                        <span>days</span>
                       </div>
-                    </div>
-                    <div id="assessment-list" class="assessment-list"></div>
+                      <div class="assessment-workspace__hero-copy">
+                        <p class="eyebrow">Assessment focus</p>
+                        <h3 id="subject-next-assessment-title">No active assessment yet</h3>
+                        <p id="subject-next-assessment-meta">Attach notes and track upcoming due dates here.</p>
+                      </div>
+                    </section>
+                    <section class="assessment-card">
+                      <div class="section-heading">
+                        <div>
+                          <p class="eyebrow">Deadlines</p>
+                          <h3>Assessment Schedule</h3>
+                        </div>
+                      </div>
+                      <div id="assessment-list" class="assessment-list"></div>
+                    </section>
                   </section>
                 </section>
               </div>

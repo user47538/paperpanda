@@ -452,6 +452,25 @@ const elements = {
   homeHeroDate: document.getElementById("home-hero-date"),
   homeHeroTitle: document.getElementById("home-hero-title"),
   homeHeroSubtitle: document.getElementById("home-hero-subtitle"),
+  homeSubjectGrid: document.getElementById("home-subject-grid"),
+  homeCurrentDocTitle: document.getElementById("home-current-doc-title"),
+  homeCurrentDocMeta: document.getElementById("home-current-doc-meta"),
+  homeCurrentDocProgress: document.getElementById("home-current-doc-progress"),
+  homeCurrentDocProgressLabel: document.getElementById("home-current-doc-progress-label"),
+  homeCurrentDocVisual: document.getElementById("home-current-doc-visual"),
+  homeCurrentDocDuration: document.getElementById("home-current-doc-duration"),
+  homeListenCurrentButton: document.getElementById("home-listen-current-button"),
+  homeOpenCurrentButton: document.getElementById("home-open-current-button"),
+  homeHomeworkList: document.getElementById("home-homework-list"),
+  homeHomeworkCountPill: document.getElementById("home-homework-count-pill"),
+  homeAskMicButton: document.getElementById("home-ask-mic-button"),
+  homeAskPrompt: document.getElementById("home-ask-prompt"),
+  homeAskReadButton: document.getElementById("home-ask-read-button"),
+  homeAskQuizButton: document.getElementById("home-ask-quiz-button"),
+  homeNextUpCount: document.getElementById("home-next-up-count"),
+  homeNextUpTitle: document.getElementById("home-next-up-title"),
+  homeNextUpMeta: document.getElementById("home-next-up-meta"),
+  homeWatchPicksList: document.getElementById("home-watch-picks-list"),
   openUpcomingFromHeroButton: document.getElementById("open-upcoming-from-hero-button"),
   settingsView: document.getElementById("settings-view"),
   subjectsView: document.getElementById("subjects-view"),
@@ -550,6 +569,12 @@ const elements = {
   readerContent: document.getElementById("reader-content"),
   assessmentList: document.getElementById("assessment-list"),
   practiceList: document.getElementById("practice-list"),
+  subjectHomeworkUpcomingCount: document.getElementById("subject-homework-upcoming-count"),
+  subjectHomeworkUpcomingList: document.getElementById("subject-homework-upcoming-list"),
+  subjectRevisionGradePill: document.getElementById("subject-revision-grade-pill"),
+  subjectNextAssessmentDays: document.getElementById("subject-next-assessment-days"),
+  subjectNextAssessmentTitle: document.getElementById("subject-next-assessment-title"),
+  subjectNextAssessmentMeta: document.getElementById("subject-next-assessment-meta"),
   watchList: document.getElementById("watch-list"),
   watchToggleButton: document.getElementById("watch-toggle-button"),
   watchRescanButton: document.getElementById("watch-rescan-button"),
@@ -788,6 +813,22 @@ function scrollReaderIntoView() {
 function focusAskComposer() {
   elements.askInput.focus();
   elements.askInput.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function openSubjectsWorkspace(tab = "reader") {
+  state.currentView = "subjects";
+  state.activeSubjectTab = tab;
+  render();
+}
+
+function focusBundleInReader(bundle) {
+  const firstDocument = bundle?.documents?.[0];
+  if (!firstDocument) {
+    return;
+  }
+  state.selectedDocumentId = firstDocument.id;
+  state.askDocumentId = firstDocument.id;
+  openSubjectsWorkspace("reader");
 }
 
 function seededAssessment(taskNumber, componentTask, distributionDate, dueDate, weighting) {
@@ -1652,6 +1693,75 @@ function getAssessmentProgressMetrics() {
   };
 }
 
+function getHomeContinueReadingBundle() {
+  const subject = getSelectedSubject();
+  if (!subject) {
+    return null;
+  }
+  const bundles = getAllDocumentBundles(subject);
+  return bundles.find((bundle) => !bundle.reviewed) || bundles[0] || null;
+}
+
+function getHomeDocumentProgress(bundle) {
+  if (!bundle) {
+    return 0;
+  }
+  const totalPages = bundle.documents.length || 1;
+  const reviewedPages = bundle.documents.filter((documentRecord) => documentRecord.reviewed).length;
+  return reviewedPages / totalPages;
+}
+
+function getHomeWatchEntries(limit = 2) {
+  return state.subjects
+    .flatMap((subject) =>
+      (Array.isArray(subject.watch) ? subject.watch : []).map((item) => ({
+        subject,
+        item
+      }))
+    )
+    .sort((left, right) => new Date(right.item.addedAt || 0).getTime() - new Date(left.item.addedAt || 0).getTime())
+    .slice(0, limit);
+}
+
+function getHomeHomeworkEntries(limit = 3) {
+  return getAllHomeworkBundles()
+    .sort((left, right) => {
+      const leftProgress = getTextCompletionRatio(left.bundle.workNotes, 350);
+      const rightProgress = getTextCompletionRatio(right.bundle.workNotes, 350);
+      if (leftProgress !== rightProgress) {
+        return leftProgress - rightProgress;
+      }
+      return getDocumentSortValue(right.bundle) - getDocumentSortValue(left.bundle);
+    })
+    .slice(0, limit);
+}
+
+function buildHomeHomeworkCardMarkup({ subject, bundle }, index) {
+  const progressRatio = getTextCompletionRatio(bundle.workNotes, 350);
+  const dueTag = progressRatio >= 1 ? "Done" : index === 0 ? "2 days" : index === 1 ? "Fri" : "Tue";
+  const chips = [
+    bundle.documents[0]?.type || "Class notes",
+    bundle.documents.length > 1 ? `${bundle.documents.length} pages` : bundle.documents[0]?.pageNumber ? "1 page" : bundle.documents[0]?.type || "Note",
+    bundle.workNotes ? "Writing started" : "Needs a draft"
+  ];
+
+  return `
+    <button type="button" class="homework-spotlight-card homework-spotlight-card--${["peach", "yellow", "lilac"][index % 3]}" data-open-homework-card="${bundle.id}">
+      <div class="homework-spotlight-card__top">
+        <span class="homework-spotlight-card__eyebrow">${escapeHtml(`${getSubjectShortCode(subject.name)} · HW`)}</span>
+        <span class="homework-spotlight-card__due">${escapeHtml(dueTag)}</span>
+      </div>
+      <h4>${escapeHtml(bundle.title)}</h4>
+      <div class="homework-spotlight-card__chips">
+        ${chips.map((chip) => `<span class="homework-spotlight-card__chip">${escapeHtml(chip)}</span>`).join("")}
+      </div>
+      <div class="homework-spotlight-card__progress">
+        <span>${escapeHtml(progressRatio >= 1 ? "Ready to submit" : "In progress")}</span>
+      </div>
+    </button>
+  `;
+}
+
 function renderOverview() {
   const unreadDocumentMetrics = getUnreadDocumentMetrics();
   const homeworkMetrics = getHomeworkMetrics();
@@ -1663,31 +1773,139 @@ function renderOverview() {
     getAssessmentEntries().find((entry) => entry.dueDateObject && entry.dueDateObject >= today) ||
     getAssessmentEntries().find((entry) => entry.dueDateObject);
 
-  elements.documentsToReadCount.textContent = String(unreadDocumentMetrics.unread);
-  elements.documentsToReadSummary.textContent = unreadDocumentMetrics.total
-    ? `${unreadDocumentMetrics.total - unreadDocumentMetrics.unread} of ${unreadDocumentMetrics.total} whole documents have been marked read or listened to.`
-    : "No documents have been uploaded yet.";
+  if (elements.documentsToReadCount) {
+    elements.documentsToReadCount.textContent = String(unreadDocumentMetrics.unread);
+  }
+  if (elements.documentsToReadSummary) {
+    elements.documentsToReadSummary.textContent = unreadDocumentMetrics.total
+      ? `${unreadDocumentMetrics.total - unreadDocumentMetrics.unread} of ${unreadDocumentMetrics.total} whole documents have been marked read or listened to.`
+      : "No documents have been uploaded yet.";
+  }
   setProgressBar(elements.documentsToReadProgress, unreadDocumentMetrics.progress);
 
-  elements.homeworkToCompleteCount.textContent = String(homeworkMetrics.remaining);
-  elements.homeworkToCompleteSummary.textContent = homeworkMetrics.total
-    ? `${homeworkMetrics.total - homeworkMetrics.remaining} of ${homeworkMetrics.total} homework items have enough writing started.`
-    : "No homework items are waiting right now.";
+  if (elements.homeworkToCompleteCount) {
+    elements.homeworkToCompleteCount.textContent = String(homeworkMetrics.remaining);
+  }
+  if (elements.homeworkToCompleteSummary) {
+    elements.homeworkToCompleteSummary.textContent = homeworkMetrics.total
+      ? `${homeworkMetrics.total - homeworkMetrics.remaining} of ${homeworkMetrics.total} homework items have enough writing started.`
+      : "No homework items are waiting right now.";
+  }
   setProgressBar(elements.homeworkToCompleteProgress, homeworkMetrics.progress);
 
-  elements.assessmentsUpcomingCount.textContent = String(assessmentMetrics.upcoming);
-  elements.assessmentsUpcomingSummary.textContent = assessmentMetrics.active
-    ? `${assessmentMetrics.active} active assessments are being tracked across the account.`
-    : "No active assessments are being tracked right now.";
+  if (elements.assessmentsUpcomingCount) {
+    elements.assessmentsUpcomingCount.textContent = String(assessmentMetrics.upcoming);
+  }
+  if (elements.assessmentsUpcomingSummary) {
+    elements.assessmentsUpcomingSummary.textContent = assessmentMetrics.active
+      ? `${assessmentMetrics.active} active assessments are being tracked across the account.`
+      : "No active assessments are being tracked right now.";
+  }
   setProgressBar(elements.assessmentsUpcomingProgress, assessmentMetrics.progress);
 
-  elements.upcomingAssessmentCount.textContent = `${upcomingEntries.length} due in the next fortnight`;
-  elements.upcomingAssessmentSummary.textContent = upcomingEntries.length
-    ? `Select to open a summary of the ${upcomingEntries.length} assessment${upcomingEntries.length === 1 ? "" : "s"} due in the next 14 days.`
-    : "Select to check the next 14 days. Nothing is due in that window right now.";
-  elements.upcomingNextDue.textContent = nextEntry
-    ? `Next due: ${nextEntry.subject.name} · ${formatAssessmentDueLabel(nextEntry.assessment.dueDate)}`
-    : "No due dates available yet";
+  if (elements.upcomingAssessmentCount) {
+    elements.upcomingAssessmentCount.textContent = `${upcomingEntries.length} due in the next fortnight`;
+  }
+  if (elements.upcomingAssessmentSummary) {
+    elements.upcomingAssessmentSummary.textContent = upcomingEntries.length
+      ? `Select to open a summary of the ${upcomingEntries.length} assessment${upcomingEntries.length === 1 ? "" : "s"} due in the next 14 days.`
+      : "Select to check the next 14 days. Nothing is due in that window right now.";
+  }
+  if (elements.upcomingNextDue) {
+    elements.upcomingNextDue.textContent = nextEntry ? "Open task" : "Open calendar";
+  }
+
+  const continueBundle = getHomeContinueReadingBundle();
+  const continueProgress = getHomeDocumentProgress(continueBundle);
+  if (elements.homeCurrentDocTitle) {
+    elements.homeCurrentDocTitle.textContent = continueBundle ? continueBundle.title : "Choose a subject to continue reading.";
+  }
+  if (elements.homeCurrentDocMeta) {
+    elements.homeCurrentDocMeta.textContent = continueBundle
+      ? `${getSelectedSubject()?.name || "Subject"} · ${continueBundle.type || "Class notes"} · ${continueBundle.documents.length} ${continueBundle.documents.length === 1 ? "page" : "pages"}`
+      : "Upload class notes and they will appear here.";
+  }
+  setProgressBar(elements.homeCurrentDocProgress, continueProgress);
+  if (elements.homeCurrentDocProgressLabel) {
+    elements.homeCurrentDocProgressLabel.textContent = continueBundle ? `${Math.round(continueProgress * 100)}% read` : "0% read";
+  }
+  const durationLabel = continueBundle
+    ? `${Math.max(1, Math.ceil(String(continueBundle.content || "").split(/\s+/).filter(Boolean).length / 140))}:00 listen`
+    : "Ready to listen";
+  if (elements.homeCurrentDocVisual) {
+    elements.homeCurrentDocVisual.innerHTML = continueBundle?.previewImageUrl
+      ? `
+        <div class="home-continue-card__art home-continue-card__art--image">
+          <img src="${escapeHtml(continueBundle.previewImageUrl)}" alt="${escapeHtml(continueBundle.title)} preview" />
+          <span class="home-continue-card__pause">❚❚</span>
+          <span class="home-continue-card__time">${escapeHtml(durationLabel)}</span>
+        </div>
+      `
+      : `
+        <div class="home-continue-card__art">
+          <span class="home-continue-card__pause">❚❚</span>
+          <span class="home-continue-card__time">${escapeHtml(durationLabel)}</span>
+        </div>
+      `;
+  }
+
+  const homeHomeworkEntries = getHomeHomeworkEntries();
+  if (elements.homeHomeworkCountPill) {
+    elements.homeHomeworkCountPill.textContent = `${homeworkMetrics.remaining} left`;
+  }
+  if (elements.homeHomeworkList) {
+    elements.homeHomeworkList.innerHTML = homeHomeworkEntries.length
+      ? homeHomeworkEntries.map((entry, index) => buildHomeHomeworkCardMarkup(entry, index)).join("")
+      : `<div class="empty-state">No homework is waiting right now.</div>`;
+    elements.homeHomeworkList.querySelectorAll("[data-open-homework-card]").forEach((button) => {
+      button.addEventListener("click", () => {
+        openTaskView({ kind: "homework", id: button.dataset.openHomeworkCard });
+      });
+    });
+  }
+
+  if (elements.homeNextUpCount) {
+    const daysUntil = nextEntry?.dueDateObject ? Math.max(0, Math.ceil((nextEntry.dueDateObject.getTime() - today.getTime()) / 86400000)) : 0;
+    elements.homeNextUpCount.textContent = String(daysUntil);
+  }
+  if (elements.homeNextUpTitle) {
+    elements.homeNextUpTitle.textContent = nextEntry ? nextEntry.assessment.componentTask || nextEntry.assessment.title : "No upcoming assessment yet";
+  }
+  if (elements.homeNextUpMeta) {
+    elements.homeNextUpMeta.textContent = nextEntry
+      ? `${nextEntry.subject.name} · ${nextEntry.assessment.weighting || "Assessment"} · ${formatAssessmentDueLabel(nextEntry.assessment.dueDate)}`
+      : "Open the calendar to review due dates.";
+  }
+
+  if (elements.homeWatchPicksList) {
+    const watchEntries = getHomeWatchEntries(2);
+    elements.homeWatchPicksList.innerHTML = watchEntries.length
+      ? watchEntries
+          .map(
+            ({ subject, item }) => `
+              <button type="button" class="home-watch-row" data-home-watch-open="${escapeHtml(item.url)}">
+                <span class="home-watch-row__thumb">${item.source === "auto-document" ? "🧬" : "🎬"}</span>
+                <span class="home-watch-row__copy">
+                  <strong>${escapeHtml(item.title)}</strong>
+                  <span>${escapeHtml(`${subject.name} · ${item.sourceDocumentTitle || "Linked from notes"}`)}</span>
+                </span>
+              </button>
+            `
+          )
+          .join("")
+      : `<div class="empty-state empty-state--compact">No watch links have been added yet.</div>`;
+    elements.homeWatchPicksList.querySelectorAll("[data-home-watch-open]").forEach((button) => {
+      button.addEventListener("click", () => {
+        window.open(button.dataset.homeWatchOpen, "_blank", "noopener");
+      });
+    });
+  }
+
+  if (elements.homeAskPrompt) {
+    elements.homeAskPrompt.textContent = continueBundle
+      ? `Good morning. Want me to start with ${continueBundle.title} or your homework?`
+      : "Good morning. Upload some notes and I can help you read or simplify them.";
+  }
 
   renderUpcomingModal();
 }
@@ -2117,11 +2335,14 @@ function renderHomeHero() {
   const assessmentMetrics = getAssessmentProgressMetrics();
   const totalThings = unreadDocumentMetrics.unread + homeworkMetrics.remaining + assessmentMetrics.upcoming;
   const nextEntry = getUpcomingAssessmentEntries()[0] || getAssessmentEntries().find((entry) => entry.dueDateObject);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const daysUntil = nextEntry?.dueDateObject ? Math.max(0, Math.ceil((nextEntry.dueDateObject.getTime() - today.getTime()) / 86400000)) : 0;
 
   elements.homeHeroDate.textContent = formatHeroDate();
   elements.homeHeroTitle.innerHTML = `Hey ${escapeHtml(state.studentName || "there")}. <span>${totalThings} things</span>`;
   elements.homeHeroSubtitle.textContent = nextEntry
-    ? `today — and ${formatAssessmentDueLabel(nextEntry.assessment.dueDate)} until ${nextEntry.assessment.componentTask || nextEntry.assessment.title}.`
+    ? `today — and ${daysUntil} ${daysUntil === 1 ? "day" : "days"} until ${nextEntry.assessment.componentTask || nextEntry.assessment.title}.`
     : "today — your study space is ready for the next upload.";
 }
 
@@ -2144,26 +2365,34 @@ function renderSubjectList() {
   elements.uploadSubjectSelect.value = state.selectedSubjectId;
   renderUploadAssessmentTaskOptions();
 
-  elements.subjectList.innerHTML = state.subjects
-    .map(
-      (subject) => `
+  const subjectTileMarkup = state.subjects
+    .map((subject, index) => {
+      const counts = getSubjectTabCounts(subject);
+      return `
         <button
           type="button"
-          class="subject-tile${subject.id === state.selectedSubjectId ? " subject-tile--active" : ""}"
+          class="subject-tile subject-tile--${["dark", "lilac", "peach", "yellow", "sky", "mint"][index % 6]}${subject.id === state.selectedSubjectId ? " subject-tile--active" : ""}"
           data-subject-id="${subject.id}"
         >
           <span class="subject-tile__code">${escapeHtml(getSubjectShortCode(subject.name))}</span>
           <span class="subject-tile__title">${escapeHtml(subject.name)}</span>
           <span class="subject-tile__meta">
-            <span>${escapeHtml(`${getSubjectTabCounts(subject).reader} docs`)}</span>
-            <span>${escapeHtml(`${getSubjectTabCounts(subject).homework} homework`)}</span>
+            <span>${escapeHtml(`${counts.reader} notes`)}</span>
+            <span>${escapeHtml(`${counts.homework} HW`)}</span>
           </span>
         </button>
-      `
-    )
+      `;
+    })
     .join("");
 
-  elements.subjectList.querySelectorAll("[data-subject-id]").forEach((button) => {
+  if (elements.subjectList) {
+    elements.subjectList.innerHTML = subjectTileMarkup;
+  }
+  if (elements.homeSubjectGrid) {
+    elements.homeSubjectGrid.innerHTML = subjectTileMarkup;
+  }
+
+  document.querySelectorAll("[data-subject-id]").forEach((button) => {
     button.addEventListener("click", () => {
       const subject = state.subjects.find((item) => item.id === button.dataset.subjectId);
       if (!subject) {
@@ -2179,6 +2408,7 @@ function renderSubjectList() {
       state.selectedDocumentId = getVisibleSubjectDocuments(subject)[0]?.id || null;
       state.askDocumentId = getVisibleSubjectDocuments(subject)[0]?.id || null;
       elements.askInput.value = "";
+      state.currentView = button.closest("#home-view") ? "subjects" : state.currentView;
       render();
     });
   });
@@ -2205,8 +2435,7 @@ function renderSubjectHeader() {
       <p class="subject-header__meta">${escapeHtml(`${formatGradeLabel(state.studentGrade)} · ${activeTabLabel}`)}</p>
     </div>
     <div class="subject-header__actions">
-      <span class="subject-header__summary">${escapeHtml(subject.focus || "Reading, guidance, and due dates in one place.")}</span>
-      <button type="button" class="ghost-button" id="subject-upload-button">Upload</button>
+      <button type="button" class="ghost-button ghost-button--small" id="subject-upload-button">+ Upload</button>
     </div>
   `;
   document.getElementById("subject-upload-button")?.addEventListener("click", openUploadModal);
@@ -4581,9 +4810,37 @@ function renderAssessments() {
 
   if (!selectedEntries.length) {
     elements.assessmentList.innerHTML = `<div class="empty-state">No assessments for ${escapeHtml(selectedSubject.name)} yet.</div>`;
+    if (elements.subjectNextAssessmentDays) {
+      elements.subjectNextAssessmentDays.textContent = "0";
+    }
+    if (elements.subjectNextAssessmentTitle) {
+      elements.subjectNextAssessmentTitle.textContent = "No active assessment yet";
+    }
+    if (elements.subjectNextAssessmentMeta) {
+      elements.subjectNextAssessmentMeta.textContent = "Attach notes and track upcoming due dates here.";
+    }
     renderSubjectsHero();
     renderDockContext();
     return;
+  }
+
+  const nextAssessmentEntry = selectedEntries.find((entry) => !entry.assessment.completed) || selectedEntries[0];
+  if (elements.subjectNextAssessmentDays) {
+    if (nextAssessmentEntry?.dueDateObject) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      elements.subjectNextAssessmentDays.textContent = String(
+        Math.max(0, Math.ceil((nextAssessmentEntry.dueDateObject.getTime() - today.getTime()) / 86400000))
+      );
+    } else {
+      elements.subjectNextAssessmentDays.textContent = "0";
+    }
+  }
+  if (elements.subjectNextAssessmentTitle) {
+    elements.subjectNextAssessmentTitle.textContent = nextAssessmentEntry.assessment.componentTask || nextAssessmentEntry.assessment.title;
+  }
+  if (elements.subjectNextAssessmentMeta) {
+    elements.subjectNextAssessmentMeta.textContent = `${selectedSubject.name} · ${nextAssessmentEntry.assessment.weighting || "Assessment"} · ${formatAssessmentDueLabel(nextAssessmentEntry.assessment.dueDate)}`;
   }
 
   selectedEntries.forEach(({ subject, assessment, dueDateObject }) => {
@@ -4833,26 +5090,128 @@ function renderPractice() {
   const homeworkBundles = getHomeworkBundles(subject);
   if (!homeworkBundles.length) {
     elements.practiceList.innerHTML = `<div class="empty-state">No homework items for this subject yet.</div>`;
+    if (elements.subjectHomeworkUpcomingList) {
+      elements.subjectHomeworkUpcomingList.innerHTML = `<div class="empty-state empty-state--compact">Nothing else is queued for this week.</div>`;
+    }
     renderSubjectsHero();
     renderDockContext();
     return;
   }
 
-  elements.practiceList.innerHTML = homeworkBundles
-    .map(
-      (documentBundle) => `
-        <article class="practice-item">
-          <div class="activity-row">
-            <span class="activity-tag">Homework</span>
-          </div>
-          <h4><button type="button" class="assessment-link-button" data-open-homework="${documentBundle.id}">${escapeHtml(documentBundle.title)}</button></h4>
-          <p class="practice-copy">Open this homework item to work from the full document while keeping page-by-page reading in Documents.</p>
-        </article>
-      `
-    )
-    .join("");
+  const focusBundle = homeworkBundles[0];
+  const nextBundles = homeworkBundles.slice(1, 3);
+  const focusSteps = buildHomeworkTaskSteps(focusBundle);
+  const readPrompt = `Read this homework aloud and help me understand the instructions: ${focusBundle.title}`;
+  const simplifyPrompt = `Simplify the homework task and explain it in smaller steps: ${focusBundle.title}\n\n${focusBundle.content || ""}`;
+  const focusDocument = focusBundle.documents[0] || null;
+
+  elements.practiceList.innerHTML = `
+    <article class="homework-focus-card">
+      <div class="homework-focus-card__header">
+        <div>
+          <p class="eyebrow">Homework · in progress</p>
+          <h3>${escapeHtml(focusBundle.title)}</h3>
+        </div>
+        <span class="homework-focus-card__due">${escapeHtml(getDaysUntilText(new Date(Date.now() + 2 * 86400000)))}</span>
+      </div>
+      <div class="homework-focus-card__chips">
+        <span class="homework-focus-card__chip">${escapeHtml(`${focusBundle.documents[0]?.type || "Class notes"} · ${focusBundle.documents.length > 1 ? `${focusBundle.documents.length} pp` : "linked note"}`)}</span>
+        <span class="homework-focus-card__chip homework-focus-card__chip--mint">~${estimateTaskMinutes(focusBundle.content || focusBundle.workNotes)} min</span>
+        <span class="homework-focus-card__chip homework-focus-card__chip--lilac">${escapeHtml(focusBundle.workNotes ? "Workbook submission" : "Need a first draft")}</span>
+      </div>
+      <div class="homework-focus-card__panda-row">
+        <div>
+          <strong>Panda broke this into steps</strong>
+          <span>Tap any step to mark complete</span>
+        </div>
+        <button type="button" class="task-inline-link" data-homework-simplify="${focusBundle.id}">↯ Re-simplify</button>
+      </div>
+      <div class="homework-focus-card__steps">
+        ${focusSteps
+          .map(
+            (step) => `
+              <article class="homework-step${step.active ? " homework-step--active" : ""}${step.done ? " homework-step--done" : ""}">
+                <span class="homework-step__check">${step.done ? "✓" : ""}</span>
+                <span class="homework-step__label">${escapeHtml(step.label)}</span>
+                ${step.active ? '<span class="homework-step__tag">YOU&#39;RE HERE</span>' : ""}
+              </article>
+            `
+          )
+          .join("")}
+      </div>
+      <div class="homework-focus-card__actions">
+        <button type="button" class="primary-button primary-button--dark" data-homework-readaloud="${focusBundle.id}">▶ Read task aloud</button>
+        <button type="button" class="ghost-button ghost-button--peach" data-homework-simplify="${focusBundle.id}">↯ Simplify wording</button>
+        <button type="button" class="ghost-button ghost-button--mint" data-open-homework-reader="${focusBundle.id}">📖 Open in Reader</button>
+      </div>
+    </article>
+  `;
+
+  if (elements.subjectHomeworkUpcomingCount) {
+    elements.subjectHomeworkUpcomingCount.textContent = String(nextBundles.length);
+  }
+  if (elements.subjectHomeworkUpcomingList) {
+    elements.subjectHomeworkUpcomingList.innerHTML = nextBundles.length
+      ? nextBundles
+          .map(
+            (bundle, index) => `
+              <button type="button" class="task-stack-item task-stack-item--${["yellow", "lilac"][index % 2]}" data-open-homework="${bundle.id}">
+                <span class="task-stack-item__eyebrow">${escapeHtml(`${getSubjectShortCode(subject.name)} · HW`)}</span>
+                <strong>${escapeHtml(bundle.title)}</strong>
+                <span>${escapeHtml(bundle.workNotes ? "Writing started" : "Needs a draft")}</span>
+              </button>
+            `
+          )
+          .join("")
+      : `<div class="empty-state empty-state--compact">Nothing else is queued for this week.</div>`;
+  }
+  if (elements.subjectRevisionGradePill) {
+    elements.subjectRevisionGradePill.textContent = formatGradeLabel(state.studentGrade);
+  }
 
   elements.practiceList.querySelectorAll("[data-open-homework]").forEach((button) => {
+    button.addEventListener("click", () => {
+      openTaskView({ kind: "homework", id: button.dataset.openHomework });
+    });
+  });
+  elements.practiceList.querySelectorAll("[data-homework-readaloud]").forEach((button) => {
+    button.addEventListener("click", () => {
+      speakTextWithOpenAi([focusBundle.title, focusBundle.content || "", focusBundle.workNotes || ""].filter(Boolean).join(". "), {
+        context: "ask",
+        statusMessages: {
+          preparing: "Preparing homework audio...",
+          playing: "Reading homework...",
+          error: "Homework audio failed."
+        }
+      }).catch((error) => {
+        console.error("Homework audio failed.", error);
+      });
+    });
+  });
+  document.querySelectorAll("[data-homework-simplify]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (!focusDocument) {
+        return;
+      }
+      state.askDocumentId = focusDocument.id;
+      elements.askInput.value = simplifyPrompt;
+      state.activeSubjectTab = "homework";
+      renderAskContext();
+      await handleAsk();
+    });
+  });
+  elements.practiceList.querySelectorAll("[data-open-homework-reader]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!focusDocument) {
+        return;
+      }
+      state.selectedDocumentId = focusDocument.id;
+      state.askDocumentId = focusDocument.id;
+      state.activeSubjectTab = "reader";
+      render();
+    });
+  });
+  elements.subjectHomeworkUpcomingList?.querySelectorAll("[data-open-homework]").forEach((button) => {
     button.addEventListener("click", () => {
       openTaskView({ kind: "homework", id: button.dataset.openHomework });
     });
@@ -6346,6 +6705,50 @@ elements.openUploadModalButton?.addEventListener("click", openUploadModal);
 elements.openUploadModalSecondary.addEventListener("click", openUploadModal);
 elements.subjectHeroUploadButton?.addEventListener("click", openUploadModal);
 elements.openUpcomingFromHeroButton?.addEventListener("click", openUpcomingModal);
+elements.homeListenCurrentButton?.addEventListener("click", () => {
+  const bundle = getHomeContinueReadingBundle();
+  const firstDocument = bundle?.documents?.[0];
+  if (!firstDocument) {
+    return;
+  }
+  state.selectedDocumentId = firstDocument.id;
+  state.askDocumentId = firstDocument.id;
+  speakDocument(firstDocument);
+});
+elements.homeOpenCurrentButton?.addEventListener("click", () => {
+  const bundle = getHomeContinueReadingBundle();
+  if (!bundle) {
+    return;
+  }
+  focusBundleInReader(bundle);
+});
+elements.homeAskMicButton?.addEventListener("click", () => {
+  openSubjectsWorkspace(state.activeSubjectTab || "reader");
+  startAskMicrophone();
+});
+elements.homeAskReadButton?.addEventListener("click", () => {
+  const subject = getSelectedSubject();
+  if (!subject) {
+    return;
+  }
+  const bundle = getHomeworkBundles(subject)[0];
+  if (!bundle) {
+    openSubjectsWorkspace("homework");
+    return;
+  }
+  const firstDocument = bundle.documents[0];
+  if (firstDocument) {
+    state.askDocumentId = firstDocument.id;
+    state.selectedDocumentId = firstDocument.id;
+  }
+  openSubjectsWorkspace("homework");
+});
+elements.homeAskQuizButton?.addEventListener("click", () => {
+  openSubjectsWorkspace("homework");
+  elements.askInput.value = "Quiz me on the notes I read yesterday and focus on the most important ideas.";
+  renderAskContext();
+  void handleAsk();
+});
 elements.subjectTabs?.querySelectorAll("[data-viewer-tab]").forEach((button) => {
   button.addEventListener("click", () => {
     const nextTab = button.dataset.viewerTab;
