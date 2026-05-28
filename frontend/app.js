@@ -6090,6 +6090,14 @@ function signInToAccount(account) {
   openDashboard("home");
 }
 
+function setAuthMode(mode, { clearStatus = true } = {}) {
+  state.authMode = mode;
+  if (clearStatus) {
+    elements.signInStatus.textContent = "";
+  }
+  syncSignInMode();
+}
+
 function handleDashboardOpen() {
   const studentName = elements.studentNameInput.value.trim();
   const studentGrade = normaliseGrade(elements.studentGradeSelect.value);
@@ -6097,6 +6105,7 @@ function handleDashboardOpen() {
   const password = String(elements.studentPasswordInput.value || "");
   const confirmPassword = String(elements.studentPasswordConfirmInput.value || "");
   const existingAccount = findAccountByEmail(studentEmail);
+  const isCreateMode = state.authMode === "create";
 
   elements.signInStatus.textContent = "";
 
@@ -6105,74 +6114,77 @@ function handleDashboardOpen() {
     return;
   }
 
-  if (state.authMode === "create") {
-    if (existingAccount) {
-      if (existingAccount.password !== password) {
-        state.authMode = "signin";
-        syncSignInMode();
-        elements.signInStatus.textContent = "That email already has an account. Sign in with the saved password.";
-        return;
-      }
+  if (existingAccount) {
+    if (existingAccount.password === password) {
       signInToAccount(existingAccount);
       return;
     }
 
-    if (!studentName) {
-      elements.signInStatus.textContent = "Enter a student name.";
-      return;
-    }
-    if (!confirmPassword) {
-      elements.signInStatus.textContent = "Confirm the password.";
-      return;
-    }
-    if (password !== confirmPassword) {
-      elements.signInStatus.textContent = "Passwords do not match.";
-      return;
-    }
-    if (findAccountByEmail(studentEmail)) {
-      elements.signInStatus.textContent = "That email already has an account. Sign in instead.";
+    if (isCreateMode) {
+      setAuthMode("signin", { clearStatus: false });
+      elements.signInStatus.textContent = "That email already has an account. Sign in with the saved password.";
       return;
     }
 
-    const accounts = loadAccounts();
-    accounts.push({
-      name: studentName,
-      email: studentEmail,
-      password,
-      grade: studentGrade
-    });
-    saveAccounts(accounts);
-    signInToAccount({ name: studentName, email: studentEmail, password, grade: studentGrade });
-    return;
-  }
-
-  if (!existingAccount) {
-    elements.signInStatus.textContent = "No account was found for that email. Switch to Create account first.";
-    return;
-  }
-
-  if (existingAccount.password !== password) {
     elements.signInStatus.textContent = "That password is incorrect.";
     return;
   }
 
-  signInToAccount(existingAccount);
+  if (!isCreateMode) {
+    if (studentName || confirmPassword) {
+      setAuthMode("create", { clearStatus: false });
+    } else {
+      elements.signInStatus.textContent = "No account was found for that email. Switch to Create account first.";
+      return;
+    }
+  }
+
+  if (!studentName) {
+    elements.signInStatus.textContent = "Enter a student name.";
+    return;
+  }
+  if (!confirmPassword) {
+    elements.signInStatus.textContent = "Confirm the password.";
+    return;
+  }
+  if (password !== confirmPassword) {
+    elements.signInStatus.textContent = "Passwords do not match.";
+    return;
+  }
+
+  const accounts = loadAccounts();
+  const newAccount = {
+    name: studentName,
+    email: studentEmail,
+    password,
+    grade: studentGrade
+  };
+  accounts.push(newAccount);
+  saveAccounts(accounts);
+  signInToAccount(newAccount);
 }
 
 elements.askButton.addEventListener("click", handleAsk);
 elements.askMicButton?.addEventListener("click", handleAskMicToggle);
 elements.askListenButton?.addEventListener("click", handleAskListen);
 elements.signInModeCreateButton.addEventListener("click", () => {
-  state.authMode = "create";
-  elements.signInStatus.textContent = "";
-  syncSignInMode();
+  setAuthMode("create");
 });
 elements.signInModeLoginButton.addEventListener("click", () => {
-  state.authMode = "signin";
-  elements.signInStatus.textContent = "";
-  syncSignInMode();
+  setAuthMode("signin");
 });
 elements.openDashboardButton.addEventListener("click", handleDashboardOpen);
+[elements.studentNameInput, elements.studentEmailInput, elements.studentPasswordInput, elements.studentPasswordConfirmInput]
+  .filter(Boolean)
+  .forEach((field) => {
+    field.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") {
+        return;
+      }
+      event.preventDefault();
+      handleDashboardOpen();
+    });
+  });
 elements.removeBackgroundButton.addEventListener("click", handleRemoveBackground);
 elements.backgroundColourInput.addEventListener("input", handleBackgroundColourChange);
 elements.clearBackgroundColourButton.addEventListener("click", resetBackgroundColour);
