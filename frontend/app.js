@@ -831,6 +831,646 @@ function focusBundleInReader(bundle) {
   openSubjectsWorkspace("reader");
 }
 
+const youTubeUrlPattern = /https?:\/\/(?:www\.)?(?:youtube\.com\/[^\s<>"']+|youtu\.be\/[^\s<>"']+)/gi;
+
+function getSortedDocuments(subject) {
+  return [...(Array.isArray(subject?.documents) ? subject.documents : [])].sort((left, right) => {
+    const leftTime = left?.addedAt ? new Date(left.addedAt).getTime() : 0;
+    const rightTime = right?.addedAt ? new Date(right.addedAt).getTime() : 0;
+    if (leftTime !== rightTime) {
+      return rightTime - leftTime;
+    }
+
+    const leftPage = Number(left?.pageNumber || 0);
+    const rightPage = Number(right?.pageNumber || 0);
+    if (left?.uploadGroupId && left.uploadGroupId === right?.uploadGroupId && leftPage !== rightPage) {
+      return leftPage - rightPage;
+    }
+
+    return String(left?.title || "").localeCompare(String(right?.title || ""));
+  });
+}
+
+function getBaseDocumentTitle(bundleOrDocument) {
+  const rawTitle = String(bundleOrDocument?.title || bundleOrDocument?.documents?.[0]?.title || "").trim();
+  return rawTitle.replace(/\s*-\s*Page\s+\d+$/i, "").trim();
+}
+
+function getDocumentSortValue(item) {
+  const addedTime = item?.addedAt ? new Date(item.addedAt).getTime() : 0;
+  const pageNumber = Number(item?.pageNumber || item?.documents?.[0]?.pageNumber || 0);
+  return addedTime * 1000 + pageNumber;
+}
+
+function buildDocumentBundle(documents) {
+  const sortedDocuments = [...documents].sort((left, right) => {
+    const leftPage = Number(left?.pageNumber || 0);
+    const rightPage = Number(right?.pageNumber || 0);
+    if (leftPage !== rightPage) {
+      return leftPage - rightPage;
+    }
+    return String(left?.title || "").localeCompare(String(right?.title || ""));
+  });
+  const primaryDocument = sortedDocuments[0] || null;
+  if (!primaryDocument) {
+    return null;
+  }
+
+  return {
+    id: primaryDocument.uploadGroupId || primaryDocument.id,
+    title: getBaseDocumentTitle(primaryDocument) || primaryDocument.title,
+    type: primaryDocument.type || "Document",
+    added: primaryDocument.added || "",
+    addedAt: primaryDocument.addedAt || "",
+    reviewed: sortedDocuments.every((documentRecord) => Boolean(documentRecord.reviewed)),
+    documents: sortedDocuments,
+    content: sortedDocuments.map((documentRecord) => documentRecord.content || "").filter(Boolean).join("\n\n"),
+    previewImageUrl: primaryDocument.previewImageUrl || null,
+    isPageGroup: sortedDocuments.length > 1 && sortedDocuments.some((documentRecord) => Number(documentRecord.pageNumber)),
+    flags: { ...(primaryDocument.flags || {}) },
+    workNotes: String(primaryDocument.workNotes || "")
+  };
+}
+
+function getDocumentGroupsFromDocuments(documents) {
+  const groupedDocuments = new Map();
+  getSortedDocuments({ documents }).forEach((documentRecord) => {
+    const groupId = documentRecord.uploadGroupId || documentRecord.id;
+    if (!groupedDocuments.has(groupId)) {
+      groupedDocuments.set(groupId, []);
+    }
+    groupedDocuments.get(groupId).push(documentRecord);
+  });
+
+  return [...groupedDocuments.values()]
+    .map(buildDocumentBundle)
+    .filter(Boolean)
+    .sort((left, right) => getDocumentSortValue(right) - getDocumentSortValue(left));
+}
+
+function getDocumentGroups(subject) {
+  return getDocumentGroupsFromDocuments(getVisibleSubjectDocuments(subject || { documents: [] }));
+}
+
+function getDocumentBundlesByFilter(subject, predicate) {
+  const filteredDocuments = getSortedDocuments(subject).filter((documentRecord) => predicate(documentRecord));
+  return getDocumentGroupsFromDocuments(filteredDocuments);
+}
+
+function getHomeworkBundles(subject) {
+  return getDocumentBundlesByFilter(subject, (documentRecord) => isHomeworkDocument(documentRecord));
+}
+
+function getLinkedDocumentBundles(subject, linkedDocumentIds = []) {
+  const linkedIdSet = new Set((Array.isArray(linkedDocumentIds) ? linkedDocumentIds : []).filter(Boolean));
+  if (!linkedIdSet.size) {
+    return [];
+  }
+  return getDocumentGroupsFromDocuments(Array.isArray(subject?.documents) ? subject.documents : []).filter((bundle) =>
+    bundle.documents.some((documentRecord) => linkedIdSet.has(documentRecord.id))
+  );
+}
+
+function findHomeworkBundle(subject, bundleId) {
+  return getHomeworkBundles(subject).find((bundle) => bundle.id === bundleId) || null;
+}
+
+function getBundlePrimaryDocument(bundle) {
+  return bundle?.documents?.[0] || null;
+}
+
+function getBundleWorkNotes(bundle) {
+  return String(getBundlePrimaryDocument(bundle)?.workNotes || "");
+}
+
+function setBundleWorkNotes(bundle, value) {
+  const primaryDocument = getBundlePrimaryDocument(bundle);
+  if (primaryDocument) {
+    primaryDocument.workNotes = String(value || "");
+  }
+}
+
+function getBundleStoredLinkedDocumentIds(bundle) {
+  const primaryDocument = getBundlePrimaryDocument(bundle);
+  return Array.isArray(primaryDocument?.linkedDocumentIds) ? primaryDocument.linkedDocumentIds.filter(Boolean) : [];
+}
+
+function setBundleStoredLinkedDocumentIds(bundle, linkedDocumentIds) {
+  const primaryDocument = getBundlePrimaryDocument(bundle);
+  if (primaryDocument) {
+    primaryDocument.linkedDocumentIds = [...new Set((linkedDocumentIds || []).filter(Boolean))];
+  }
+}
+
+function getBundleStoredStepState(bundle) {
+  const primaryDocument = getBundlePrimaryDocument(bundle);
+  return Array.isArray(primaryDocument?.stepState) ? primaryDocument.stepState.map(Boolean) : [];
+}
+
+function setBundleStoredStepState(bundle, nextState) {
+  const primaryDocument = getBundlePrimaryDocument(bundle);
+  if (primaryDocument) {
+    primaryDocument.stepState = Array.isArray(nextState) ? nextState.map(Boolean) : [];
+  }
+}
+
+function getBundleStoredTaskSteps(bundle) {
+  const primaryDocument = getBundlePrimaryDocument(bundle);
+  return Array.isArray(primaryDocument?.taskSteps) ? primaryDocument.taskSteps.map((step) => String(step || "").trim()).filter(Boolean) : [];
+}
+
+function setBundleStoredTaskSteps(bundle, taskSteps) {
+  const primaryDocument = getBundlePrimaryDocument(bundle);
+  if (primaryDocument) {
+    primaryDocument.taskSteps = Array.isArray(taskSteps) ? taskSteps.map((step) => String(step || "").trim()).filter(Boolean) : [];
+  }
+}
+
+function getAssessmentStoredStageState(assessment) {
+  return Array.isArray(assessment?.stageState)
+    ? assessment.stageState.map((stageItems) => (Array.isArray(stageItems) ? stageItems.map(Boolean) : []))
+    : [];
+}
+
+function setAssessmentStoredStageState(assessment, nextState) {
+  assessment.stageState = Array.isArray(nextState)
+    ? nextState.map((stageItems) => (Array.isArray(stageItems) ? stageItems.map(Boolean) : []))
+    : [];
+}
+
+function setDocumentReviewedState(subject, documentIds, reviewed) {
+  const targetIds = new Set((documentIds || []).filter(Boolean));
+  if (!subject || !targetIds.size) {
+    return;
+  }
+  (subject.documents || []).forEach((documentRecord) => {
+    if (!targetIds.has(documentRecord.id)) {
+      return;
+    }
+    documentRecord.reviewed = Boolean(reviewed);
+    documentRecord.reviewMode = reviewed ? "manual" : "";
+  });
+  persistSubjects();
+}
+
+function getSelectedDocumentIndex() {
+  const documents = getVisibleSubjectDocuments(getSelectedSubject() || { documents: [] });
+  return documents.findIndex((documentRecord) => documentRecord.id === state.selectedDocumentId);
+}
+
+function selectAdjacentDocument(direction) {
+  const documents = getVisibleSubjectDocuments(getSelectedSubject() || { documents: [] });
+  if (!documents.length) {
+    return;
+  }
+  const currentIndex = getSelectedDocumentIndex();
+  const nextIndex = Math.max(0, Math.min(documents.length - 1, (currentIndex === -1 ? 0 : currentIndex) + direction));
+  const nextDocument = documents[nextIndex];
+  if (!nextDocument) {
+    return;
+  }
+  state.selectedDocumentId = nextDocument.id;
+  state.askDocumentId = nextDocument.id;
+  renderDocuments();
+  renderAskContext();
+}
+
+function extractYouTubeLinks(text) {
+  const matches = String(text || "").match(youTubeUrlPattern) || [];
+  return [...new Set(matches.map((value) => value.trim()))];
+}
+
+function syncAutoWatchForSubject(subject) {
+  if (!subject) {
+    return;
+  }
+
+  const manualWatchItems = Array.isArray(subject.watch)
+    ? subject.watch.filter((item) => item?.source !== "auto-document")
+    : [];
+  const autoWatchItems = getDocumentGroupsFromDocuments(Array.isArray(subject.documents) ? subject.documents : [])
+    .flatMap((bundle) =>
+      extractYouTubeLinks(bundle.content).map((url) => ({
+        id: `watch-${bundle.id}-${url}`,
+        title: `${bundle.title} video`,
+        url,
+        source: "auto-document",
+        sourceDocumentTitle: bundle.title
+      }))
+    );
+
+  const seenUrls = new Set();
+  subject.watch = [...manualWatchItems, ...autoWatchItems].filter((item) => {
+    const key = `${item.source || "manual"}::${item.url || ""}`;
+    if (!item?.url || seenUrls.has(key)) {
+      return false;
+    }
+    seenUrls.add(key);
+    return true;
+  });
+}
+
+function syncAutoWatchForAllSubjects() {
+  state.subjects.forEach((subject) => syncAutoWatchForSubject(subject));
+}
+
+function renderSubjectHeader() {
+  const subject = getSelectedSubject();
+  if (!subject || !elements.subjectHeader) {
+    return;
+  }
+
+  const unreadBundles = getAllDocumentBundles(subject).filter((bundle) => !bundle.reviewed).length;
+  elements.subjectHeader.innerHTML = `
+    <div class="subject-header__title">
+      <p class="eyebrow">Current subject</p>
+      <h3>${escapeHtml(subject.name)}</h3>
+    </div>
+    <div class="subject-header__summary">
+      ${escapeHtml(unreadBundles ? `${unreadBundles} document${unreadBundles === 1 ? "" : "s"} still to read` : "All current documents reviewed")}
+    </div>
+    <div class="subject-header__actions">
+      <button type="button" class="primary-button primary-button--dark" id="subject-header-upload-inline">+ Upload</button>
+    </div>
+  `;
+  document.getElementById("subject-header-upload-inline")?.addEventListener("click", openUploadModal);
+}
+
+function renderSubjectTabs() {
+  const subject = getSelectedSubject();
+  if (!subject || !elements.subjectTabs) {
+    return;
+  }
+
+  const counts = {
+    reader: getAllDocumentBundles(subject).length,
+    homework: getHomeworkBundles(subject).length,
+    watch: Array.isArray(subject.watch) ? subject.watch.length : 0,
+    assessments: Array.isArray(subject.assessments) ? subject.assessments.filter((assessment) => !assessment.completed).length : 0
+  };
+
+  elements.tabCountReader.textContent = String(counts.reader);
+  elements.tabCountHomework.textContent = String(counts.homework);
+  elements.tabCountWatch.textContent = String(counts.watch);
+  elements.tabCountAssessments.textContent = String(counts.assessments);
+  elements.subjectTabs.querySelectorAll("[data-viewer-tab]").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.viewerTab === state.activeSubjectTab);
+  });
+  elements.readingViewerMeta.textContent = `${subject.name} · Year ${state.studentGrade}`;
+  elements.viewerPanelReader.classList.toggle("hidden", state.activeSubjectTab !== "reader");
+  elements.viewerPanelHomework.classList.toggle("hidden", state.activeSubjectTab !== "homework");
+  elements.viewerPanelWatch.classList.toggle("hidden", state.activeSubjectTab !== "watch");
+  elements.viewerPanelAssessments.classList.toggle("hidden", state.activeSubjectTab !== "assessments");
+}
+
+function renderPendingUpload() {
+  if (!elements.pendingUpload) {
+    return;
+  }
+  if (!state.pendingFiles.length) {
+    elements.pendingUpload.innerHTML = "";
+    return;
+  }
+  elements.pendingUpload.innerHTML = `
+    <div class="pending-upload__summary">Selected:</div>
+    <ul>${state.pendingFiles.map((file) => `<li>${escapeHtml(file.name)}</li>`).join("")}</ul>
+  `;
+}
+
+function renderUploadAssessmentTaskOptions() {
+  const subject = getUploadSubject();
+  const isAssessment = getSelectedUploadType() === "assessment";
+  elements.uploadAssessmentTaskWrap.classList.toggle("hidden", !isAssessment);
+  elements.uploadDueDateWrap.classList.toggle("hidden", !isAssessment);
+  elements.uploadWatchUrlWrap.classList.toggle("hidden", getSelectedUploadType() !== "watch");
+  elements.uploadWatchTitleWrap.classList.toggle("hidden", getSelectedUploadType() !== "watch");
+
+  if (!subject || !isAssessment) {
+    elements.uploadAssessmentTaskSelect.innerHTML = `<option value="">Create new assessment</option>`;
+    return;
+  }
+
+  const options = [`<option value="">Create new assessment</option>`]
+    .concat(
+      (subject.assessments || []).map(
+        (assessment) => `<option value="${assessment.id}">${escapeHtml(assessment.componentTask || assessment.title)}</option>`
+      )
+    )
+    .join("");
+  elements.uploadAssessmentTaskSelect.innerHTML = options;
+}
+
+function renderDockContext() {
+  const subject = getSelectedSubject();
+  if (!elements.dockContextTitle || !elements.dockContextBody || !subject) {
+    return;
+  }
+
+  if (state.activeSubjectTab === "reader") {
+    const selectedDocument = getSelectedDocument();
+    elements.dockContextTitle.textContent = "Linked here from notes";
+    elements.dockContextBody.innerHTML = selectedDocument
+      ? `<article class="dock-tile dock-tile--bg dock-tile--active"><div class="dock-tile__copy"><strong>${escapeHtml(selectedDocument.title)}</strong><span>${escapeHtml(selectedDocument.type)}</span></div></article>`
+      : `<div class="empty-state empty-state--compact">Select a document to read it here.</div>`;
+    return;
+  }
+
+  if (state.activeSubjectTab === "watch") {
+    elements.dockContextTitle.textContent = "Watch picks";
+    const watchItems = Array.isArray(subject.watch) ? subject.watch.slice(0, 3) : [];
+    elements.dockContextBody.innerHTML = watchItems.length
+      ? watchItems
+          .map(
+            (item) => `
+              <article class="dock-tile dock-tile--mint">
+                <div class="dock-tile__copy">
+                  <strong>${escapeHtml(item.title)}</strong>
+                  <span>${escapeHtml(item.sourceDocumentTitle || item.url)}</span>
+                </div>
+              </article>
+            `
+          )
+          .join("")
+      : `<div class="empty-state empty-state--compact">No WATCH links for this subject yet.</div>`;
+    return;
+  }
+
+  elements.dockContextTitle.textContent = "Today’s stack";
+  const homeworkBundles = getHomeworkBundles(subject).slice(0, 3);
+  elements.dockContextBody.innerHTML = homeworkBundles.length
+    ? homeworkBundles
+        .map(
+          (bundle, index) => `
+            <article class="dock-tile dock-tile--${["peach", "yellow", "lilac"][index % 3]}">
+              <div class="dock-tile__copy">
+                <strong>${escapeHtml(bundle.title)}</strong>
+                <span>${escapeHtml(getBundleWorkNotes(bundle) ? "Writing started" : "Needs a draft")}</span>
+              </div>
+            </article>
+          `
+        )
+        .join("")
+    : `<div class="empty-state empty-state--compact">No stacked tasks yet.</div>`;
+}
+
+async function loadRevisionCatalogue(force = false) {
+  if (!state.studentGrade) {
+    return [];
+  }
+  if (!force && state.revisionCatalogueLoadedGrade === state.studentGrade && state.revisionCatalogue.length) {
+    return state.revisionCatalogue;
+  }
+
+  try {
+    const payload = await requestApiGet(`/api/revision/catalogue?grade=${encodeURIComponent(state.studentGrade)}`);
+    state.revisionCatalogue = Array.isArray(payload?.catalogue) ? payload.catalogue : [];
+  } catch (error) {
+    state.revisionCatalogue = state.subjects.map((subject) => ({
+      grade: state.studentGrade,
+      subjectId: subject.id,
+      subjectName: subject.name,
+      overview: subject.summary || "",
+      testedSkills: [],
+      topics: []
+    }));
+  }
+
+  state.revisionCatalogueLoadedGrade = state.studentGrade;
+  if (!state.revisionSelectedSubjectId) {
+    state.revisionSelectedSubjectId = state.selectedSubjectId;
+  }
+  return state.revisionCatalogue;
+}
+
+function getRevisionSubjectEntry() {
+  const subjectId = state.revisionSelectedSubjectId || state.selectedSubjectId;
+  const catalogueEntry = (state.revisionCatalogue || []).find((entry) => entry.subjectId === subjectId);
+  if (catalogueEntry) {
+    return catalogueEntry;
+  }
+  const subject = state.subjects.find((item) => item.id === subjectId);
+  return subject
+    ? {
+        grade: state.studentGrade,
+        subjectId: subject.id,
+        subjectName: subject.name,
+        overview: subject.summary || "",
+        testedSkills: [],
+        topics: []
+      }
+    : null;
+}
+
+function renderRevisionPanel() {
+  if (!elements.revisionSubjectSelect || !elements.revisionTopicSelect) {
+    return;
+  }
+
+  const entries = state.revisionCatalogue.length
+    ? state.revisionCatalogue
+    : state.subjects.map((subject) => ({
+        subjectId: subject.id,
+        subjectName: subject.name,
+        overview: subject.summary || "",
+        testedSkills: [],
+        topics: []
+      }));
+
+  if (!state.revisionSelectedSubjectId) {
+    state.revisionSelectedSubjectId = state.selectedSubjectId;
+  }
+
+  elements.revisionSubjectSelect.innerHTML = entries
+    .map(
+      (entry) => `<option value="${entry.subjectId}" ${entry.subjectId === state.revisionSelectedSubjectId ? "selected" : ""}>${escapeHtml(entry.subjectName)}</option>`
+    )
+    .join("");
+
+  const selectedEntry = getRevisionSubjectEntry();
+  const topics = Array.isArray(selectedEntry?.topics) ? selectedEntry.topics : [];
+  elements.revisionTopicSelect.innerHTML = [`<option value="">Any focus</option>`]
+    .concat(topics.map((topic) => `<option value="${escapeHtml(String(topic))}" ${topic === state.revisionSelectedTopic ? "selected" : ""}>${escapeHtml(String(topic))}</option>`))
+    .join("");
+  elements.revisionTopicWrap.classList.toggle("hidden", !topics.length);
+
+  const selectedSubject = state.subjects.find((subject) => subject.id === state.revisionSelectedSubjectId) || getSelectedSubject();
+  const noteBundles = selectedSubject ? getAllDocumentBundles(selectedSubject) : [];
+  elements.revisionNotesSelect.innerHTML = noteBundles
+    .map((bundle) => `<option value="${bundle.id}" ${state.revisionSelectedNoteIds.includes(bundle.id) ? "selected" : ""}>${escapeHtml(bundle.title)}</option>`)
+    .join("");
+
+  const isEnglish = selectedEntry?.subjectId === "english";
+  elements.revisionTextWrap.classList.toggle("hidden", !isEnglish);
+  elements.subjectRevisionGradePill.textContent = `Year ${state.studentGrade}`;
+  elements.revisionSummary.textContent = selectedEntry?.overview || "Select a subject to load the curriculum overview and tested skills.";
+  elements.revisionSkills.innerHTML = (selectedEntry?.testedSkills || [])
+    .slice(0, 6)
+    .map((skill) => `<span class="document-chip">${escapeHtml(skill)}</span>`)
+    .join("");
+}
+
+function openRevisionTestView() {
+  state.currentView = "revision";
+  render();
+}
+
+function renderRevisionTestView() {
+  if (!elements.revisionTestHeading || !elements.revisionTestContent) {
+    return;
+  }
+
+  const test = state.generatedRevisionTest;
+  if (!test) {
+    elements.revisionTestHeading.textContent = "Generated test";
+    elements.revisionTestMeta.innerHTML = "";
+    elements.revisionTestContent.innerHTML = "Create a test from the home page to work on it here.";
+    elements.revisionFeedback.classList.add("hidden");
+    elements.revisionFeedback.innerHTML = "";
+    return;
+  }
+
+  const feedbackById = new Map(
+    Array.isArray(state.revisionSubmission?.questionFeedback)
+      ? state.revisionSubmission.questionFeedback.map((feedback) => [String(feedback.id || ""), feedback])
+      : []
+  );
+
+  elements.revisionViewTitle.textContent = test.title || "Revision test";
+  elements.revisionTestHeading.textContent = test.title || "Generated test";
+  elements.revisionTestMeta.innerHTML = `
+    <div class="document-chip">${escapeHtml(test.subjectName || "")}</div>
+    <div class="document-chip">${escapeHtml(test.grade || `Year ${state.studentGrade}`)}</div>
+    <div class="document-chip">${escapeHtml(test.focus || "Revision focus")}</div>
+  `;
+
+  elements.revisionTestContent.innerHTML = (Array.isArray(test.sections) ? test.sections : [])
+    .map(
+      (section) => `
+        <section class="revision-section">
+          <h4>${escapeHtml(section.title || "Section")}</h4>
+          ${section.stimulusText ? `<div class="revision-stimulus">${escapeHtml(section.stimulusText)}</div>` : ""}
+          ${(section.questions || [])
+            .map((question) => {
+              const questionId = String(question.id || "");
+              const responseValue = state.revisionResponses[questionId] || "";
+              const feedback = feedbackById.get(questionId);
+              const type = String(question.type || "");
+              const inputMarkup = type === "multiple-choice"
+                ? `
+                  <div class="revision-options">
+                    ${(question.options || [])
+                      .map(
+                        (option) => `
+                          <label class="revision-option">
+                            <input type="radio" name="${questionId}" value="${escapeHtml(option)}" ${responseValue === option ? "checked" : ""} data-revision-question="${questionId}" />
+                            <span>${escapeHtml(option)}</span>
+                          </label>
+                        `
+                      )
+                      .join("")}
+                  </div>
+                `
+                : `<textarea class="reader-editor revision-answer-editor" data-revision-question="${questionId}" placeholder="Write your answer here...">${escapeHtml(responseValue)}</textarea>`;
+              return `
+                <article class="revision-question">
+                  <div class="revision-question__meta">${escapeHtml(type)} · ${escapeHtml(String(question.marks || 0))} marks · ${escapeHtml(question.skill || "")}</div>
+                  <h5>${escapeHtml(`Q${question.number || ""}. ${question.prompt || ""}`)}</h5>
+                  ${inputMarkup}
+                  ${
+                    feedback
+                      ? `<div class="revision-question__feedback"><strong>${escapeHtml(`${feedback.score || 0}/${feedback.marks || question.marks || 0}`)}</strong><p>${escapeHtml(feedback.feedback || "")}</p>${feedback.correctOption ? `<p><strong>Correct answer:</strong> ${escapeHtml(feedback.correctOption)}</p>` : ""}${feedback.studentAnswer ? `<p><strong>Your answer:</strong> ${escapeHtml(feedback.studentAnswer)}</p>` : ""}</div>`
+                      : ""
+                  }
+                </article>
+              `;
+            })
+            .join("")}
+        </section>
+      `
+    )
+    .join("");
+
+  elements.revisionTestContent.querySelectorAll("[data-revision-question]").forEach((input) => {
+    const update = () => {
+      const questionId = input.dataset.revisionQuestion;
+      if (!questionId) {
+        return;
+      }
+      if (input.type === "radio") {
+        if (input.checked) {
+          state.revisionResponses[questionId] = input.value;
+        }
+        return;
+      }
+      state.revisionResponses[questionId] = input.value;
+    };
+    input.addEventListener(input.type === "radio" ? "change" : "input", update);
+  });
+
+  if (state.revisionSubmission) {
+    elements.revisionFeedback.classList.remove("hidden");
+    elements.revisionFeedback.innerHTML = `
+      <strong>${escapeHtml(`Score: ${state.revisionSubmission.totalScore || 0}/${state.revisionSubmission.totalAvailable || 0}`)}</strong>
+      <p>${escapeHtml(state.revisionSubmission.overallFeedback || "")}</p>
+    `;
+  } else {
+    elements.revisionFeedback.classList.add("hidden");
+    elements.revisionFeedback.innerHTML = "";
+  }
+}
+
+async function handleCreateRevisionTest() {
+  const selectedEntry = getRevisionSubjectEntry();
+  if (!selectedEntry) {
+    elements.revisionStatus.textContent = "Select a subject first.";
+    return;
+  }
+
+  const subject = state.subjects.find((item) => item.id === selectedEntry.subjectId);
+  const noteBundles = getLinkedDocumentBundles(subject, state.revisionSelectedNoteIds);
+  elements.revisionStatus.textContent = "Generating revision test...";
+  try {
+    const payload = await requestApi("/api/revision/generate-test", {
+      grade: state.studentGrade,
+      subjectId: selectedEntry.subjectId,
+      topic: state.revisionSelectedTopic,
+      textTitle: state.revisionTextTitle,
+      notes: noteBundles.map((bundle) => ({
+        title: bundle.title,
+        content: clipText(bundle.content || "")
+      }))
+    });
+    state.generatedRevisionTest = payload?.test || null;
+    state.revisionResponses = {};
+    state.revisionSubmission = null;
+    state.revisionViewMode = "draft";
+    state.activeSavedRevisionTestId = "";
+    elements.revisionStatus.textContent = "";
+    openRevisionTestView();
+  } catch (error) {
+    elements.revisionStatus.textContent = error instanceof Error ? error.message : "Revision test generation failed.";
+  }
+}
+
+async function handleSubmitRevisionTest() {
+  if (!state.generatedRevisionTest) {
+    elements.revisionTestStatus.textContent = "Create a test first.";
+    return;
+  }
+  elements.revisionTestStatus.textContent = "Submitting test for feedback...";
+  try {
+    const payload = await requestApi("/api/revision/submit-test", {
+      test: state.generatedRevisionTest,
+      responses: state.revisionResponses
+    });
+    state.revisionSubmission = payload;
+    elements.revisionTestStatus.textContent = "Feedback ready.";
+    renderRevisionTestView();
+  } catch (error) {
+    elements.revisionTestStatus.textContent = error instanceof Error ? error.message : "Revision test submission failed.";
+  }
+}
+
 function seededAssessment(taskNumber, componentTask, distributionDate, dueDate, weighting) {
   return {
     id: createId(),
@@ -3536,6 +4176,7 @@ function buildHomeworkTaskSteps(homeworkBundle) {
 }
 
 function buildAssessmentTaskStages(assessment, linkedDocumentBundles) {
+  const workLength = String(assessment?.workNotes || "").trim().length;
   const linkedTitles = linkedDocumentBundles.slice(0, 2).map((bundle) => bundle.title);
   const fallbackDefinitions = [
     {
