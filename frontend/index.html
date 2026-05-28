@@ -11,7 +11,7 @@
       <section class="landing-panel" id="landing-panel">
         <div class="landing-copy">
           <div class="brand-lockup">
-            <img src="/paperpanda-logo.png" alt="PaperPanda logo" class="brand-lockup__logo" />
+            <img src="/paperpanda-panda.png" alt="PaperPanda panda" class="brand-lockup__logo" />
             <div class="brand-lockup__copy">
               <span class="brand-lockup__name">PAPERPANDA</span>
             </div>
@@ -74,7 +74,7 @@
         <header class="topbar">
           <div class="topbar__brand-block">
             <div class="brand-lockup brand-lockup--topbar">
-              <img src="/paperpanda-logo.png" alt="PaperPanda logo" class="brand-lockup__logo brand-lockup__logo--small" />
+              <img src="/paperpanda-panda.png" alt="PaperPanda panda" class="brand-lockup__logo brand-lockup__logo--small" />
               <div class="brand-lockup__copy">
                 <span class="brand-lockup__name brand-lockup__name--topbar">PaperPanda</span>
                 <span class="brand-lockup__tag">Student learning dashboard</span>
@@ -195,12 +195,16 @@
             <aside class="home-stage__dock">
               <section class="ask-card ask-card--home" id="home-ask-card">
                 <div class="ask-card__voice-row">
+                  <img src="/paperpanda-panda.png" alt="Panda" class="ask-card__avatar" />
                   <div class="ask-card__voice-copy">
                     <p class="eyebrow">Ask Panda</p>
                     <h3>Ask Panda</h3>
                     <p class="helper-text">Hold space anywhere to talk.</p>
                   </div>
                   <button type="button" class="ask-card__mic-button" id="home-ask-mic-button">🎙</button>
+                </div>
+                <div class="ask-card__wave" aria-hidden="true">
+                  <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
                 </div>
                 <div class="ask-card__prompt" id="home-ask-prompt">Good morning. Want me to start with your reading or homework?</div>
                 <div class="ask-card__quick-actions">
@@ -496,38 +500,37 @@
             </section>
 
             <aside class="ask-card">
-              <div class="section-heading section-heading--stacked">
-                <div>
+              <div class="ask-card__voice-row ask-card__voice-row--subject">
+                <img src="/paperpanda-panda.png" alt="Panda" class="ask-card__avatar" />
+                <div class="ask-card__voice-copy">
                   <p class="eyebrow">Support</p>
-                  <h3>AI Ask</h3>
+                  <h3>Ask Panda</h3>
+                  <p class="helper-text">Ask about the current subject or what you're reading.</p>
                 </div>
+                <button type="button" class="ask-card__mic-button" id="ask-mic-button">🎙</button>
               </div>
-              <p class="helper-text">
-                Ask for explanations, revision steps, or how to start a task. Guidance is kept
-                focused on the selected subject.
-              </p>
+              <div class="ask-card__wave" aria-hidden="true">
+                <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+              </div>
               <p class="helper-text helper-text--tiny" id="ai-connection-status">
                 AI answers and natural voice are provided by the backend service when deployed.
               </p>
               <div class="ask-context" id="ask-context">No document selected for Ask yet.</div>
+              <div class="ask-response ask-response--card" id="ask-response">
+                Pick a subject and ask a question to see guided support here.
+              </div>
               <textarea
                 id="ask-input"
-                rows="7"
+                rows="5"
                 placeholder="Example: Can you explain what I should focus on for this history source analysis?"
               ></textarea>
               <div class="ask-toolbar">
                 <button type="button" class="primary-button primary-button--full" id="ask-button">
                   Get guidance
                 </button>
-                <button type="button" class="ghost-button ghost-button--light" id="ask-mic-button">
-                  Use microphone
-                </button>
                 <button type="button" class="ghost-button ghost-button--light" id="ask-listen-button">
                   Listen
                 </button>
-              </div>
-              <div class="ask-response" id="ask-response">
-                Pick a subject and ask a question to see guided support here.
               </div>
             </aside>
             <section class="dock-context-card" id="dock-context-card">
@@ -563,7 +566,7 @@
         <header class="topbar">
           <div class="topbar__brand-block">
             <div class="brand-lockup brand-lockup--topbar">
-              <img src="/paperpanda-logo.png" alt="PaperPanda logo" class="brand-lockup__logo brand-lockup__logo--small" />
+              <img src="/paperpanda-panda.png" alt="PaperPanda panda" class="brand-lockup__logo brand-lockup__logo--small" />
               <div class="brand-lockup__copy">
                 <span class="brand-lockup__name brand-lockup__name--topbar">PaperPanda</span>
                 <span class="brand-lockup__tag">Revision test</span>

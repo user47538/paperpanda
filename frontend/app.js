@@ -4628,6 +4628,14 @@ function renderTaskView() {
     const studyPlanPrompt = `Suggest a short study plan for ${assessment.componentTask || assessment.title} before ${formatAssessmentDueLabel(assessment.dueDate)}.`;
     const simplifyPrompt = `Simplify this assessment task into plain student-friendly steps: ${assessment.componentTask || assessment.title}. ${assessment.description || ""}`;
     const isReadingTask = currentAudioContext === `task:assessment:${assessment.id}`;
+    const pandaVisualMarkup = `
+      <div class="task-panda-visual" aria-hidden="true">
+        <img src="/paperpanda-panda.png" alt="" class="task-panda-visual__avatar" />
+        <div class="task-panda-visual__wave">
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+        </div>
+      </div>
+    `;
     elements.saveTaskWorkButton.textContent = "Save draft";
     elements.closeTaskViewButton.textContent = "Back to subjects";
     elements.taskSourceContent.innerHTML = `
@@ -4656,7 +4664,7 @@ function renderTaskView() {
             <div class="task-stage-list">
               ${stageCards
                 .map(
-                  (stage) => `
+                  (stage, stageIndex) => `
                     <article class="task-stage-card${stage.active ? " task-stage-card--active" : ""}">
                       <div class="task-stage-card__header">
                         <div class="task-stage-card__title">
@@ -4724,9 +4732,12 @@ function renderTaskView() {
             </section>
             <section class="task-panda-card">
               <div class="task-panda-card__header">
-                <span class="task-panda-card__icon">🐼</span>
-                <h3>Ask Panda about this</h3>
+                <div>
+                  <h3>Ask Panda about this</h3>
+                  <p>I’m listening...</p>
+                </div>
               </div>
+              ${pandaVisualMarkup}
               <div class="task-panda-card__actions">
                 <button type="button" class="task-panda-pill" data-task-action="simplify-assessment" data-task-ask-prompt="${escapeHtml(simplifyPrompt)}">Simplify this task</button>
                 <button type="button" class="task-panda-pill" data-task-action="generate-practice-test">Generate a practice test</button>
@@ -4763,6 +4774,14 @@ function renderTaskView() {
     const quizPrompt = `Quiz me on this homework topic with 3 quick questions: ${homeworkBundle.title}.`;
     const linkedHomeworkNotes = getLinkedDocumentBundles(subject, getBundleStoredLinkedDocumentIds(homeworkBundle)).filter((bundle) => bundle.id !== homeworkBundle.id);
     const isReadingTask = currentAudioContext === `task:homework:${homeworkBundle.id}`;
+    const pandaVisualMarkup = `
+      <div class="task-panda-visual" aria-hidden="true">
+        <img src="/paperpanda-panda.png" alt="" class="task-panda-visual__avatar" />
+        <div class="task-panda-visual__wave">
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+        </div>
+      </div>
+    `;
     elements.saveTaskWorkButton.textContent = "Save draft";
     elements.closeTaskViewButton.textContent = "Back to subjects";
     elements.taskSourceContent.innerHTML = `
@@ -4850,9 +4869,12 @@ function renderTaskView() {
             </section>
             <section class="task-panda-card task-panda-card--light">
               <div class="task-panda-card__header">
-                <span class="task-panda-card__icon">🐼</span>
-                <h3>Ask Panda</h3>
+                <div>
+                  <h3>Ask Panda</h3>
+                  <p>I’m listening...</p>
+                </div>
               </div>
+              ${pandaVisualMarkup}
               <div class="task-panda-card__actions">
                 <button type="button" class="task-panda-pill" data-task-action="simplify-homework" data-task-ask-prompt="${escapeHtml(simplifyPrompt)}">Simplify this task</button>
                 <button type="button" class="task-panda-pill" data-task-action="generate-practice-test">Generate a practice test</button>
