@@ -83,7 +83,7 @@ html, body { margin: 0; min-height: 100%; }
 
 body {
   min-width: 320px;
-  background: var(--bg);
+  background: #FBF7F0;
   color: var(--ink);
   font-family: var(--font-body);
   letter-spacing: -0.005em;
@@ -107,7 +107,7 @@ button { border: 0; }
   justify-content: space-between;
   padding: 18px 36px;
   gap: 24px;
-  background: var(--bg);
+  background: #FBF7F0;
   border-bottom: 0;
 }
 
@@ -158,9 +158,9 @@ button { border: 0; }
 .brand-lockup { display: inline-flex; align-items: center; gap: 12px; margin: 0; }
 .brand-lockup__logo {
   width: 44px; height: 44px;
-  border-radius: 14px;
-  background: transparent;
-  padding: 0;
+  border-radius: 999px;
+  background: #DAD0FA;
+  padding: 8px;
   object-fit: contain;
 }
 .brand-lockup__logo--small { width: 36px; height: 36px; }
@@ -746,6 +746,14 @@ input[type="date"] {
   color: var(--card);
 }
 
+.subject-tile__code {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  text-align: center;
+}
+
 .subject-tile__title { font-family: var(--font-display); font-weight: 800; font-size: 14px; letter-spacing: -0.02em; text-transform: none; }
 
 .subject-pill,
@@ -787,10 +795,14 @@ input[type="date"] {
   gap: 18px;
 }
 
+.subject-header:empty {
+  display: none;
+}
+
 /* ============================================================
  * Documents table
  * ============================================================ */
-.documents-card { padding: 0; overflow: hidden; }
+.documents-card { padding: 0; overflow: hidden; background: #FFFFFF; }
 .documents-card .section-heading { padding: 18px 22px 4px; }
 
 .documents-table-wrap { width: 100%; overflow-x: auto; }
@@ -808,7 +820,7 @@ input[type="date"] {
   font-weight: 700;
   color: var(--muted);
   padding: 10px 22px;
-  background: var(--bg);
+  background: #FFFFFF;
   border-bottom: 1px solid var(--hairline);
 }
 .documents-table tbody td {
@@ -819,7 +831,7 @@ input[type="date"] {
   color: var(--ink);
 }
 .documents-table tbody tr:last-child td { border-bottom: 0; }
-.documents-table tbody tr:hover { background: var(--bg); }
+.documents-table tbody tr:hover { background: #FFFFFF; }
 .documents-table input[type="checkbox"] { accent-color: var(--ink); width: 16px; height: 16px; }
 .documents-table .doc-title { font-family: var(--font-display); font-weight: 700; font-size: 13.5px; }
 
@@ -830,7 +842,7 @@ input[type="date"] {
   gap: 12px;
   padding: 14px 22px;
   border-top: 1px solid var(--hairline);
-  background: var(--bg);
+  background: #FFFFFF;
   flex-wrap: wrap;
 }
 
@@ -855,6 +867,7 @@ input[type="date"] {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background: #FFFFFF;
 }
 .reader-card .section-heading,
 .reader-card .section-heading--reader {
@@ -2218,7 +2231,7 @@ input[type="date"] {
   margin: 0;
   max-width: 44ch;
   color: var(--ink-2);
-  font-size: 9px;
+  font-size: 18px;
   font-weight: 500;
   line-height: 1.4;
 }
@@ -2278,12 +2291,10 @@ input[type="date"] {
   background: var(--card);
   box-shadow: var(--shadow-sm);
   color: var(--ink);
+  border: 1px solid transparent;
 }
 
 .subject-list--row .subject-tile__code {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   min-width: 30px;
   height: 30px;
   border-radius: 10px;
@@ -2305,18 +2316,13 @@ input[type="date"] {
   display: none;
 }
 
-.subject-tile--active {
-  background: var(--ink);
-  color: var(--card);
-}
-
-.subject-tile--active .subject-tile__code {
-  background: rgba(255, 255, 255, 0.12);
-  color: var(--card);
-}
-
-.subject-tile--active .subject-tile__meta {
-  color: rgba(255, 255, 255, 0.76);
+.subject-list--row .subject-tile--active,
+.subject-list--row .subject-tile[aria-current="true"],
+.subject-list--row .subject-list button[aria-current="true"] {
+  background: #FFFFFF;
+  color: var(--ink);
+  border-color: var(--bg);
+  box-shadow: 0 0 0 1px var(--bg);
 }
 
 .subject-header {
@@ -2333,6 +2339,26 @@ input[type="date"] {
   border-radius: 0;
   box-shadow: none;
   backdrop-filter: blur(14px);
+}
+
+.subject-header {
+  display: none !important;
+}
+
+.subject-tile--active::after,
+.subject-tile--dark::after {
+  content: none;
+}
+
+.subject-tile[data-subject-id="maths"] .subject-tile__code,
+.subject-tile[data-subject-id="wellbeing"] .subject-tile__code {
+  background: #1B1825;
+  color: #FFFFFF;
+}
+
+.subject-list--row .subject-tile[data-subject-id="maths"],
+.subject-list--row .subject-tile[data-subject-id="wellbeing"] {
+  --bg: #1B1825;
 }
 
 .subject-header__title {

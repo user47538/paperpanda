@@ -1075,25 +1075,10 @@ function syncAutoWatchForAllSubjects() {
 }
 
 function renderSubjectHeader() {
-  const subject = getSelectedSubject();
-  if (!subject || !elements.subjectHeader) {
+  if (!elements.subjectHeader) {
     return;
   }
-
-  const unreadBundles = getAllDocumentBundles(subject).filter((bundle) => !bundle.reviewed).length;
-  elements.subjectHeader.innerHTML = `
-    <div class="subject-header__title">
-      <p class="eyebrow">Current subject</p>
-      <h3>${escapeHtml(subject.name)}</h3>
-    </div>
-    <div class="subject-header__summary">
-      ${escapeHtml(unreadBundles ? `${unreadBundles} document${unreadBundles === 1 ? "" : "s"} still to read` : "All current documents reviewed")}
-    </div>
-    <div class="subject-header__actions">
-      <button type="button" class="primary-button primary-button--dark" id="subject-header-upload-inline">+ Upload</button>
-    </div>
-  `;
-  document.getElementById("subject-header-upload-inline")?.addEventListener("click", openUploadModal);
+  elements.subjectHeader.innerHTML = "";
 }
 
 function renderSubjectTabs() {
