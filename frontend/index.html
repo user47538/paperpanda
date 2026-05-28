@@ -293,6 +293,16 @@
               <div class="subject-list" id="subject-list"></div>
             </section>
 
+            <section class="saved-tests card-stack-card">
+              <div class="section-heading section-heading--stacked section-heading--compact">
+                <div>
+                  <p class="eyebrow">Revision</p>
+                  <h3>Saved Tests</h3>
+                </div>
+              </div>
+              <div class="saved-tests__list" id="saved-tests-list"></div>
+            </section>
+
             <aside class="ask-card">
               <div class="section-heading section-heading--stacked">
                 <div>
@@ -313,20 +323,19 @@
                 rows="7"
                 placeholder="Example: Can you explain what I should focus on for this history source analysis?"
               ></textarea>
-              <button type="button" class="primary-button primary-button--full" id="ask-button">
-                Get guidance
-              </button>
+              <div class="ask-toolbar">
+                <button type="button" class="primary-button primary-button--full" id="ask-button">
+                  Get guidance
+                </button>
+                <button type="button" class="ghost-button ghost-button--light" id="ask-mic-button">
+                  Use microphone
+                </button>
+                <button type="button" class="ghost-button ghost-button--light" id="ask-listen-button">
+                  Listen
+                </button>
+              </div>
               <div class="ask-response" id="ask-response">
                 Pick a subject and ask a question to see guided support here.
-              </div>
-              <div class="saved-tests">
-                <div class="section-heading section-heading--stacked section-heading--compact">
-                  <div>
-                    <p class="eyebrow">Revision</p>
-                    <h3>Saved Tests</h3>
-                  </div>
-                </div>
-                <div class="saved-tests__list" id="saved-tests-list"></div>
               </div>
             </aside>
           </aside>
@@ -370,12 +379,6 @@
                 <div>
                   <p class="eyebrow">Read and listen</p>
                   <h3 id="reader-title">Document reader</h3>
-                </div>
-                <div class="reader-toolbar" id="reader-toolbar">
-                  <button type="button" class="table-action" id="reader-previous-button" aria-label="Previous page">←</button>
-                  <button type="button" class="table-action" id="reader-listen-button">Listen</button>
-                  <button type="button" class="table-action" id="reader-ask-button">Ask</button>
-                  <button type="button" class="table-action" id="reader-next-button" aria-label="Next page">→</button>
                 </div>
               </div>
               <div class="reader-content" id="reader-content">

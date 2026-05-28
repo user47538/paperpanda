@@ -13,7 +13,7 @@ const sessionStorageKey = "studylift-session";
 const subjectsStorageKey = "paperpanda-subjects-by-account";
 const settingsStorageKey = "studylift-settings";
 const uiVersionStorageKey = "paperpanda-ui-version";
-const currentUiVersion = "2026-05-26-homework-whole-file";
+const currentUiVersion = "2026-05-28-design-handoff-voice-ask";
 const previewDatabaseName = "paperpanda-assets";
 const previewStoreName = "document-previews";
 const settingsAssetStoreName = "settings-assets";
@@ -23,6 +23,8 @@ let currentAudioPlayback = null;
 let currentAudioObjectUrl = "";
 let previewDatabasePromise = null;
 let currentListenSessionId = 0;
+let currentAudioContext = "";
+let currentSpeechRecognition = null;
 const defaultGrade = "7";
 
 const subjectSeed = [
@@ -364,12 +366,14 @@ const state = {
   studentName: "",
   currentUserEmail: "",
   studentGrade: defaultGrade,
-  authMode: "create",
+  authMode: "signin",
   selectedSubjectId: subjectSeed[0].id,
   selectedDocumentId: null,
   askDocumentId: null,
   listeningDocumentId: null,
   selectedDocumentIds: [],
+  askMicActive: false,
+  askResponseSpeaking: false,
   expandedDocumentGroups: {},
   attachmentModalOpen: false,
   activeAttachmentAssessment: null,
@@ -513,16 +517,14 @@ const elements = {
   aiConnectionStatus: document.getElementById("ai-connection-status"),
   askInput: document.getElementById("ask-input"),
   askButton: document.getElementById("ask-button"),
+  askMicButton: document.getElementById("ask-mic-button"),
+  askListenButton: document.getElementById("ask-listen-button"),
   askContext: document.getElementById("ask-context"),
   askResponse: document.getElementById("ask-response"),
   savedTestsList: document.getElementById("saved-tests-list"),
   readerCard: document.getElementById("reader-card"),
   readerTitle: document.getElementById("reader-title"),
   readerContent: document.getElementById("reader-content"),
-  readerPreviousButton: document.getElementById("reader-previous-button"),
-  readerListenButton: document.getElementById("reader-listen-button"),
-  readerAskButton: document.getElementById("reader-ask-button"),
-  readerNextButton: document.getElementById("reader-next-button"),
   assessmentList: document.getElementById("assessment-list"),
   practiceList: document.getElementById("practice-list"),
   watchList: document.getElementById("watch-list"),
@@ -938,8 +940,11 @@ function loadAccounts() {
     return Array.isArray(parsed)
       ? parsed.map((account) => ({
           ...account,
+          name: String(account?.name || "").trim(),
+          email: normaliseAccountKey(account?.email),
+          password: String(account?.password || ""),
           grade: normaliseGrade(account?.grade)
-        }))
+        })).filter((account) => account.email)
       : [];
   } catch (error) {
     console.error("Accounts could not be restored.", error);
@@ -948,7 +953,18 @@ function loadAccounts() {
 }
 
 function saveAccounts(accounts) {
-  window.localStorage.setItem(accountsStorageKey, JSON.stringify(accounts));
+  window.localStorage.setItem(
+    accountsStorageKey,
+    JSON.stringify(
+      accounts.map((account) => ({
+        ...account,
+        name: String(account?.name || "").trim(),
+        email: normaliseAccountKey(account?.email),
+        password: String(account?.password || ""),
+        grade: normaliseGrade(account?.grade)
+      }))
+    )
+  );
 }
 
 function persistSession(email) {
@@ -960,7 +976,11 @@ function clearSession() {
 }
 
 function findAccountByEmail(email) {
-  return loadAccounts().find((account) => account.email.toLowerCase() === email.toLowerCase()) || null;
+  const normalisedEmail = normaliseAccountKey(email);
+  if (!normalisedEmail) {
+    return null;
+  }
+  return loadAccounts().find((account) => normaliseAccountKey(account.email) === normalisedEmail) || null;
 }
 
 function syncSignInMode() {
@@ -1520,6 +1540,7 @@ function openDashboard(nextView = "home") {
 
 function showLanding() {
   stopListening();
+  stopAskMicrophone({ preserveStatus: true });
   closeUpcomingModal();
   closeUploadModal();
   closeAttachNotesModal();
@@ -1811,6 +1832,149 @@ async function requestAskAnswer(question, subject, document) {
   }
 
   return answer;
+}
+
+function getLatestAskAnswer() {
+  const subject = getSelectedSubject();
+  const history = subject ? getTodayAskHistory(subject) : [];
+  return history.length ? String(history[history.length - 1].answer || "").trim() : "";
+}
+
+function renderAskVoiceControls() {
+  if (elements.askMicButton) {
+    elements.askMicButton.textContent = state.askMicActive ? "Stop microphone" : "Use microphone";
+  }
+  if (elements.askListenButton) {
+    elements.askListenButton.textContent = state.askResponseSpeaking ? "Stop" : "Listen";
+    elements.askListenButton.disabled = !state.askResponseSpeaking && !getLatestAskAnswer();
+  }
+}
+
+function getSpeechRecognitionConstructor() {
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+function stopAskMicrophone({ preserveStatus = false } = {}) {
+  if (currentSpeechRecognition) {
+    currentSpeechRecognition.onresult = null;
+    currentSpeechRecognition.onerror = null;
+    currentSpeechRecognition.onend = null;
+    currentSpeechRecognition.stop();
+    currentSpeechRecognition = null;
+  }
+  state.askMicActive = false;
+  if (!preserveStatus && elements.askResponse.textContent === "Listening for your question...") {
+    elements.askResponse.textContent = getLatestAskAnswer() || "Ask a question about the selected subject or document.";
+  }
+  renderAskVoiceControls();
+}
+
+function startAskMicrophone() {
+  const SpeechRecognitionConstructor = getSpeechRecognitionConstructor();
+  if (!SpeechRecognitionConstructor) {
+    elements.askResponse.textContent = "Microphone input is not available in this browser.";
+    renderAskVoiceControls();
+    return;
+  }
+
+  stopAskMicrophone({ preserveStatus: true });
+  const recognition = new SpeechRecognitionConstructor();
+  currentSpeechRecognition = recognition;
+  recognition.lang = "en-AU";
+  recognition.interimResults = true;
+  recognition.continuous = false;
+  state.askMicActive = true;
+  elements.askResponse.textContent = "Listening for your question...";
+  renderAskVoiceControls();
+
+  recognition.onresult = (event) => {
+    const transcript = Array.from(event.results || [])
+      .map((result) => result[0]?.transcript || "")
+      .join(" ")
+      .trim();
+    elements.askInput.value = transcript;
+    if (event.results?.[event.results.length - 1]?.isFinal && transcript) {
+      elements.askResponse.textContent = "Question captured. Asking Panda...";
+      stopAskMicrophone({ preserveStatus: true });
+      void handleAsk();
+    }
+  };
+
+  recognition.onerror = (event) => {
+    state.askMicActive = false;
+    currentSpeechRecognition = null;
+    elements.askResponse.textContent =
+      event?.error === "not-allowed"
+        ? "Microphone permission was denied."
+        : "Voice input failed. Try again or type your question.";
+    renderAskVoiceControls();
+  };
+
+  recognition.onend = () => {
+    currentSpeechRecognition = null;
+    state.askMicActive = false;
+    renderAskVoiceControls();
+  };
+
+  recognition.start();
+}
+
+async function speakTextWithOpenAi(text, { context = "document", documentId = null, statusMessages = {} } = {}) {
+  stopListening();
+  const textToRead = normaliseSpeechText(text);
+  if (!textToRead) {
+    throw new Error("There is no readable text available yet.");
+  }
+
+  const listenSessionId = Date.now();
+  currentListenSessionId = listenSessionId;
+  currentAudioContext = context;
+  state.listeningDocumentId = context === "document" ? documentId : null;
+  state.askResponseSpeaking = context === "ask";
+  renderDocuments();
+  renderAskVoiceControls();
+  elements.askResponse.textContent = statusMessages.preparing || "Preparing audio...";
+
+  const chunks = splitSpeechTextIntoChunks(clipText(textToRead, 3500), 1100);
+  if (!chunks.length) {
+    throw new Error("There is no readable text available yet.");
+  }
+
+  for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
+    if (currentListenSessionId !== listenSessionId) {
+      return;
+    }
+
+    const speechBlob = await requestApi("/api/speak", { text: chunks[chunkIndex] }, true);
+
+    if (currentListenSessionId !== listenSessionId) {
+      return;
+    }
+
+    if (currentAudioObjectUrl) {
+      URL.revokeObjectURL(currentAudioObjectUrl);
+    }
+    currentAudioObjectUrl = URL.createObjectURL(speechBlob);
+    currentAudioPlayback = new Audio(currentAudioObjectUrl);
+    currentAudioPlayback.onerror = () => {
+      stopListening();
+      elements.askResponse.textContent = statusMessages.error || "AI voice playback failed.";
+    };
+    await currentAudioPlayback.play();
+    elements.askResponse.textContent = statusMessages.playing || "Reading...";
+
+    await new Promise((resolve, reject) => {
+      if (!currentAudioPlayback) {
+        resolve();
+        return;
+      }
+      currentAudioPlayback.onended = () => resolve();
+      currentAudioPlayback.onerror = () => reject(new Error(statusMessages.error || "AI voice playback failed."));
+    });
+  }
+
+  stopListening();
+  renderDocuments();
 }
 
 function currentDateKey() {
@@ -2585,6 +2749,7 @@ function renderAskContext() {
     : "No document selected for Ask yet.";
   elements.askResponse.textContent =
     historyMarkup || "Ask a question about the selected subject or document.";
+  renderAskVoiceControls();
 }
 
 function renderSavedRevisionTests() {
@@ -2671,18 +2836,22 @@ function openSavedRevisionTest(savedTestId) {
   openRevisionTestView();
 }
 
-function renderReaderToolbar() {
+function getReaderToolbarMarkup() {
   const selectedDocument = getSelectedDocument();
   const selectedIndex = getSelectedDocumentIndex();
   const documentCount = getVisibleSubjectDocuments(getSelectedSubject() || { documents: [] }).length || 0;
   const hasDocument = Boolean(selectedDocument);
 
-  elements.readerPreviousButton.disabled = !hasDocument || selectedIndex <= 0;
-  elements.readerListenButton.disabled = !hasDocument;
-  elements.readerAskButton.disabled = !hasDocument;
-  elements.readerNextButton.disabled = !hasDocument || selectedIndex === -1 || selectedIndex >= documentCount - 1;
-  elements.readerListenButton.textContent =
-    selectedDocument && state.listeningDocumentId === selectedDocument.id ? "Stop" : "Listen";
+  return `
+    <div class="reader-toolbar reader-toolbar--inline">
+      <button type="button" class="table-action" data-reader-action="previous" aria-label="Previous page" ${!hasDocument || selectedIndex <= 0 ? "disabled" : ""}>←</button>
+      <button type="button" class="table-action" data-reader-action="listen" ${!hasDocument ? "disabled" : ""}>
+        ${selectedDocument && state.listeningDocumentId === selectedDocument.id ? "Stop" : "Listen"}
+      </button>
+      <button type="button" class="table-action" data-reader-action="ask" ${!hasDocument ? "disabled" : ""}>Ask</button>
+      <button type="button" class="table-action" data-reader-action="next" aria-label="Next page" ${!hasDocument || selectedIndex === -1 || selectedIndex >= documentCount - 1 ? "disabled" : ""}>→</button>
+    </div>
+  `;
 }
 
 function renderDocumentGroupRows(group, { reviewedSection = false } = {}) {
@@ -3005,7 +3174,6 @@ function renderReader() {
   if (!selectedDocument) {
     elements.readerTitle.textContent = "Document reader";
     elements.readerContent.textContent = "Choose a document from the table to read it here.";
-    renderReaderToolbar();
     return;
   }
 
@@ -3028,10 +3196,13 @@ function renderReader() {
     `
     : "";
   const reviewToggleMarkup = `
-    <label class="document-review-toggle document-review-toggle--reader">
-      <input type="checkbox" id="reader-reviewed-toggle" ${selectedDocument.reviewed ? "checked" : ""} />
-      <span>${selectedDocument.reviewed ? "Read / listened" : "Mark as read / listened"}</span>
-    </label>
+    <div class="reader-controls-row">
+      <label class="document-review-toggle document-review-toggle--reader">
+        <input type="checkbox" id="reader-reviewed-toggle" ${selectedDocument.reviewed ? "checked" : ""} />
+        <span>${selectedDocument.reviewed ? "Read / listened" : "Mark as read / listened"}</span>
+      </label>
+      ${getReaderToolbarMarkup()}
+    </div>
   `;
 
   if (selectedDocument.flags?.homework) {
@@ -3073,7 +3244,7 @@ function renderReader() {
         window.open(selectedDocument.originalFile.objectUrl, "_blank", "noopener");
       });
     }
-    renderReaderToolbar();
+    attachReaderActionHandlers();
     return;
   }
 
@@ -3099,11 +3270,10 @@ function renderReader() {
       window.open(selectedDocument.originalFile.objectUrl, "_blank", "noopener");
     });
   }
-  renderReaderToolbar();
+  attachReaderActionHandlers();
 }
 
 function speakDocument(document) {
-  stopListening();
   const textToRead = normaliseSpeechText(
     document.content || `${document.title}. Preview text is not available for this file yet.`
   );
@@ -3112,67 +3282,55 @@ function speakDocument(document) {
     return;
   }
 
-  const speakWithOpenAi = async () => {
-    const listenSessionId = Date.now();
-    currentListenSessionId = listenSessionId;
-    state.listeningDocumentId = document.id;
-    renderDocuments();
-    elements.askResponse.textContent = "Preparing audio...";
-
-    const chunks = splitSpeechTextIntoChunks(clipText(textToRead, 3500), 1100);
-    if (!chunks.length) {
-      throw new Error("There is no readable text available for this document yet.");
+  speakTextWithOpenAi(textToRead, {
+    context: "document",
+    documentId: document.id,
+    statusMessages: {
+      preparing: "Preparing audio...",
+      playing: "Reading document...",
+      error: "AI voice playback failed for this document."
     }
-
-    for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
-      if (currentListenSessionId !== listenSessionId) {
-        return;
-      }
-
-      const speechBlob = await requestApi(
-        "/api/speak",
-        {
-          text: chunks[chunkIndex]
-        },
-        true
-      );
-
-      if (currentListenSessionId !== listenSessionId) {
-        return;
-      }
-
-      if (currentAudioObjectUrl) {
-        URL.revokeObjectURL(currentAudioObjectUrl);
-      }
-      currentAudioObjectUrl = URL.createObjectURL(speechBlob);
-      currentAudioPlayback = new Audio(currentAudioObjectUrl);
-      currentAudioPlayback.onerror = () => {
-        stopListening();
-        elements.askResponse.textContent = "AI voice playback failed for this document.";
-      };
-      await currentAudioPlayback.play();
-      elements.askResponse.textContent = "Reading document...";
-
-      await new Promise((resolve, reject) => {
-        if (!currentAudioPlayback) {
-          resolve();
-          return;
-        }
-        currentAudioPlayback.onended = () => resolve();
-        currentAudioPlayback.onerror = () => reject(new Error("AI voice playback failed for this document."));
-      });
-    }
-
-    stopListening();
-    renderDocuments();
-  };
-
-  speakWithOpenAi().catch((error) => {
+  }).catch((error) => {
     console.error("OpenAI speech failed.", error);
     stopListening();
     elements.askResponse.textContent =
       error instanceof Error ? `Listen failed: ${error.message}` : "Listen failed.";
     renderDocuments();
+  });
+}
+
+function attachReaderActionHandlers() {
+  elements.readerContent.querySelectorAll("[data-reader-action]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const action = button.dataset.readerAction;
+      const selectedDocument = getSelectedDocument();
+      if (!selectedDocument && action !== "previous" && action !== "next") {
+        return;
+      }
+
+      if (action === "previous") {
+        selectAdjacentDocument(-1);
+        return;
+      }
+
+      if (action === "next") {
+        selectAdjacentDocument(1);
+        return;
+      }
+
+      if (action === "listen" && selectedDocument) {
+        toggleListen(selectedDocument);
+        return;
+      }
+
+      if (action === "ask" && selectedDocument) {
+        state.askDocumentId = selectedDocument.id;
+        elements.askInput.value = "";
+        renderAskContext();
+        elements.askResponse.textContent = "Ask a question about the selected document.";
+        focusAskComposer();
+      }
+    });
   });
 }
 
@@ -3195,6 +3353,11 @@ function stopListening() {
   if (state.listeningDocumentId) {
     state.listeningDocumentId = null;
   }
+  if (state.askResponseSpeaking) {
+    state.askResponseSpeaking = false;
+  }
+  currentAudioContext = "";
+  renderAskVoiceControls();
 }
 
 function toggleListen(documentRecord) {
@@ -4071,9 +4234,46 @@ async function handleAsk() {
     answer
   });
   persistSubjects();
+  elements.askResponse.textContent = answer;
   elements.askInput.value = "";
   elements.askButton.disabled = false;
   renderAskContext();
+}
+
+function handleAskMicToggle() {
+  if (state.askMicActive) {
+    stopAskMicrophone();
+    return;
+  }
+  startAskMicrophone();
+}
+
+function handleAskListen() {
+  if (state.askResponseSpeaking) {
+    stopListening();
+    return;
+  }
+
+  const latestAnswer = getLatestAskAnswer();
+  if (!latestAnswer) {
+    elements.askResponse.textContent = "Ask a question first so there is an AI response to play back.";
+    renderAskVoiceControls();
+    return;
+  }
+
+  speakTextWithOpenAi(latestAnswer, {
+    context: "ask",
+    statusMessages: {
+      preparing: "Preparing Panda's answer...",
+      playing: "Playing Panda's answer...",
+      error: "AI voice playback failed for this answer."
+    }
+  }).catch((error) => {
+    console.error("OpenAI speech failed.", error);
+    stopListening();
+    elements.askResponse.textContent =
+      error instanceof Error ? `Listen failed: ${error.message}` : "Listen failed.";
+  });
 }
 
 function formatDate() {
@@ -5339,9 +5539,9 @@ function signInToAccount(account) {
 function handleDashboardOpen() {
   const studentName = elements.studentNameInput.value.trim();
   const studentGrade = normaliseGrade(elements.studentGradeSelect.value);
-  const studentEmail = elements.studentEmailInput.value.trim().toLowerCase();
-  const password = elements.studentPasswordInput.value;
-  const confirmPassword = elements.studentPasswordConfirmInput.value;
+  const studentEmail = normaliseAccountKey(elements.studentEmailInput.value);
+  const password = String(elements.studentPasswordInput.value || "");
+  const confirmPassword = String(elements.studentPasswordConfirmInput.value || "");
   const existingAccount = findAccountByEmail(studentEmail);
 
   elements.signInStatus.textContent = "";
@@ -5354,7 +5554,9 @@ function handleDashboardOpen() {
   if (state.authMode === "create") {
     if (existingAccount) {
       if (existingAccount.password !== password) {
-        elements.signInStatus.textContent = "That email already has an account. Use the correct password to sign in.";
+        state.authMode = "signin";
+        syncSignInMode();
+        elements.signInStatus.textContent = "That email already has an account. Sign in with the saved password.";
         return;
       }
       signInToAccount(existingAccount);
@@ -5390,8 +5592,13 @@ function handleDashboardOpen() {
     return;
   }
 
-  if (!existingAccount || existingAccount.password !== password) {
-    elements.signInStatus.textContent = "That email or password is incorrect.";
+  if (!existingAccount) {
+    elements.signInStatus.textContent = "No account was found for that email. Switch to Create account first.";
+    return;
+  }
+
+  if (existingAccount.password !== password) {
+    elements.signInStatus.textContent = "That password is incorrect.";
     return;
   }
 
@@ -5399,6 +5606,8 @@ function handleDashboardOpen() {
 }
 
 elements.askButton.addEventListener("click", handleAsk);
+elements.askMicButton?.addEventListener("click", handleAskMicToggle);
+elements.askListenButton?.addEventListener("click", handleAskListen);
 elements.signInModeCreateButton.addEventListener("click", () => {
   state.authMode = "create";
   elements.signInStatus.textContent = "";
@@ -5408,30 +5617,6 @@ elements.signInModeLoginButton.addEventListener("click", () => {
   state.authMode = "signin";
   elements.signInStatus.textContent = "";
   syncSignInMode();
-});
-elements.readerPreviousButton.addEventListener("click", () => {
-  selectAdjacentDocument(-1);
-});
-elements.readerListenButton.addEventListener("click", () => {
-  const selectedDocument = getSelectedDocument();
-  if (!selectedDocument) {
-    return;
-  }
-  toggleListen(selectedDocument);
-});
-elements.readerAskButton.addEventListener("click", () => {
-  const selectedDocument = getSelectedDocument();
-  if (!selectedDocument) {
-    return;
-  }
-  state.askDocumentId = selectedDocument.id;
-  elements.askInput.value = "";
-  renderAskContext();
-  elements.askResponse.textContent = "Ask a question about the selected document.";
-  focusAskComposer();
-});
-elements.readerNextButton.addEventListener("click", () => {
-  selectAdjacentDocument(1);
 });
 elements.openDashboardButton.addEventListener("click", handleDashboardOpen);
 elements.removeBackgroundButton.addEventListener("click", handleRemoveBackground);
@@ -5594,6 +5779,7 @@ elements.uploadPanel.addEventListener("drop", async (event) => {
   }
 });
 elements.signoutButton.addEventListener("click", () => {
+  stopAskMicrophone({ preserveStatus: true });
   clearSession();
   state.studentName = "";
   state.currentUserEmail = "";
