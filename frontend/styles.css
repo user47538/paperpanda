@@ -22,7 +22,7 @@
   --ink-soft-2: #9994A4;
 
   /* Surfaces */
-  --bg: #FAF7F2;
+  --bg: #FBF7F0;
   --bg-2: #F4EFE6;
   --card: #FFFFFF;
   --surface: #FFFFFF;
@@ -95,8 +95,18 @@ button { border: 0; }
 
 .hidden { display: none !important; }
 
-.page-shell { width: 100%; margin: 0 auto; padding: 0 0 56px; }
-.app-shell { display: grid; gap: 0; }
+.page-shell {
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 0 56px;
+  background: var(--bg);
+}
+
+.app-shell {
+  display: grid;
+  gap: 0;
+  background: var(--bg);
+}
 
 /* ============================================================
  * Topbar
@@ -450,6 +460,7 @@ button { border: 0; }
  * ============================================================ */
 .home-view, .settings-view, .subjects-view {
   padding: 12px 36px 0;
+  background: var(--bg);
 }
 
 .overview-band {
@@ -901,7 +912,7 @@ input[type="date"] {
 .reader-actions {
   padding: 14px 24px 22px;
   border-top: 1px solid var(--hairline);
-  background: var(--bg);
+  background: #FFFFFF;
 }
 
 /* ============================================================
@@ -2199,6 +2210,7 @@ input[type="date"] {
   display: grid;
   gap: 20px;
   padding: 18px 36px 42px;
+  background: var(--bg);
 }
 
 .hero-band {
@@ -2249,12 +2261,14 @@ input[type="date"] {
   gap: 20px;
   padding: 0 36px 42px;
   align-items: start;
+  background: var(--bg);
 }
 
 .workspace-main {
   display: grid;
   gap: 16px;
   min-width: 0;
+  background: var(--bg);
 }
 
 .workspace-dock {
@@ -2488,7 +2502,6 @@ input[type="date"] {
 }
 
 .viewer-panel .documents-card,
-.viewer-panel .reader-card,
 .viewer-panel .practice-card,
 .viewer-panel .assessment-card {
   background: var(--bg);
@@ -2497,12 +2510,25 @@ input[type="date"] {
   padding: 20px;
 }
 
+.viewer-panel .reader-card {
+  background: #FFFFFF;
+  box-shadow: none;
+  border-radius: 24px;
+  padding: 20px;
+}
+
 .viewer-panel .documents-card {
   padding: 0;
+  background: #FFFFFF;
 }
 
 .viewer-panel .documents-card .section-heading {
   padding: 16px 20px 4px;
+}
+
+.viewer-panel .documents-card,
+.viewer-panel .reader-card {
+  background: #FFFFFF !important;
 }
 
 .ask-card {
