@@ -26,6 +26,19 @@ let currentListenSessionId = 0;
 let currentAudioContext = "";
 let currentSpeechRecognition = null;
 const defaultGrade = "7";
+const defaultPageBackgroundColor = "#FBF7F0";
+const pandaEmojiChoices = [
+  { id: "angry", label: "Angry", src: "/panda-emojis/panda-angry-256.png" },
+  { id: "confused", label: "Confused", src: "/panda-emojis/panda-confused-256.png" },
+  { id: "cowboy", label: "Cowboy", src: "/panda-emojis/panda-cowboy-256.png" },
+  { id: "explode", label: "Explode", src: "/panda-emojis/panda-explode-256.png" },
+  { id: "hearts", label: "Hearts", src: "/panda-emojis/panda-hearts-256.png" },
+  { id: "paint", label: "Paint", src: "/panda-emojis/panda-paint-256.png" },
+  { id: "party", label: "Party", src: "/panda-emojis/panda-party-256.png" },
+  { id: "shades", label: "Shades", src: "/panda-emojis/panda-shades-256.png" },
+  { id: "spew", label: "Spew", src: "/panda-emojis/panda-spew-256.png" },
+  { id: "yawn", label: "Yawn", src: "/panda-emojis/panda-yawn-256.png" }
+];
 
 const subjectSeed = [
   {
@@ -328,6 +341,31 @@ const subjectTemplateSeed = subjectSeed.map(({ documents, assessments, watch, as
   askHistory: []
 }));
 
+const defaultSubjectIconMap = Object.fromEntries(
+  subjectSeed.map((subject, index) => [subject.id, pandaEmojiChoices[index % pandaEmojiChoices.length].id])
+);
+
+function normalizePageBackgroundColor(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) {
+    return defaultPageBackgroundColor;
+  }
+
+  if (
+    normalized === "#fff" ||
+    normalized === "#ffffff" ||
+    normalized === "white" ||
+    normalized === "rgb(255,255,255)" ||
+    normalized === "rgb(255, 255, 255)" ||
+    normalized === "rgba(255,255,255,1)" ||
+    normalized === "rgba(255, 255, 255, 1)"
+  ) {
+    return defaultPageBackgroundColor;
+  }
+
+  return value;
+}
+
 const legacyAssessmentTemplateKeysBySubject = Object.fromEntries(
   subjectSeed.map((subject) => [
     subject.id,
@@ -418,9 +456,10 @@ const state = {
     subjectsBackground: "",
     homeBackgroundAssetId: "",
     subjectsBackgroundAssetId: "",
-    homeBackgroundColor: "#ffffff",
-    subjectsBackgroundColor: "#ffffff",
-    headingColor: "#111111"
+    homeBackgroundColor: defaultPageBackgroundColor,
+    subjectsBackgroundColor: defaultPageBackgroundColor,
+    headingColor: "#111111",
+    subjectIcons: { ...defaultSubjectIconMap }
   },
   subjects: createBaseSubjects()
 };
@@ -444,6 +483,7 @@ const elements = {
   studentPasswordConfirmInput: document.getElementById("student-password-confirm"),
   signInNote: document.getElementById("signin-note"),
   signInStatus: document.getElementById("signin-status"),
+  appBrandTag: document.getElementById("app-brand-tag"),
   welcomeHeading: document.getElementById("welcome-heading"),
   navHomeButton: document.getElementById("nav-home-button"),
   navSubjectsButton: document.getElementById("nav-subjects-button"),
@@ -611,6 +651,8 @@ const elements = {
   settingsCurrentPasswordInput: document.getElementById("settings-current-password"),
   settingsNewPasswordInput: document.getElementById("settings-new-password"),
   settingsConfirmPasswordInput: document.getElementById("settings-confirm-password"),
+  settingsSubjectIcons: document.getElementById("settings-subject-icons"),
+  saveSubjectIconsButton: document.getElementById("save-subject-icons-button"),
   saveAccountSettingsButton: document.getElementById("save-account-settings-button"),
   savePasswordSettingsButton: document.getElementById("save-password-settings-button"),
   settingsStatus: document.getElementById("settings-status"),
@@ -1294,6 +1336,53 @@ function renderRevisionPanel() {
     .join("");
 }
 
+function getSelectedRevisionNoteBundles(subject = state.subjects.find((item) => item.id === state.revisionSelectedSubjectId)) {
+  const allBundles = subject ? getAllDocumentBundles(subject) : [];
+  return allBundles.filter((bundle) => state.revisionSelectedNoteIds.includes(bundle.id));
+}
+
+async function generateRevisionTest({
+  subjectId,
+  topic = "",
+  textTitle = "",
+  noteBundles = []
+} = {}) {
+  const selectedEntry =
+    state.revisionCatalogue.find((entry) => entry.subjectId === subjectId) ||
+    state.subjects.find((subject) => subject.id === subjectId);
+  if (!selectedEntry) {
+    throw new Error("Select a subject first.");
+  }
+
+  state.revisionSelectedSubjectId = subjectId;
+  state.revisionSelectedTopic = topic;
+  state.revisionTextTitle = textTitle;
+  state.revisionSelectedNoteIds = noteBundles.map((bundle) => bundle.id);
+  state.generatedRevisionTest = null;
+  state.revisionResponses = {};
+  state.revisionSubmission = null;
+  state.revisionViewMode = "draft";
+  state.activeSavedRevisionTestId = "";
+
+  const payload = await requestApi("/api/revision/generate-test", {
+    grade: state.studentGrade,
+    subjectId,
+    topic,
+    textTitle,
+    notes: noteBundles.map((bundle) => ({
+      title: bundle.title,
+      content: clipText(bundle.content || "")
+    }))
+  });
+
+  state.generatedRevisionTest = payload?.test || null;
+  state.revisionResponses = {};
+  state.revisionSubmission = null;
+  state.revisionViewMode = "draft";
+  state.activeSavedRevisionTestId = "";
+  openRevisionTestView();
+}
+
 function openRevisionTestView() {
   state.currentView = "revision";
   render();
@@ -1412,28 +1501,19 @@ async function handleCreateRevisionTest() {
   }
 
   const subject = state.subjects.find((item) => item.id === selectedEntry.subjectId);
-  const noteBundles = getLinkedDocumentBundles(subject, state.revisionSelectedNoteIds);
+  const noteBundles = getSelectedRevisionNoteBundles(subject);
   elements.revisionStatus.textContent = "Generating revision test...";
   try {
-    const payload = await requestApi("/api/revision/generate-test", {
-      grade: state.studentGrade,
+    await generateRevisionTest({
       subjectId: selectedEntry.subjectId,
       topic: state.revisionSelectedTopic,
       textTitle: state.revisionTextTitle,
-      notes: noteBundles.map((bundle) => ({
-        title: bundle.title,
-        content: clipText(bundle.content || "")
-      }))
+      noteBundles
     });
-    state.generatedRevisionTest = payload?.test || null;
-    state.revisionResponses = {};
-    state.revisionSubmission = null;
-    state.revisionViewMode = "draft";
-    state.activeSavedRevisionTestId = "";
     elements.revisionStatus.textContent = "";
-    openRevisionTestView();
   } catch (error) {
     elements.revisionStatus.textContent = error instanceof Error ? error.message : "Revision test generation failed.";
+    elements.revisionTestStatus.textContent = elements.revisionStatus.textContent;
   }
 }
 
@@ -1700,6 +1780,58 @@ function hydrateSettingsView() {
   elements.settingsNewPasswordInput.value = "";
   elements.settingsConfirmPasswordInput.value = "";
   elements.settingsStatus.textContent = "";
+  renderSubjectIconSettings();
+}
+
+function renderSubjectIconSettings() {
+  if (!elements.settingsSubjectIcons) {
+    return;
+  }
+
+  elements.settingsSubjectIcons.innerHTML = state.subjects
+    .map((subject) => {
+      const currentChoice = getSubjectIconChoice(subject.id);
+      return `
+        <label class="subject-icon-setting">
+          <span class="subject-icon-setting__subject">${escapeHtml(subject.name)}</span>
+          <span class="subject-icon-setting__controls">
+            <span class="subject-icon-setting__preview">
+              ${currentChoice ? `<img src="${escapeHtml(currentChoice.src)}" alt="${escapeHtml(currentChoice.label)}" class="subject-icon-setting__preview-image" />` : `<span>${escapeHtml(getSubjectShortCode(subject.name))}</span>`}
+            </span>
+            <select class="upload-select subject-icon-setting__select" data-subject-icon-select="${subject.id}">
+              ${pandaEmojiChoices
+                .map(
+                  (choice) =>
+                    `<option value="${choice.id}" ${choice.id === currentChoice?.id ? "selected" : ""}>${escapeHtml(choice.label)}</option>`
+                )
+                .join("")}
+            </select>
+          </span>
+        </label>
+      `;
+    })
+    .join("");
+
+  elements.settingsSubjectIcons.querySelectorAll("[data-subject-icon-select]").forEach((select) => {
+    select.addEventListener("change", () => {
+      const subjectId = select.dataset.subjectIconSelect;
+      const choice = pandaEmojiChoices.find((item) => item.id === select.value) || pandaEmojiChoices[0];
+      if (!subjectId || !choice) {
+        return;
+      }
+      state.settings.subjectIcons = {
+        ...state.settings.subjectIcons,
+        [subjectId]: choice.id
+      };
+      renderSubjectIconSettings();
+    });
+  });
+}
+
+function saveSubjectIconSettings() {
+  persistSettings();
+  elements.settingsStatus.textContent = "Subject pandas saved.";
+  render();
 }
 
 function openPreviewDatabase() {
@@ -1980,6 +2112,8 @@ function persistSubjects() {
 }
 
 function persistSettings() {
+  state.settings.homeBackgroundColor = normalizePageBackgroundColor(state.settings.homeBackgroundColor);
+  state.settings.subjectsBackgroundColor = normalizePageBackgroundColor(state.settings.subjectsBackgroundColor);
   window.localStorage.setItem(
     settingsStorageKey,
     JSON.stringify({
@@ -1989,7 +2123,8 @@ function persistSettings() {
       subjectsBackgroundAssetId: state.settings.subjectsBackgroundAssetId,
       homeBackgroundColor: state.settings.homeBackgroundColor,
       subjectsBackgroundColor: state.settings.subjectsBackgroundColor,
-      headingColor: state.settings.headingColor
+      headingColor: state.settings.headingColor,
+      subjectIcons: state.settings.subjectIcons
     })
   );
 }
@@ -2113,10 +2248,16 @@ function restoreSettings() {
       subjectsBackground: String(parsed.subjectsBackground || ""),
       homeBackgroundAssetId: String(parsed.homeBackgroundAssetId || (parsed.homeBackground ? "home-background" : "")),
       subjectsBackgroundAssetId: String(parsed.subjectsBackgroundAssetId || (parsed.subjectsBackground ? "subjects-background" : "")),
-      homeBackgroundColor: parsed.homeBackgroundColor || "#ffffff",
-      subjectsBackgroundColor: parsed.subjectsBackgroundColor || "#ffffff",
-      headingColor: parsed.headingColor || "#111111"
+      homeBackgroundColor: normalizePageBackgroundColor(parsed.homeBackgroundColor),
+      subjectsBackgroundColor: normalizePageBackgroundColor(parsed.subjectsBackgroundColor),
+      headingColor: parsed.headingColor || "#111111",
+      subjectIcons: {
+        ...defaultSubjectIconMap,
+        ...(parsed.subjectIcons && typeof parsed.subjectIcons === "object" ? parsed.subjectIcons : {})
+      }
     };
+    state.settings.homeBackgroundColor = normalizePageBackgroundColor(state.settings.homeBackgroundColor);
+    state.settings.subjectsBackgroundColor = normalizePageBackgroundColor(state.settings.subjectsBackgroundColor);
   } catch (error) {
     console.error("Failed to restore settings.", error);
   }
@@ -2184,14 +2325,16 @@ async function hydrateBackgroundAssets() {
 }
 
 function applyBackgrounds() {
+  state.settings.homeBackgroundColor = normalizePageBackgroundColor(state.settings.homeBackgroundColor);
+  state.settings.subjectsBackgroundColor = normalizePageBackgroundColor(state.settings.subjectsBackgroundColor);
   elements.homeView.style.backgroundImage = state.settings.homeBackground
     ? `url("${state.settings.homeBackground}")`
     : "";
   elements.subjectsView.style.backgroundImage = state.settings.subjectsBackground
     ? `url("${state.settings.subjectsBackground}")`
     : "";
-  elements.homeView.style.backgroundColor = state.settings.homeBackgroundColor || "#ffffff";
-  elements.subjectsView.style.backgroundColor = state.settings.subjectsBackgroundColor || "#ffffff";
+  elements.homeView.style.backgroundColor = state.settings.homeBackgroundColor;
+  elements.subjectsView.style.backgroundColor = state.settings.subjectsBackgroundColor;
   elements.homeView.style.backgroundRepeat = state.settings.homeBackground ? "repeat" : "no-repeat";
   elements.subjectsView.style.backgroundRepeat = state.settings.subjectsBackground ? "repeat" : "no-repeat";
   elements.homeView.style.backgroundSize = state.settings.homeBackground ? "auto" : "";
@@ -2204,8 +2347,8 @@ function applyBackgrounds() {
   }
   if (elements.backgroundColourInput) {
     const targetColor = elements.backgroundHomeCheckbox.checked
-      ? state.settings.homeBackgroundColor || "#ffffff"
-      : state.settings.subjectsBackgroundColor || "#ffffff";
+      ? state.settings.homeBackgroundColor
+      : state.settings.subjectsBackgroundColor;
     elements.backgroundColourInput.value = targetColor;
   }
 }
@@ -2220,7 +2363,7 @@ function renderAiConnectionState() {
 function openDashboard(nextView = "home") {
   elements.landingPanel.classList.add("hidden");
   elements.appShell.classList.remove("hidden");
-  elements.welcomeHeading.textContent = `Welcome back, ${state.studentName}`;
+  elements.welcomeHeading.textContent = "";
   hydrateSettingsView();
   state.currentView = nextView;
   render();
@@ -2334,6 +2477,13 @@ function getHomeDocumentProgress(bundle) {
   const totalPages = bundle.documents.length || 1;
   const reviewedPages = bundle.documents.filter((documentRecord) => documentRecord.reviewed).length;
   return reviewedPages / totalPages;
+}
+
+function isBundleListening(bundle) {
+  if (!bundle) {
+    return false;
+  }
+  return bundle.documents.some((documentRecord) => currentAudioContext === `document:${documentRecord.id}`);
 }
 
 function getHomeWatchEntries(limit = 2) {
@@ -2457,20 +2607,24 @@ function renderOverview() {
   const durationLabel = continueBundle
     ? `${Math.max(1, Math.ceil(String(continueBundle.content || "").split(/\s+/).filter(Boolean).length / 140))}:00 listen`
     : "Ready to listen";
+  const isContinueBundleListening = isBundleListening(continueBundle);
+  if (elements.homeListenCurrentButton) {
+    elements.homeListenCurrentButton.textContent = isContinueBundleListening ? "Stop listening" : "Listen from here";
+  }
   if (elements.homeCurrentDocVisual) {
     elements.homeCurrentDocVisual.innerHTML = continueBundle?.previewImageUrl
       ? `
-        <div class="home-continue-card__art home-continue-card__art--image">
+        <button type="button" class="home-continue-card__art home-continue-card__art--image" id="home-current-doc-visual-toggle">
           <img src="${escapeHtml(continueBundle.previewImageUrl)}" alt="${escapeHtml(continueBundle.title)} preview" />
-          <span class="home-continue-card__pause">❚❚</span>
+          <span class="home-continue-card__pause">${isContinueBundleListening ? "❚❚" : "▶"}</span>
           <span class="home-continue-card__time">${escapeHtml(durationLabel)}</span>
-        </div>
+        </button>
       `
       : `
-        <div class="home-continue-card__art">
-          <span class="home-continue-card__pause">❚❚</span>
+        <button type="button" class="home-continue-card__art" id="home-current-doc-visual-toggle">
+          <span class="home-continue-card__pause">${isContinueBundleListening ? "❚❚" : "▶"}</span>
           <span class="home-continue-card__time">${escapeHtml(durationLabel)}</span>
-        </div>
+        </button>
       `;
   }
 
@@ -2874,6 +3028,19 @@ function getSubjectShortCode(subjectName) {
   return `${words[0][0] || ""}${words[1][0] || ""}`.toUpperCase();
 }
 
+function getSubjectIconChoice(subjectId) {
+  const iconId = state.settings.subjectIcons?.[subjectId];
+  return pandaEmojiChoices.find((choice) => choice.id === iconId) || null;
+}
+
+function getSubjectTileCodeMarkup(subject) {
+  const iconChoice = getSubjectIconChoice(subject.id);
+  if (iconChoice) {
+    return `<img src="${escapeHtml(iconChoice.src)}" alt="${escapeHtml(`${subject.name} panda`)}" class="subject-tile__emoji" />`;
+  }
+  return escapeHtml(getSubjectShortCode(subject.name));
+}
+
 function getSubjectTabCounts(subject) {
   return {
     reader: getVisibleSubjectDocuments(subject).length,
@@ -3000,7 +3167,7 @@ function renderSubjectList() {
           class="subject-tile subject-tile--${palette[index % palette.length]}${subject.id === state.selectedSubjectId ? " subject-tile--active" : ""}"
           data-subject-id="${subject.id}"
         >
-          <span class="subject-tile__code">${escapeHtml(getSubjectShortCode(subject.name))}</span>
+          <span class="subject-tile__code">${getSubjectTileCodeMarkup(subject)}</span>
           <span class="subject-tile__title">${escapeHtml(subject.name)}</span>
           <span class="subject-tile__meta">
             <span>${escapeHtml(`${counts.reader} notes`)}</span>
@@ -3018,7 +3185,7 @@ function renderSubjectList() {
         class="subject-tile subject-tile--${palette[index % palette.length]}${subject.id === state.selectedSubjectId ? " subject-tile--active" : ""}"
         data-subject-id="${subject.id}"
       >
-        <span class="subject-tile__code">${escapeHtml(getSubjectShortCode(subject.name))}</span>
+        <span class="subject-tile__code">${getSubjectTileCodeMarkup(subject)}</span>
         <span class="subject-tile__title">${escapeHtml(subject.name)}</span>
       </button>
     `)
@@ -4163,43 +4330,9 @@ function buildHomeworkTaskSteps(homeworkBundle) {
 function buildAssessmentTaskStages(assessment, linkedDocumentBundles) {
   const workLength = String(assessment?.workNotes || "").trim().length;
   const linkedTitles = linkedDocumentBundles.slice(0, 2).map((bundle) => bundle.title);
-  const fallbackDefinitions = [
-    {
-      title: "Plan",
-      items: [
-        "Read teacher task description",
-        assessment.weighting ? `Note weighting and due date (${assessment.weighting})` : "Note weighting and due date"
-      ],
-      doneCount: workLength > 40 ? 2 : 1
-    },
-    {
-      title: "Research",
-      items: [
-        linkedTitles[0] ? `${linkedTitles[0]}` : "Open your lesson notes",
-        linkedTitles[1] ? `${linkedTitles[1]}` : "Pull out 3 strong facts or examples",
-        "List the syllabus points being covered"
-      ],
-      doneCount: linkedDocumentBundles.length ? (workLength > 120 ? 3 : 2) : 1
-    },
-    {
-      title: "Draft",
-      items: [
-        "Write an opening response or plan",
-        "Build the middle with evidence from your notes",
-        "Check key terms and polish your wording"
-      ],
-      doneCount: workLength > 320 ? 3 : workLength > 180 ? 2 : workLength > 90 ? 1 : 0
-    },
-    {
-      title: "Submit",
-      items: [
-        assessment.completed
-          ? `Assessment marked complete for ${formatAssessmentDueLabel(assessment.dueDate)}`
-          : `Sit the task on ${formatAssessmentDueLabel(assessment.dueDate)}`
-      ],
-      doneCount: assessment.completed ? 1 : 0
-    }
-  ];
+  const revisionEntry = state.revisionCatalogue.find((entry) => entry.subjectId === state.selectedSubjectId);
+  const topicHints = Array.isArray(revisionEntry?.topics) ? revisionEntry.topics.slice(0, 3) : [];
+  const fallbackDefinitions = buildSpecificAssessmentStages(assessment, linkedTitles, topicHints, workLength);
   const storedStages = Array.isArray(assessment.aiTaskStages)
     ? assessment.aiTaskStages.filter((stage) => stage?.title && Array.isArray(stage.items) && stage.items.length)
     : [];
@@ -4230,6 +4363,53 @@ function buildAssessmentTaskStages(assessment, linkedDocumentBundles) {
   });
 }
 
+function buildSpecificAssessmentStages(assessment, linkedTitles = [], topicHints = [], workLength = 0) {
+  const topicsLabel = topicHints.length
+    ? `Review these topics: ${topicHints.join(", ")}`
+    : `List the exact topics covered in ${assessment.componentTask || assessment.title}`;
+  const firstNote = linkedTitles[0] ? `Read ${linkedTitles[0]} and highlight the formulas or key points that match the task` : "Read the attached notes and mark the most important ideas";
+  const secondNote = linkedTitles[1] ? `Use ${linkedTitles[1]} for practice questions or worked examples` : "Complete 3 short practice questions that match the task";
+
+  return [
+    {
+      title: "Preparation",
+      items: [
+        `Read the task sheet for ${assessment.componentTask || assessment.title}`,
+        assessment.weighting ? `Note the weighting and due date (${assessment.weighting})` : "Note the due date and assessment conditions",
+        topicsLabel
+      ],
+      doneCount: workLength > 40 ? 2 : workLength > 10 ? 1 : 0
+    },
+    {
+      title: "Practice",
+      items: [
+        firstNote,
+        secondNote,
+        topicHints.length ? `Practise at least one question from: ${topicHints.slice(0, 3).join(", ")}` : "Write down the areas that still feel uncertain"
+      ],
+      doneCount: linkedTitles.length ? (workLength > 120 ? 2 : 1) : 0
+    },
+    {
+      title: "Test day",
+      items: [
+        "Pack the equipment you need and check the test conditions",
+        "Read every question carefully and underline the key instruction words",
+        "Start with the question you feel most confident answering"
+      ],
+      doneCount: assessment.completed ? 3 : 0
+    },
+    {
+      title: "Review",
+      items: [
+        assessment.completed
+          ? `Review the completed assessment from ${formatAssessmentDueLabel(assessment.dueDate)}`
+          : "After the task, check which questions were hardest and note what to revisit"
+      ],
+      doneCount: assessment.completed ? 1 : 0
+    }
+  ];
+}
+
 function parseChecklistLines(answer, { max = 4 } = {}) {
   return String(answer || "")
     .split(/\n+/)
@@ -4239,28 +4419,67 @@ function parseChecklistLines(answer, { max = 4 } = {}) {
 }
 
 function parseAssessmentStages(answer) {
-  const lines = String(answer || "")
-    .split(/\n+/)
-    .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "").trim())
-    .filter(Boolean)
-    .slice(0, 4);
-  return lines
-    .map((line, index) => {
-      const [titlePart, itemsPart] = line.includes(":") ? line.split(/:\s*/, 2) : [`Stage ${index + 1}`, line];
-      const items = String(itemsPart || "")
-        .split(/\s*;\s*/)
-        .map((item) => item.trim())
-        .filter(Boolean)
-        .slice(0, 4);
-      if (!items.length) {
-        return null;
+  const stageTitleFallbacks = ["Preparation", "Practice", "Test day", "Review"];
+  const text = String(answer || "").trim();
+  const jsonMatch = text.match(/\[[\s\S]*\]/);
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[0]);
+      const normalised = Array.isArray(parsed)
+        ? parsed
+            .map((stage, index) => ({
+              title: String(stage?.title || stageTitleFallbacks[index] || "").trim(),
+              items: Array.isArray(stage?.items)
+                ? stage.items.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 4)
+                : []
+            }))
+            .filter((stage) => stage.title && stage.items.length)
+        : [];
+      if (normalised.length) {
+        return normalised.slice(0, 4);
       }
-      return {
-        title: titlePart.trim() || `Stage ${index + 1}`,
-        items
-      };
-    })
-    .filter(Boolean);
+    } catch (error) {
+      console.warn("Assessment stages JSON parse failed.", error);
+    }
+  }
+
+  const cleaned = text.replace(/\*\*/g, "").trim();
+  const firstStageIndex = cleaned.search(/stage\s*1/i);
+  const stageOnlyText = firstStageIndex >= 0 ? cleaned.slice(firstStageIndex) : cleaned;
+  const stagePattern = /stage\s*(\d+)\s*:?\s*([A-Za-z ]+)?\s*:\s*([\s\S]*?)(?=(?:\n|\r|\s)stage\s*\d+\s*:|$)/gi;
+  const stages = [];
+  let match;
+
+  while ((match = stagePattern.exec(stageOnlyText)) !== null && stages.length < 4) {
+    const stageNumber = Number(match[1]);
+    const rawTitle = String(match[2] || "").trim();
+    const title = !rawTitle || /^stage\s*\d+$/i.test(rawTitle) ? stageTitleFallbacks[stageNumber - 1] || stageTitleFallbacks[stages.length] : rawTitle;
+    const body = String(match[3] || "")
+      .replace(/^[-:–\s]+/, "")
+      .trim();
+    const items = body
+      .split(/\s*(?:;|•|\n)\s*/)
+      .map((item) => item.replace(/\.$/, "").trim())
+      .filter(Boolean)
+      .slice(0, 4);
+    if (title && items.length) {
+      stages.push({ title, items });
+    }
+  }
+
+  return stages;
+}
+
+function hasUsableAssessmentStages(stages) {
+  return Array.isArray(stages) && stages.length === 4 && stages.every((stage) => {
+    if (!stage?.title || !Array.isArray(stage.items) || !stage.items.length) {
+      return false;
+    }
+    if (/^stage\s*\d+$/i.test(String(stage.title).trim())) {
+      return false;
+    }
+    return stage.items.every((item) => item && !/^sure\b/i.test(String(item).trim()));
+  });
 }
 
 function toggleHomeworkStep(bundleId, stepIndex) {
@@ -4311,32 +4530,44 @@ async function openRevisionTestFromTask(config) {
     return;
   }
   await loadRevisionCatalogue();
-  state.revisionSelectedSubjectId = subject.id;
-  state.revisionSelectedTopic = "";
-  state.revisionSubmission = null;
-  state.revisionViewMode = "draft";
-  state.activeSavedRevisionTestId = "";
-
+  const revisionEntry = state.revisionCatalogue.find((entry) => entry.subjectId === subject.id);
+  let noteBundles = [];
+  let textTitle = "";
+  let topic = "";
   if (config.taskKind === "assessment") {
     const assessment = subject.assessments.find((item) => item.id === config.taskId);
     if (!assessment) {
       return;
     }
-    state.revisionSelectedNoteIds = [...new Set(assessment.linkedDocumentIds || [])];
-    state.revisionTextTitle = assessment.componentTask || assessment.title || "";
+    noteBundles = getLinkedDocumentBundles(subject, assessment.linkedDocumentIds);
+    textTitle = assessment.componentTask || assessment.title || "";
+    topic = revisionEntry?.topics?.find((entry) =>
+      textTitle.toLowerCase().includes(String(entry).toLowerCase())
+    ) || revisionEntry?.topics?.[0] || textTitle;
   } else {
     const homeworkBundle = findHomeworkBundle(subject, config.taskId);
     if (!homeworkBundle) {
       return;
     }
-    const linkedIds = getBundleStoredLinkedDocumentIds(homeworkBundle);
-    const ownIds = homeworkBundle.documents.map((documentRecord) => documentRecord.id);
-    state.revisionSelectedNoteIds = [...new Set([...linkedIds, ...ownIds])];
-    state.revisionTextTitle = homeworkBundle.title || "";
+    const linkedIds = new Set([
+      ...getBundleStoredLinkedDocumentIds(homeworkBundle),
+      ...homeworkBundle.documents.map((documentRecord) => documentRecord.id)
+    ]);
+    noteBundles = getAllDocumentBundles(subject).filter((bundle) =>
+      bundle.documents.some((documentRecord) => linkedIds.has(documentRecord.id))
+    );
+    textTitle = homeworkBundle.title || "";
+    topic = revisionEntry?.topics?.find((entry) =>
+      textTitle.toLowerCase().includes(String(entry).toLowerCase())
+    ) || revisionEntry?.topics?.[0] || textTitle;
   }
 
-  renderRevisionPanel();
-  await handleCreateRevisionTest();
+  await generateRevisionTest({
+    subjectId: subject.id,
+    topic,
+    textTitle,
+    noteBundles
+  });
 }
 
 async function simplifyHomeworkBundle(homeworkBundle, subject) {
@@ -4368,11 +4599,19 @@ async function simplifyHomeworkBundle(homeworkBundle, subject) {
 
 async function simplifyAssessmentTask(assessment, subject) {
   const linkedDocumentBundles = getLinkedDocumentBundles(subject, assessment.linkedDocumentIds);
+  const revisionEntry = state.revisionCatalogue.find((entry) => entry.subjectId === subject.id);
+  const topicHints = Array.isArray(revisionEntry?.topics) ? revisionEntry.topics.slice(0, 6) : [];
   const prompt = [
-    "Break this assessment into exactly 4 stages.",
-    "Return exactly 4 lines using the format \"Stage title: item one; item two; item three\".",
+    "Break this assessment into exactly 4 named stages for a student checklist.",
+    "Use these exact stage titles in order: Preparation, Practice, Test day, Review.",
+    "Make the checklist items specific to the actual task and subject, not generic study advice.",
+    "If the task is a test or exam, include the actual topics to review by name where possible.",
+    "Return only valid JSON with this exact shape:",
+    '[{"title":"Preparation","items":["item 1","item 2","item 3"]},{"title":"Practice","items":["item 1","item 2","item 3"]},{"title":"Test day","items":["item 1","item 2"]},{"title":"Review","items":["item 1","item 2"]}]',
     `Assessment: ${assessment.componentTask || assessment.title}`,
+    `Subject: ${subject.name}`,
     `Due: ${formatAssessmentDueLabel(assessment.dueDate)}`,
+    topicHints.length ? `Likely topics: ${topicHints.join(", ")}` : "",
     clipText(assessment.description || "", 800),
     ...linkedDocumentBundles.slice(0, 2).map((bundle) => `${bundle.title}\n${clipText(bundle.content || "", 700)}`)
   ].filter(Boolean).join("\n\n");
@@ -4381,12 +4620,22 @@ async function simplifyAssessmentTask(assessment, subject) {
     assessment,
     linkedDocumentBundles
   }));
-  const nextStages = parseAssessmentStages(answer);
-  if (nextStages.length) {
-    assessment.aiTaskStages = nextStages;
-    persistSubjects();
-  }
-  state.taskAskResponse = answer;
+  const parsedStages = parseAssessmentStages(answer);
+  const nextStages = hasUsableAssessmentStages(parsedStages)
+    ? parsedStages
+    : buildSpecificAssessmentStages(
+        assessment,
+        linkedDocumentBundles.slice(0, 2).map((bundle) => bundle.title),
+        topicHints.slice(0, 4),
+        String(assessment?.workNotes || "").trim().length
+      );
+
+  assessment.aiTaskStages = nextStages;
+  assessment.stageState = [];
+  persistSubjects();
+  state.taskAskResponse = nextStages
+    .map((stage) => `${stage.title}: ${stage.items.join("; ")}`)
+    .join("\n");
   state.taskAskStatus = "";
   renderAssessments();
   renderTaskView();
@@ -6531,10 +6780,10 @@ function resetBackgroundColour() {
   }
 
   if (elements.backgroundHomeCheckbox.checked) {
-    state.settings.homeBackgroundColor = "#ffffff";
+    state.settings.homeBackgroundColor = defaultPageBackgroundColor;
   }
   if (elements.backgroundSubjectsCheckbox.checked) {
-    state.settings.subjectsBackgroundColor = "#ffffff";
+    state.settings.subjectsBackgroundColor = defaultPageBackgroundColor;
   }
 
   persistSettings();
@@ -6651,7 +6900,7 @@ function saveAccountSettings() {
   state.currentUserEmail = nextEmail;
   state.studentGrade = nextGrade;
   persistSession(nextEmail);
-  elements.welcomeHeading.textContent = `Welcome back, ${state.studentName}`;
+  elements.welcomeHeading.textContent = "";
   elements.settingsStatus.textContent = "Account saved.";
   state.generatedRevisionTest = null;
   state.revisionResponses = {};
@@ -6900,6 +7149,26 @@ elements.homeListenCurrentButton?.addEventListener("click", () => {
   if (!firstDocument) {
     return;
   }
+  if (currentAudioContext === `document:${firstDocument.id}`) {
+    stopListening();
+    render();
+    return;
+  }
+  state.selectedDocumentId = firstDocument.id;
+  state.askDocumentId = firstDocument.id;
+  speakDocument(firstDocument);
+});
+elements.homeCurrentDocVisual?.addEventListener("click", () => {
+  const bundle = getHomeContinueReadingBundle();
+  const firstDocument = bundle?.documents?.[0];
+  if (!firstDocument) {
+    return;
+  }
+  if (currentAudioContext === `document:${firstDocument.id}`) {
+    stopListening();
+    render();
+    return;
+  }
   state.selectedDocumentId = firstDocument.id;
   state.askDocumentId = firstDocument.id;
   speakDocument(firstDocument);
@@ -6964,6 +7233,7 @@ elements.closeEditAssessmentButton.addEventListener("click", closeEditAssessment
 elements.cancelEditAssessmentButton.addEventListener("click", closeEditAssessmentModal);
 elements.saveEditAssessmentButton.addEventListener("click", saveEditedAssessment);
 elements.saveAccountSettingsButton.addEventListener("click", saveAccountSettings);
+elements.saveSubjectIconsButton?.addEventListener("click", saveSubjectIconSettings);
 elements.savePasswordSettingsButton.addEventListener("click", savePasswordSettings);
 elements.closeTaskViewButton.addEventListener("click", () => {
   state.currentView = "subjects";

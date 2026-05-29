@@ -77,10 +77,10 @@
               <img src="/paperpanda-logo.svg" alt="PaperPanda panda" class="brand-lockup__logo brand-lockup__logo--small" />
               <div class="brand-lockup__copy">
                 <span class="brand-lockup__name brand-lockup__name--topbar">PaperPanda</span>
-                <span class="brand-lockup__tag">Student learning dashboard</span>
+                <span class="brand-lockup__tag" id="app-brand-tag"></span>
               </div>
             </div>
-            <h2 id="welcome-heading">Welcome back</h2>
+            <h2 id="welcome-heading"></h2>
           </div>
           <div class="topbar__actions">
             <button type="button" class="topbar-link-button" id="nav-home-button">Home</button>
@@ -106,12 +106,6 @@
           <div class="home-stage">
             <section class="home-stage__main">
               <section class="home-section">
-                <div class="section-heading section-heading--between">
-                  <div>
-                    <p class="eyebrow">Your subjects</p>
-                  </div>
-                  <span class="section-heading__aside">Manage</span>
-                </div>
                 <div class="home-subject-grid" id="home-subject-grid"></div>
               </section>
 
@@ -154,7 +148,6 @@
                 <div class="section-heading section-heading--between">
                   <div>
                     <p class="eyebrow">Customise</p>
-                    <h3>Customise</h3>
                   </div>
                   <button type="button" class="ghost-button ghost-button--small" id="enter-subjects-button">Open subjects</button>
                 </div>
@@ -175,7 +168,7 @@
                   <div class="home-customise-panel__fields">
                     <label class="upload-field">
                       <span class="upload-field__label">Background colour</span>
-                      <input type="color" id="background-colour-input" value="#ffffff" />
+                      <input type="color" id="background-colour-input" value="#fbf7f0" />
                     </label>
                     <label class="upload-field">
                       <span class="upload-field__label">Heading colour</span>
@@ -240,8 +233,8 @@
         </section>
 
         <section class="settings-view hidden" id="settings-view">
-          <section class="home-grid">
-            <section class="home-card">
+            <section class="home-grid">
+              <section class="home-card">
               <div class="section-heading">
                 <div>
                   <p class="eyebrow">Settings</p>
@@ -267,13 +260,26 @@
                   <option value="12">HSC / Year 12</option>
                 </select>
               </label>
-              <div class="upload-submit-row">
-                <button type="button" class="primary-button" id="save-account-settings-button">Save account</button>
-              </div>
-            </section>
+                <div class="upload-submit-row">
+                  <button type="button" class="primary-button" id="save-account-settings-button">Save account</button>
+                </div>
+              </section>
 
-            <section class="home-card">
-              <div class="section-heading">
+              <section class="home-card">
+                <div class="section-heading">
+                  <div>
+                    <p class="eyebrow">Customise</p>
+                    <h3>Subject pandas</h3>
+                  </div>
+                </div>
+                <div class="subject-icon-settings" id="settings-subject-icons"></div>
+                <div class="upload-submit-row">
+                  <button type="button" class="primary-button" id="save-subject-icons-button">Save subject pandas</button>
+                </div>
+              </section>
+
+              <section class="home-card">
+                <div class="section-heading">
                 <div>
                   <p class="eyebrow">Security</p>
                   <h3>Password</h3>
@@ -343,8 +349,7 @@
                     <section class="documents-card" id="documents-section">
                       <div class="section-heading section-heading--stacked">
                         <div>
-                          <p class="eyebrow">Resources</p>
-                          <h3>Documents</h3>
+                          <h3>Resources</h3>
                         </div>
                       </div>
                       <div class="documents-table-wrap">
