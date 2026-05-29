@@ -366,6 +366,10 @@ function normalizePageBackgroundColor(value) {
   return value;
 }
 
+function getWarmSurfaceColor() {
+  return normalizePageBackgroundColor(defaultPageBackgroundColor);
+}
+
 const legacyAssessmentTemplateKeysBySubject = Object.fromEntries(
   subjectSeed.map((subject) => [
     subject.id,
@@ -1375,7 +1379,11 @@ async function generateRevisionTest({
     }))
   });
 
-  state.generatedRevisionTest = payload?.test || null;
+  if (!payload?.test) {
+    throw new Error("Panda could not generate a practice test yet.");
+  }
+
+  state.generatedRevisionTest = payload.test;
   state.revisionResponses = {};
   state.revisionSubmission = null;
   state.revisionViewMode = "draft";
@@ -2327,21 +2335,31 @@ async function hydrateBackgroundAssets() {
 function applyBackgrounds() {
   state.settings.homeBackgroundColor = normalizePageBackgroundColor(state.settings.homeBackgroundColor);
   state.settings.subjectsBackgroundColor = normalizePageBackgroundColor(state.settings.subjectsBackgroundColor);
+  const homeSurfaceColor = state.settings.homeBackgroundColor || getWarmSurfaceColor();
+  const subjectsSurfaceColor = state.settings.subjectsBackgroundColor || getWarmSurfaceColor();
   elements.homeView.style.backgroundImage = state.settings.homeBackground
     ? `url("${state.settings.homeBackground}")`
     : "";
   elements.subjectsView.style.backgroundImage = state.settings.subjectsBackground
     ? `url("${state.settings.subjectsBackground}")`
     : "";
-  elements.homeView.style.backgroundColor = state.settings.homeBackgroundColor;
-  elements.subjectsView.style.backgroundColor = state.settings.subjectsBackgroundColor;
+  elements.homeView.style.backgroundColor = homeSurfaceColor;
+  elements.subjectsView.style.backgroundColor = subjectsSurfaceColor;
   elements.homeView.style.backgroundRepeat = state.settings.homeBackground ? "repeat" : "no-repeat";
   elements.subjectsView.style.backgroundRepeat = state.settings.subjectsBackground ? "repeat" : "no-repeat";
   elements.homeView.style.backgroundSize = state.settings.homeBackground ? "auto" : "";
   elements.subjectsView.style.backgroundSize = state.settings.subjectsBackground ? "auto" : "";
   elements.homeView.style.backgroundPosition = "top left";
   elements.subjectsView.style.backgroundPosition = "top left";
+  document.body.style.backgroundColor = homeSurfaceColor;
+  document.documentElement.style.backgroundColor = homeSurfaceColor;
+  document.querySelector(".page-shell")?.style.setProperty("background-color", homeSurfaceColor);
+  elements.appShell?.style.setProperty("background-color", state.currentView === "subjects" ? subjectsSurfaceColor : homeSurfaceColor);
+  elements.revisionView?.style.setProperty("background-color", subjectsSurfaceColor);
+  elements.taskView?.style.setProperty("background-color", "rgba(26, 23, 38, 0.42)");
   document.documentElement.style.setProperty("--custom-heading-color", state.settings.headingColor || "#111111");
+  document.documentElement.style.setProperty("--app-home-surface", homeSurfaceColor);
+  document.documentElement.style.setProperty("--app-subjects-surface", subjectsSurfaceColor);
   if (elements.headingColourInput) {
     elements.headingColourInput.value = state.settings.headingColor || "#111111";
   }
@@ -2690,6 +2708,8 @@ function renderOverview() {
 }
 
 function renderCurrentView() {
+  elements.appBrandTag.textContent = "";
+  elements.welcomeHeading.textContent = "";
   elements.appShell.classList.toggle("hidden", state.currentView === "task" || state.currentView === "revision");
   elements.homeView.classList.toggle("hidden", state.currentView !== "home");
   elements.settingsView.classList.toggle("hidden", state.currentView !== "settings");
@@ -3041,6 +3061,21 @@ function getSubjectTileCodeMarkup(subject) {
   return escapeHtml(getSubjectShortCode(subject.name));
 }
 
+function getSubjectTileOutlineColor(subject, paletteIndex) {
+  if (subject.id === "maths" || subject.id === "wellbeing") {
+    return "#1B1825";
+  }
+
+  return {
+    dark: "#1B1825",
+    lilac: "#DAD0FA",
+    peach: "#F9D8BE",
+    yellow: "#FFE79E",
+    sky: "#C8E2F6",
+    mint: "#CDEEDB"
+  }[["dark", "lilac", "peach", "yellow", "sky", "mint"][paletteIndex % 6]] || "#DAD0FA";
+}
+
 function getSubjectTabCounts(subject) {
   return {
     reader: getVisibleSubjectDocuments(subject).length,
@@ -3166,6 +3201,7 @@ function renderSubjectList() {
           type="button"
           class="subject-tile subject-tile--${palette[index % palette.length]}${subject.id === state.selectedSubjectId ? " subject-tile--active" : ""}"
           data-subject-id="${subject.id}"
+          style="--subject-outline:${escapeHtml(getSubjectTileOutlineColor(subject, index))}"
         >
           <span class="subject-tile__code">${getSubjectTileCodeMarkup(subject)}</span>
           <span class="subject-tile__title">${escapeHtml(subject.name)}</span>
@@ -3182,8 +3218,9 @@ function renderSubjectList() {
     .map((subject, index) => `
       <button
         type="button"
-        class="subject-tile subject-tile--${palette[index % palette.length]}${subject.id === state.selectedSubjectId ? " subject-tile--active" : ""}"
+        class="subject-tile subject-tile--${palette[index % palette.length]}${subject.id === state.selectedSubjectId ? " subject-tile--active subject-tile--row-active" : ""}"
         data-subject-id="${subject.id}"
+        style="--subject-outline:${escapeHtml(getSubjectTileOutlineColor(subject, index))}"
       >
         <span class="subject-tile__code">${getSubjectTileCodeMarkup(subject)}</span>
         <span class="subject-tile__title">${escapeHtml(subject.name)}</span>
@@ -4418,6 +4455,14 @@ function parseChecklistLines(answer, { max = 4 } = {}) {
     .slice(0, max);
 }
 
+function splitAssessmentStageItems(value) {
+  return String(value || "")
+    .split(/\s*(?:;|•|\n|(?:\.\s+(?=[A-Z]))|(?:,\s+(?=(?:review|read|practi|use|list|solve|complete|check|bring|arrive|underline|pack|mark|revise|write|gather|create)\b)))/i)
+    .map((item) => item.replace(/^[\s:–-]+|[.]+$/g, "").trim())
+    .filter(Boolean)
+    .slice(0, 4);
+}
+
 function parseAssessmentStages(answer) {
   const stageTitleFallbacks = ["Preparation", "Practice", "Test day", "Review"];
   const text = String(answer || "").trim();
@@ -4443,25 +4488,27 @@ function parseAssessmentStages(answer) {
     }
   }
 
-  const cleaned = text.replace(/\*\*/g, "").trim();
-  const firstStageIndex = cleaned.search(/stage\s*1/i);
+  const cleaned = text
+    .replace(/\*\*/g, "")
+    .replace(/^sure!?\s*/i, "")
+    .trim();
+  const firstStageIndex = cleaned.search(/stage\s*1\s*:/i);
   const stageOnlyText = firstStageIndex >= 0 ? cleaned.slice(firstStageIndex) : cleaned;
-  const stagePattern = /stage\s*(\d+)\s*:?\s*([A-Za-z ]+)?\s*:\s*([\s\S]*?)(?=(?:\n|\r|\s)stage\s*\d+\s*:|$)/gi;
+  const stagePattern = /stage\s*(\d+)\s*:\s*([A-Za-z][A-Za-z ]+?)\s*:\s*([\s\S]*?)(?=(?:\s*stage\s*\d+\s*:)|$)/gi;
   const stages = [];
   let match;
 
   while ((match = stagePattern.exec(stageOnlyText)) !== null && stages.length < 4) {
     const stageNumber = Number(match[1]);
-    const rawTitle = String(match[2] || "").trim();
-    const title = !rawTitle || /^stage\s*\d+$/i.test(rawTitle) ? stageTitleFallbacks[stageNumber - 1] || stageTitleFallbacks[stages.length] : rawTitle;
+    const rawTitle = String(match[2] || "").replace(/[*:]+/g, "").trim();
+    const title = !rawTitle || /^stage\s*\d+$/i.test(rawTitle)
+      ? stageTitleFallbacks[stageNumber - 1] || stageTitleFallbacks[stages.length]
+      : rawTitle;
     const body = String(match[3] || "")
       .replace(/^[-:–\s]+/, "")
+      .replace(/\*\*/g, "")
       .trim();
-    const items = body
-      .split(/\s*(?:;|•|\n)\s*/)
-      .map((item) => item.replace(/\.$/, "").trim())
-      .filter(Boolean)
-      .slice(0, 4);
+    const items = splitAssessmentStageItems(body);
     if (title && items.length) {
       stages.push({ title, items });
     }
@@ -4620,7 +4667,8 @@ async function simplifyAssessmentTask(assessment, subject) {
     assessment,
     linkedDocumentBundles
   }));
-  const parsedStages = parseAssessmentStages(answer);
+  const trimmedAnswer = String(answer || "").trim();
+  const parsedStages = trimmedAnswer.startsWith("[") ? parseAssessmentStages(trimmedAnswer) : [];
   const nextStages = hasUsableAssessmentStages(parsedStages)
     ? parsedStages
     : buildSpecificAssessmentStages(
@@ -4628,7 +4676,7 @@ async function simplifyAssessmentTask(assessment, subject) {
         linkedDocumentBundles.slice(0, 2).map((bundle) => bundle.title),
         topicHints.slice(0, 4),
         String(assessment?.workNotes || "").trim().length
-      );
+      ).map((stage) => ({ title: stage.title, items: stage.items }));
 
   assessment.aiTaskStages = nextStages;
   assessment.stageState = [];
@@ -4864,7 +4912,7 @@ function renderTaskView() {
     const isReadingTask = currentAudioContext === `task:assessment:${assessment.id}`;
     const pandaVisualMarkup = `
       <div class="task-panda-visual" aria-hidden="true">
-        <img src="/paperpanda-panda.png" alt="" class="task-panda-visual__avatar" />
+        <img src="/paperpanda-logo.svg" alt="" class="task-panda-visual__avatar" />
         <div class="task-panda-visual__wave">
           <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
         </div>
@@ -5010,7 +5058,7 @@ function renderTaskView() {
     const isReadingTask = currentAudioContext === `task:homework:${homeworkBundle.id}`;
     const pandaVisualMarkup = `
       <div class="task-panda-visual" aria-hidden="true">
-        <img src="/paperpanda-panda.png" alt="" class="task-panda-visual__avatar" />
+        <img src="/paperpanda-logo.svg" alt="" class="task-panda-visual__avatar" />
         <div class="task-panda-visual__wave">
           <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
         </div>
