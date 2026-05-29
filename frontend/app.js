@@ -2151,6 +2151,10 @@ async function putPreviewRecord(documentId, previewImageUrl) {
   });
 }
 
+function createPagePreviewRecordId(documentId, pageNumber) {
+  return `${documentId}::page-${Number(pageNumber || 0)}`;
+}
+
 async function getPreviewRecord(documentId) {
   const database = await openPreviewDatabase();
   if (!database) {
@@ -2165,7 +2169,7 @@ async function getPreviewRecord(documentId) {
   });
 }
 
-async function deletePreviewRecords(documentIds) {
+async function deletePreviewRecords(documentIds, documentRecords = []) {
   const database = await openPreviewDatabase();
   if (!database || !documentIds.length) {
     return;
@@ -2178,18 +2182,39 @@ async function deletePreviewRecords(documentIds) {
     const store = transaction.objectStore(previewStoreName);
     documentIds.forEach((documentId) => {
       store.delete(documentId);
+      documentRecords
+        .filter((documentRecord) => documentRecord.id === documentId)
+        .forEach((documentRecord) => {
+          (documentRecord.pages || []).forEach((page) => {
+            if (page?.pageNumber) {
+              store.delete(createPagePreviewRecordId(documentId, page.pageNumber));
+            }
+          });
+      });
     });
   });
 }
 
 function syncPreviewPersistence() {
   const previewEntries = state.subjects.flatMap((subject) =>
-    (subject.documents || [])
-      .filter((documentRecord) => documentRecord.previewImageUrl)
-      .map((documentRecord) => ({
-        id: documentRecord.id,
-        previewImageUrl: documentRecord.previewImageUrl
-      }))
+    (subject.documents || []).flatMap((documentRecord) => {
+      const entries = [];
+      if (documentRecord.previewImageUrl) {
+        entries.push({
+          id: documentRecord.id,
+          previewImageUrl: documentRecord.previewImageUrl
+        });
+      }
+      (documentRecord.pages || []).forEach((page) => {
+        if (page?.imageUrl) {
+          entries.push({
+            id: createPagePreviewRecordId(documentRecord.id, page.pageNumber),
+            previewImageUrl: page.imageUrl
+          });
+        }
+      });
+      return entries;
+    })
   );
 
   if (!previewEntries.length) {
@@ -2202,22 +2227,38 @@ function syncPreviewPersistence() {
 }
 
 async function hydratePreviewImages() {
-  const documentsMissingPreview = state.subjects.flatMap((subject) =>
-    (subject.documents || []).filter((documentRecord) => !documentRecord.previewImageUrl)
+  const documentsNeedingPreviewHydration = state.subjects.flatMap((subject) =>
+    (subject.documents || []).filter(
+      (documentRecord) =>
+        !documentRecord.previewImageUrl ||
+        (documentRecord.pages || []).some((page) => !page?.imageUrl)
+    )
   );
 
-  if (!documentsMissingPreview.length) {
+  if (!documentsNeedingPreviewHydration.length) {
     return;
   }
 
   let hydratedAnyPreview = false;
 
-  for (const documentRecord of documentsMissingPreview) {
+  for (const documentRecord of documentsNeedingPreviewHydration) {
     try {
-      const previewRecord = await getPreviewRecord(documentRecord.id);
-      if (previewRecord?.previewImageUrl) {
-        documentRecord.previewImageUrl = previewRecord.previewImageUrl;
-        hydratedAnyPreview = true;
+      if (!documentRecord.previewImageUrl) {
+        const previewRecord = await getPreviewRecord(documentRecord.id);
+        if (previewRecord?.previewImageUrl) {
+          documentRecord.previewImageUrl = previewRecord.previewImageUrl;
+          hydratedAnyPreview = true;
+        }
+      }
+      for (const page of documentRecord.pages || []) {
+        if (page?.imageUrl || !page?.pageNumber) {
+          continue;
+        }
+        const pagePreviewRecord = await getPreviewRecord(createPagePreviewRecordId(documentRecord.id, page.pageNumber));
+        if (pagePreviewRecord?.previewImageUrl) {
+          page.imageUrl = pagePreviewRecord.previewImageUrl;
+          hydratedAnyPreview = true;
+        }
       }
     } catch (error) {
       console.error(`Preview image failed to load for ${documentRecord.id}.`, error);
@@ -4076,6 +4117,24 @@ function renderReader() {
       </div>
     `
     : "";
+  const pagePreviewStackMarkup =
+    isWholeStudyDocument(selectedDocument) && Array.isArray(selectedDocument.pages)
+      ? selectedDocument.pages
+          .filter((page) => page?.imageUrl)
+          .map(
+            (page, index) => `
+              <figure class="reader-preview reader-preview--page">
+                <img class="reader-preview-image" src="${escapeHtml(page.imageUrl)}" alt="${escapeHtml(`${selectedDocument.title} page ${page.pageNumber || index + 1}`)} preview" />
+                ${
+                  selectedDocument.pages.length > 1
+                    ? `<figcaption class="reader-preview-caption">Page ${escapeHtml(String(page.pageNumber || index + 1))}</figcaption>`
+                    : ""
+                }
+              </figure>
+            `
+          )
+          .join("")
+      : "";
   const reviewToggleMarkup = `
     <div class="reader-controls-row">
       <label class="document-review-toggle document-review-toggle--reader">
@@ -4218,7 +4277,7 @@ function renderReader() {
         <button type="button" class="ghost-button ghost-button--small" id="reader-resume-button" ${!sections.length ? "disabled" : ""}>Resume</button>
         <button type="button" class="ghost-button ghost-button--small" id="reader-complete-section-button" ${!currentSection ? "disabled" : ""}>${currentSection && completedIds.has(currentSection.id) ? "Undo section" : "Complete section"}</button>
       </div>
-      ${previewImageMarkup}
+      <div class="reader-preview-stack">${pagePreviewStackMarkup || previewImageMarkup}</div>
       <div class="reader-section-strip">${sectionButtonsMarkup || `<span class="helper-text">${selectedDocument.studyPlanStatus === "loading" ? "Breaking this document into sections..." : "Preparing study sections..."}</span>`}</div>
       ${
         currentSection
@@ -4490,6 +4549,7 @@ function deleteDocuments(documentIds) {
   if (!subject || !uniqueDocumentIds.length) {
     return;
   }
+  const documentRecordsToDelete = subject.documents.filter((documentRecord) => uniqueDocumentIds.includes(documentRecord.id));
 
   if (uniqueDocumentIds.includes(state.listeningDocumentId)) {
     stopListening();
@@ -4509,7 +4569,7 @@ function deleteDocuments(documentIds) {
   }
   syncAutoWatchForSubject(subject);
   persistSubjects();
-  deletePreviewRecords(uniqueDocumentIds).catch((error) => {
+  deletePreviewRecords(uniqueDocumentIds, documentRecordsToDelete).catch((error) => {
     console.error("Preview images could not be removed.", error);
   });
   render();

@@ -2835,6 +2835,16 @@ input[type="date"] {
   margin-top: 6px;
 }
 
+.reader-preview-stack {
+  display: grid;
+  gap: 18px;
+  margin: 8px 0 18px;
+}
+
+.reader-preview--page {
+  margin: 0;
+}
+
 .reader-content {
   padding-top: 8px;
 }
@@ -2885,6 +2895,14 @@ input[type="date"] {
   display: grid;
   gap: 10px;
   line-height: 1.75;
+}
+
+.reader-preview-caption {
+  margin-top: 10px;
+  font-size: 0.85rem;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .reader-text-segment {
