@@ -89,6 +89,61 @@ function cleanRevisionNotes(notes) {
     .filter((note) => note.title || note.content);
 }
 
+function cleanDocumentStudyText(value) {
+  return String(value || "")
+    .replace(/\u0000/g, "")
+    .replace(/\s+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+    .slice(0, 28000);
+}
+
+function normaliseStudySections(sections) {
+  if (!Array.isArray(sections)) {
+    return [];
+  }
+
+  return sections
+    .map((section, index) => ({
+      id: String(section?.id || `section-${index + 1}`).trim(),
+      title: String(section?.title || `Section ${index + 1}`).trim(),
+      summary: String(section?.summary || "").trim(),
+      sectionText: String(section?.sectionText || "").trim(),
+      importantTerms: Array.isArray(section?.importantTerms)
+        ? section.importantTerms.map((term) => String(term || "").trim()).filter(Boolean).slice(0, 10)
+        : []
+    }))
+    .filter((section) => section.sectionText);
+}
+
+function normaliseStudyQuiz(quiz) {
+  const questions = Array.isArray(quiz?.questions)
+    ? quiz.questions
+        .map((question, index) => ({
+          id: String(question?.id || `quiz-${index + 1}`).trim(),
+          prompt: String(question?.prompt || "").trim(),
+          options: Array.isArray(question?.options)
+            ? question.options.map((option) => String(option || "").trim()).filter(Boolean).slice(0, 4)
+            : [],
+          correctOption: String(question?.correctOption || "").trim(),
+          explanation: String(question?.explanation || "").trim()
+        }))
+        .filter(
+          (question) =>
+            question.prompt &&
+            question.options.length === 4 &&
+            question.correctOption &&
+            question.options.includes(question.correctOption)
+        )
+    : [];
+
+  return {
+    title: String(quiz?.title || "Quick check").trim(),
+    passingScore: Math.max(1, Math.min(questions.length, Number(quiz?.passingScore || 3) || 3)),
+    questions
+  };
+}
+
 async function callOpenAiJson(endpoint, payload) {
   requireOpenAiKey();
   const response = await fetch(`https://api.openai.com/v1/${endpoint}`, {
@@ -523,6 +578,125 @@ app.post("/api/speak", async (request, response) => {
   } catch (error) {
     response.status(500).json({
       error: error instanceof Error ? error.message : "Speech generation failed."
+    });
+  }
+});
+
+app.post("/api/document/study-plan", async (request, response) => {
+  try {
+    const subjectName = String(request.body?.subjectName || "").trim();
+    const title = String(request.body?.title || "").trim();
+    const type = String(request.body?.type || "").trim();
+    const pageCount = Number(request.body?.pageCount || 0);
+    const content = cleanDocumentStudyText(request.body?.content);
+
+    if (!subjectName || !title || !content) {
+      response.status(400).json({ error: "subjectName, title, and content are required." });
+      return;
+    }
+
+    const responsePayload = await callOpenAiJson("responses", {
+      model: "gpt-4o-mini",
+      input: [
+        {
+          role: "system",
+          content: [
+            {
+              type: "input_text",
+              text:
+                "You are organising a school study document for a student. Return only JSON. Break the document into sequential study sections. Make the section titles useful and specific. Preserve subject detail. For maths or science, name the actual concepts or topics covered. For humanities or English, name the actual themes, source skills, or content focus. Also create a short end-of-document quiz. Do not use markdown in the JSON."
+            }
+          ]
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: JSON.stringify(
+                {
+                  document: {
+                    subjectName,
+                    title,
+                    type,
+                    pageCount,
+                    content
+                  },
+                  outputSchema: {
+                    overview: "string",
+                    importantTerms: ["string"],
+                    sections: [
+                      {
+                        id: "string",
+                        title: "string",
+                        summary: "string",
+                        sectionText: "string",
+                        importantTerms: ["string"]
+                      }
+                    ],
+                    quiz: {
+                      title: "string",
+                      passingScore: "number",
+                      questions: [
+                        {
+                          id: "string",
+                          prompt: "string",
+                          options: ["string", "string", "string", "string"],
+                          correctOption: "string",
+                          explanation: "string"
+                        }
+                      ]
+                    }
+                  },
+                  rules: [
+                    "Create between 3 and 7 sections.",
+                    "Keep sections in the same order as the document.",
+                    "Make sectionText concise enough to study from, but specific enough to preserve the key teaching points.",
+                    "The quiz must have exactly 4 multiple-choice questions.",
+                    "Set passingScore to 3 unless the document is extremely short."
+                  ]
+                },
+                null,
+                2
+              )
+            }
+          ]
+        }
+      ],
+      text: {
+        format: {
+          type: "json_object"
+        }
+      },
+      max_output_tokens: 5000
+    });
+
+    const parsed = extractResponseJson(responsePayload);
+    const sections = normaliseStudySections(parsed?.sections);
+    const quiz = normaliseStudyQuiz(parsed?.quiz);
+    const importantTerms = Array.isArray(parsed?.importantTerms)
+      ? parsed.importantTerms.map((term) => String(term || "").trim()).filter(Boolean).slice(0, 24)
+      : [];
+
+    if (!sections.length) {
+      response.status(500).json({ error: "The study plan did not contain any usable sections." });
+      return;
+    }
+
+    if (quiz.questions.length !== 4) {
+      response.status(500).json({ error: "The study plan did not contain a usable document quiz." });
+      return;
+    }
+
+    response.json({
+      overview: String(parsed?.overview || "").trim(),
+      importantTerms,
+      sections,
+      quiz
+    });
+  } catch (error) {
+    response.status(500).json({
+      error: error instanceof Error ? error.message : "Document study plan generation failed."
     });
   }
 });

@@ -27,6 +27,7 @@ let currentAudioContext = "";
 let currentSpeechRecognition = null;
 const defaultGrade = "7";
 const defaultPageBackgroundColor = "#FBF7F0";
+const documentQuizPassPoints = 10;
 const pandaEmojiChoices = [
   { id: "angry", label: "Angry", src: "/panda-emojis/panda-angry-256.png" },
   { id: "confused", label: "Confused", src: "/panda-emojis/panda-confused-256.png" },
@@ -412,6 +413,8 @@ const state = {
   selectedSubjectId: subjectSeed[0].id,
   activeSubjectTab: "reader",
   selectedDocumentId: null,
+  activeReaderSegmentIndex: -1,
+  activeReaderSectionId: "",
   askDocumentId: null,
   listeningDocumentId: null,
   selectedDocumentIds: [],
@@ -822,6 +825,75 @@ function removeLegacySeededDocuments(subjects) {
   }));
 }
 
+function mergeLegacyGroupedDocuments(subjects) {
+  return subjects.map((subject) => {
+    const documents = Array.isArray(subject.documents) ? subject.documents : [];
+    const grouped = new Map();
+
+    documents.forEach((documentRecord) => {
+      const groupId = documentRecord.uploadGroupId || documentRecord.id;
+      if (!grouped.has(groupId)) {
+        grouped.set(groupId, []);
+      }
+      grouped.get(groupId).push(documentRecord);
+    });
+
+    const mergedDocuments = [...grouped.values()].map((groupDocuments) => {
+      if (
+        groupDocuments.length === 1 &&
+        (!groupDocuments[0].uploadGroupId || !Number(groupDocuments[0].pageNumber || 0))
+      ) {
+        return groupDocuments[0];
+      }
+
+      const bundle = buildDocumentBundle(groupDocuments);
+      const primaryDocument = bundle?.documents?.[0];
+      if (!bundle || !primaryDocument) {
+        return groupDocuments[0];
+      }
+
+      const mergedRecord = normaliseDocument({
+        ...primaryDocument,
+        id: primaryDocument.uploadGroupId || primaryDocument.id,
+        title: bundle.title,
+        content: bundle.content,
+        pages: bundle.documents.map((documentItem) => ({
+          pageNumber: Number(documentItem.pageNumber || 0),
+          text: String(documentItem.content || "").trim(),
+          imageUrl: documentItem.previewImageUrl || null
+        })),
+        previewImageUrl: bundle.previewImageUrl || primaryDocument.previewImageUrl || null,
+        uploadGroupId: null,
+        pageNumber: null
+      });
+
+      return mergedRecord;
+    });
+
+    const mergedIdMap = new Map();
+    mergedDocuments.forEach((documentRecord) => {
+      if (Array.isArray(documentRecord.pages) && documentRecord.pages.length) {
+        grouped.get(documentRecord.id)?.forEach((legacyPageRecord) => {
+          mergedIdMap.set(legacyPageRecord.id, documentRecord.id);
+        });
+      } else {
+        mergedIdMap.set(documentRecord.id, documentRecord.id);
+      }
+    });
+
+    return {
+      ...subject,
+      documents: mergedDocuments,
+      assessments: (subject.assessments || []).map((assessment) => ({
+        ...assessment,
+        linkedDocumentIds: Array.isArray(assessment.linkedDocumentIds)
+          ? [...new Set(assessment.linkedDocumentIds.map((documentId) => mergedIdMap.get(documentId) || documentId))]
+          : []
+      }))
+    };
+  });
+}
+
 function getSelectedSubject() {
   return state.subjects.find((subject) => subject.id === state.selectedSubjectId);
 }
@@ -837,6 +909,137 @@ function getVisibleSubjectDocuments(subject) {
 function getSelectedDocument() {
   const subject = getSelectedSubject();
   return getVisibleSubjectDocuments(subject || { documents: [] }).find((doc) => doc.id === state.selectedDocumentId) || null;
+}
+
+function isWholeStudyDocument(documentRecord) {
+  return Boolean(
+    documentRecord &&
+      !documentRecord.flags?.homework &&
+      !documentRecord.flags?.watch &&
+      (Array.isArray(documentRecord.pages) || documentRecord.flags?.classNotes || documentRecord.flags?.assessment || documentRecord.type)
+  );
+}
+
+function getDocumentSections(documentRecord) {
+  const storedSections = Array.isArray(documentRecord?.studySections)
+    ? documentRecord.studySections.map(normaliseStudySection).filter((section) => section.sectionText)
+    : [];
+  if (storedSections.length) {
+    return storedSections;
+  }
+  return buildFallbackStudyPlan(documentRecord).sections;
+}
+
+function getDocumentProgressRatio(documentRecord) {
+  const sections = getDocumentSections(documentRecord);
+  if (!sections.length) {
+    return documentRecord?.reviewed ? 1 : 0;
+  }
+  const completedIds = new Set(Array.isArray(documentRecord?.completedSectionIds) ? documentRecord.completedSectionIds : []);
+  return sections.filter((section) => completedIds.has(section.id)).length / sections.length;
+}
+
+function getCurrentDocumentSectionIndex(documentRecord) {
+  const sections = getDocumentSections(documentRecord);
+  if (!sections.length) {
+    return 0;
+  }
+  return Math.max(0, Math.min(sections.length - 1, Number(documentRecord?.currentSectionIndex || 0) || 0));
+}
+
+function getSelectedDocumentSection(documentRecord) {
+  const sections = getDocumentSections(documentRecord);
+  return sections[getCurrentDocumentSectionIndex(documentRecord)] || null;
+}
+
+function getResumeDocumentSectionIndex(documentRecord) {
+  const sections = getDocumentSections(documentRecord);
+  const completedIds = new Set(Array.isArray(documentRecord?.completedSectionIds) ? documentRecord.completedSectionIds : []);
+  const firstIncompleteIndex = sections.findIndex((section) => !completedIds.has(section.id));
+  return firstIncompleteIndex === -1 ? getCurrentDocumentSectionIndex(documentRecord) : firstIncompleteIndex;
+}
+
+function setCurrentDocumentSection(documentRecord, nextIndex) {
+  const sections = getDocumentSections(documentRecord);
+  if (!sections.length) {
+    return;
+  }
+  documentRecord.currentSectionIndex = Math.max(0, Math.min(sections.length - 1, Number(nextIndex || 0) || 0));
+  persistSubjects();
+}
+
+function markDocumentSectionComplete(documentRecord, sectionId, completed = true) {
+  const nextIds = new Set(Array.isArray(documentRecord.completedSectionIds) ? documentRecord.completedSectionIds : []);
+  if (completed) {
+    nextIds.add(sectionId);
+  } else {
+    nextIds.delete(sectionId);
+  }
+  documentRecord.completedSectionIds = [...nextIds];
+  documentRecord.reviewed = getDocumentProgressRatio(documentRecord) >= 1;
+  persistSubjects();
+}
+
+async function ensureDocumentStudyPlan(documentRecord, subject, { force = false } = {}) {
+  if (!documentRecord || !subject || !isWholeStudyDocument(documentRecord)) {
+    return;
+  }
+  if (!force && documentRecord.studyPlanStatus === "ready" && getDocumentSections(documentRecord).length && documentRecord.endQuiz) {
+    return;
+  }
+  if (documentRecord.studyPlanStatus === "loading") {
+    return;
+  }
+
+  documentRecord.studyPlanStatus = "loading";
+  renderReader();
+
+  try {
+    const payload = await requestDocumentStudyPlan(documentRecord, subject);
+    documentRecord.studyOverview = String(payload?.overview || "").trim();
+    documentRecord.importantTerms = Array.isArray(payload?.importantTerms)
+      ? payload.importantTerms.map((term) => String(term || "").trim()).filter(Boolean)
+      : [];
+    documentRecord.studySections = Array.isArray(payload?.sections)
+      ? payload.sections.map(normaliseStudySection).filter((section) => section.sectionText)
+      : [];
+    documentRecord.endQuiz = normaliseStudyQuiz(payload?.quiz);
+    documentRecord.studyPlanStatus = documentRecord.studySections.length && documentRecord.endQuiz ? "ready" : "error";
+    if (!documentRecord.studySections.length || !documentRecord.endQuiz) {
+      const fallbackPlan = buildFallbackStudyPlan(documentRecord);
+      documentRecord.studyOverview = fallbackPlan.overview;
+      documentRecord.importantTerms = fallbackPlan.importantTerms;
+      documentRecord.studySections = fallbackPlan.sections;
+      documentRecord.endQuiz = fallbackPlan.quiz;
+      documentRecord.studyPlanStatus = "fallback";
+    }
+  } catch (error) {
+    console.error("Document study plan failed.", error);
+    const fallbackPlan = buildFallbackStudyPlan(documentRecord);
+    documentRecord.studyOverview = fallbackPlan.overview;
+    documentRecord.importantTerms = fallbackPlan.importantTerms;
+    documentRecord.studySections = fallbackPlan.sections;
+    documentRecord.endQuiz = fallbackPlan.quiz;
+    documentRecord.studyPlanStatus = "fallback";
+  }
+
+  persistSubjects();
+  renderReader();
+  renderOverview();
+}
+
+function awardDocumentQuizPointsIfNeeded(documentRecord) {
+  if (!documentRecord?.quizSubmission?.passed || documentRecord.pointsAwarded || !state.currentUserEmail) {
+    return;
+  }
+  const accounts = loadAccounts();
+  const accountIndex = accounts.findIndex((account) => normaliseAccountKey(account.email) === normaliseAccountKey(state.currentUserEmail));
+  if (accountIndex === -1) {
+    return;
+  }
+  accounts[accountIndex].points = Math.max(0, Number(accounts[accountIndex].points || 0) || 0) + documentQuizPassPoints;
+  saveAccounts(accounts);
+  documentRecord.pointsAwarded = true;
 }
 
 function getAskDocument() {
@@ -985,6 +1188,14 @@ function getBundlePrimaryDocument(bundle) {
   return bundle?.documents?.[0] || null;
 }
 
+function getBundlePageCount(bundle) {
+  const primaryDocument = getBundlePrimaryDocument(bundle);
+  if (Array.isArray(primaryDocument?.pages) && primaryDocument.pages.length) {
+    return primaryDocument.pages.length;
+  }
+  return bundle?.documents?.length || 0;
+}
+
 function getBundleWorkNotes(bundle) {
   return String(getBundlePrimaryDocument(bundle)?.workNotes || "");
 }
@@ -1055,6 +1266,12 @@ function setDocumentReviewedState(subject, documentIds, reviewed) {
     }
     documentRecord.reviewed = Boolean(reviewed);
     documentRecord.reviewMode = reviewed ? "manual" : "";
+    if (isWholeStudyDocument(documentRecord)) {
+      const sections = getDocumentSections(documentRecord);
+      if (reviewed) {
+        documentRecord.completedSectionIds = sections.map((section) => section.id);
+      }
+    }
   });
   persistSubjects();
 }
@@ -1715,12 +1932,13 @@ function loadAccounts() {
   try {
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed)
-      ? parsed.map((account) => ({
+        ? parsed.map((account) => ({
           ...account,
           name: String(account?.name || "").trim(),
           email: normaliseAccountKey(account?.email),
           password: String(account?.password || ""),
-          grade: normaliseGrade(account?.grade)
+          grade: normaliseGrade(account?.grade),
+          points: Math.max(0, Number(account?.points || 0) || 0)
         })).filter((account) => account.email)
       : [];
   } catch (error) {
@@ -1738,7 +1956,8 @@ function saveAccounts(accounts) {
         name: String(account?.name || "").trim(),
         email: normaliseAccountKey(account?.email),
         password: String(account?.password || ""),
-        grade: normaliseGrade(account?.grade)
+        grade: normaliseGrade(account?.grade),
+        points: Math.max(0, Number(account?.points || 0) || 0)
       }))
     )
   );
@@ -2013,6 +2232,12 @@ async function hydratePreviewImages() {
 function createPersistableDocument(documentRecord) {
   return {
     ...documentRecord,
+    pages: Array.isArray(documentRecord.pages)
+      ? documentRecord.pages.map((page) => ({
+          pageNumber: Number(page?.pageNumber || 0),
+          text: String(page?.text || "").trim()
+        }))
+      : [],
     previewImageUrl: null,
     originalFile: documentRecord.originalFile
       ? {
@@ -2035,6 +2260,29 @@ function createQuotaFallbackDocument(documentRecord) {
     workNotes: typeof documentRecord.workNotes === "string" ? documentRecord.workNotes.slice(0, 4000) : "",
     flags: { ...(documentRecord.flags || {}) },
     pageNumber: documentRecord.pageNumber || null,
+    pages: Array.isArray(documentRecord.pages)
+      ? documentRecord.pages.slice(0, 10).map((page) => ({
+          pageNumber: Number(page?.pageNumber || 0),
+          text: String(page?.text || "").slice(0, 1200)
+        }))
+      : [],
+    studyOverview: String(documentRecord.studyOverview || "").slice(0, 1200),
+    studyPlanStatus: documentRecord.studyPlanStatus || "idle",
+    studySections: Array.isArray(documentRecord.studySections)
+      ? documentRecord.studySections.slice(0, 8).map((section, index) => ({
+          id: String(section?.id || `section-${index + 1}`),
+          title: String(section?.title || "").slice(0, 120),
+          summary: String(section?.summary || "").slice(0, 400),
+          sectionText: String(section?.sectionText || "").slice(0, 2000),
+          importantTerms: Array.isArray(section?.importantTerms) ? section.importantTerms.slice(0, 8) : []
+        }))
+      : [],
+    completedSectionIds: Array.isArray(documentRecord.completedSectionIds) ? documentRecord.completedSectionIds.slice(0, 20) : [],
+    currentSectionIndex: Number(documentRecord.currentSectionIndex || 0),
+    importantTerms: Array.isArray(documentRecord.importantTerms) ? documentRecord.importantTerms.slice(0, 20) : [],
+    endQuiz: documentRecord.endQuiz || null,
+    quizSubmission: documentRecord.quizSubmission || null,
+    pointsAwarded: Boolean(documentRecord.pointsAwarded),
     originalFile: null,
     previewImageUrl: null
   };
@@ -2164,6 +2412,38 @@ function normaliseDocument(documentRecord) {
     workNotes: documentRecord.workNotes || "",
     reviewed: Boolean(documentRecord.reviewed),
     reviewMode: documentRecord.reviewMode || "",
+    pages: Array.isArray(documentRecord.pages)
+      ? documentRecord.pages.map((page) => ({
+          pageNumber: Number(page?.pageNumber || 0),
+          text: String(page?.text || "").trim(),
+          imageUrl: page?.imageUrl || null
+        }))
+      : [],
+    studyOverview: String(documentRecord.studyOverview || "").trim(),
+    studyPlanStatus: String(documentRecord.studyPlanStatus || "idle"),
+    studySections: Array.isArray(documentRecord.studySections)
+      ? documentRecord.studySections.map(normaliseStudySection).filter((section) => section.sectionText)
+      : [],
+    completedSectionIds: Array.isArray(documentRecord.completedSectionIds)
+      ? documentRecord.completedSectionIds.map((sectionId) => String(sectionId || "")).filter(Boolean)
+      : [],
+    currentSectionIndex: Math.max(0, Number(documentRecord.currentSectionIndex || 0) || 0),
+    importantTerms: Array.isArray(documentRecord.importantTerms)
+      ? documentRecord.importantTerms.map((term) => String(term || "").trim()).filter(Boolean)
+      : [],
+    endQuiz: normaliseStudyQuiz(documentRecord.endQuiz),
+    quizSubmission: documentRecord.quizSubmission && typeof documentRecord.quizSubmission === "object"
+      ? {
+          answers: documentRecord.quizSubmission.answers && typeof documentRecord.quizSubmission.answers === "object"
+            ? documentRecord.quizSubmission.answers
+            : {},
+          score: Number(documentRecord.quizSubmission.score || 0) || 0,
+          total: Number(documentRecord.quizSubmission.total || 0) || 0,
+          passed: Boolean(documentRecord.quizSubmission.passed),
+          completedAt: documentRecord.quizSubmission.completedAt || ""
+        }
+      : null,
+    pointsAwarded: Boolean(documentRecord.pointsAwarded),
     flags: {
       classNotes: Boolean(documentRecord.flags?.classNotes || documentRecord.flags?.termOverview),
       assessment: Boolean(documentRecord.flags?.assessment),
@@ -2186,8 +2466,10 @@ function restoreSubjectsForAccount(account) {
   const storedSubjectsMap = loadStoredSubjectsMap();
   const storedSubjects = storedSubjectsMap[accountKey];
   if (Array.isArray(storedSubjects)) {
-    state.subjects = removeLegacySeededDocuments(
-      removeLegacySeededAssessments(storedSubjects.map(hydrateStoredSubject))
+    state.subjects = mergeLegacyGroupedDocuments(
+      removeLegacySeededDocuments(
+        removeLegacySeededAssessments(storedSubjects.map(hydrateStoredSubject))
+      )
     );
     storedSubjectsMap[accountKey] = createPersistableSubjects(state.subjects);
     saveStoredSubjectsMap(storedSubjectsMap);
@@ -2492,6 +2774,10 @@ function getHomeDocumentProgress(bundle) {
   if (!bundle) {
     return 0;
   }
+  const primaryDocument = getBundlePrimaryDocument(bundle);
+  if (primaryDocument && isWholeStudyDocument(primaryDocument)) {
+    return getDocumentProgressRatio(primaryDocument);
+  }
   const totalPages = bundle.documents.length || 1;
   const reviewedPages = bundle.documents.filter((documentRecord) => documentRecord.reviewed).length;
   return reviewedPages / totalPages;
@@ -2534,7 +2820,7 @@ function buildHomeHomeworkCardMarkup({ subject, bundle }, index) {
   const dueTag = progressRatio >= 1 ? "Done" : index === 0 ? "2 days" : index === 1 ? "Fri" : "Tue";
   const chips = [
     bundle.documents[0]?.type || "Class notes",
-    bundle.documents.length > 1 ? `${bundle.documents.length} pages` : bundle.documents[0]?.pageNumber ? "1 page" : bundle.documents[0]?.type || "Note",
+    getBundlePageCount(bundle) > 1 ? `${getBundlePageCount(bundle)} pages` : bundle.documents[0]?.pageNumber ? "1 page" : bundle.documents[0]?.type || "Note",
     getBundleWorkNotes(bundle) ? "Writing started" : "Needs a draft"
   ];
 
@@ -2615,7 +2901,7 @@ function renderOverview() {
   }
   if (elements.homeCurrentDocMeta) {
     elements.homeCurrentDocMeta.textContent = continueBundle
-      ? `${getSelectedSubject()?.name || "Subject"} · ${continueBundle.type || "Class notes"} · ${continueBundle.documents.length} ${continueBundle.documents.length === 1 ? "page" : "pages"}`
+      ? `${getSelectedSubject()?.name || "Subject"} · ${continueBundle.type || "Class notes"} · ${getBundlePageCount(continueBundle)} ${getBundlePageCount(continueBundle) === 1 ? "page" : "pages"}`
       : "Upload class notes and they will appear here.";
   }
   setProgressBar(elements.homeCurrentDocProgress, continueProgress);
@@ -2772,6 +3058,38 @@ function splitSpeechTextIntoChunks(text, maxLength = 1100) {
   return chunks;
 }
 
+function buildReaderSpeechSegments(sectionText) {
+  const chunks = splitSpeechTextIntoChunks(normaliseSpeechText(sectionText), 320);
+  return chunks.length ? chunks : [normaliseSpeechText(sectionText)].filter(Boolean);
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function highlightImportantTerms(htmlText, terms = []) {
+  return terms.reduce((markup, term) => {
+    const safeTerm = String(term || "").trim();
+    if (!safeTerm) {
+      return markup;
+    }
+    const regex = new RegExp(`\\b(${escapeRegExp(safeTerm)})\\b`, "gi");
+    return markup.replace(regex, `<mark class="reader-important-term">$1</mark>`);
+  }, htmlText);
+}
+
+function buildReaderTextMarkup(sectionText, importantTerms = []) {
+  const segments = buildReaderSpeechSegments(sectionText);
+  return segments
+    .map((segment, index) => {
+      const active = state.activeReaderSegmentIndex === index;
+      const escapedSegment = escapeHtml(segment).replaceAll("\n", "<br />");
+      const highlighted = highlightImportantTerms(escapedSegment, importantTerms);
+      return `<span class="reader-text-segment${active ? " is-active" : ""}" data-reader-segment="${index}">${highlighted}</span>`;
+    })
+    .join(" ");
+}
+
 async function requestApiGet(endpoint) {
   const response = await fetch(`${API_BASE_URL}${endpoint}`);
   if (!response.ok) {
@@ -2843,6 +3161,16 @@ async function requestApiFormData(endpoint, formData) {
   }
 
   return parsedPayload || {};
+}
+
+async function requestDocumentStudyPlan(documentRecord, subject) {
+  return requestApi("/api/document/study-plan", {
+    subjectName: subject.name,
+    title: documentRecord.title,
+    type: documentRecord.type,
+    pageCount: Array.isArray(documentRecord.pages) ? documentRecord.pages.length : 0,
+    content: clipText(documentRecord.content || "", 28000)
+  });
 }
 
 async function requestAskAnswer(question, subject, document) {
@@ -2962,7 +3290,7 @@ function startAskMicrophone() {
   recognition.start();
 }
 
-async function speakTextWithOpenAi(text, { context = "document", documentId = null, statusMessages = {} } = {}) {
+async function speakTextWithOpenAi(text, { context = "document", documentId = null, statusMessages = {}, onChunkStart = null, onFinished = null, chunksOverride = null } = {}) {
   stopListening();
   const textToRead = normaliseSpeechText(text);
   if (!textToRead) {
@@ -2971,14 +3299,16 @@ async function speakTextWithOpenAi(text, { context = "document", documentId = nu
 
   const listenSessionId = Date.now();
   currentListenSessionId = listenSessionId;
-  currentAudioContext = context;
+  currentAudioContext = context === "document" && documentId ? `document:${documentId}` : context;
   state.listeningDocumentId = context === "document" ? documentId : null;
   state.askResponseSpeaking = context === "ask";
   renderDocuments();
   renderAskVoiceControls();
   elements.askResponse.textContent = statusMessages.preparing || "Preparing audio...";
 
-  const chunks = splitSpeechTextIntoChunks(clipText(textToRead, 3500), 1100);
+  const chunks = Array.isArray(chunksOverride) && chunksOverride.length
+    ? chunksOverride.map((chunk) => normaliseSpeechText(chunk)).filter(Boolean)
+    : splitSpeechTextIntoChunks(clipText(textToRead, 3500), 1100);
   if (!chunks.length) {
     throw new Error("There is no readable text available yet.");
   }
@@ -2986,6 +3316,10 @@ async function speakTextWithOpenAi(text, { context = "document", documentId = nu
   for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
     if (currentListenSessionId !== listenSessionId) {
       return;
+    }
+
+    if (typeof onChunkStart === "function") {
+      onChunkStart(chunks[chunkIndex], chunkIndex);
     }
 
     const speechBlob = await requestApi("/api/speak", { text: chunks[chunkIndex] }, true);
@@ -3016,6 +3350,9 @@ async function speakTextWithOpenAi(text, { context = "document", documentId = nu
     });
   }
 
+  if (typeof onFinished === "function") {
+    onFinished();
+  }
   stopListening();
   renderDocuments();
 }
@@ -3094,11 +3431,15 @@ function getSubjectHeroCopy(subject, tab) {
   const activeAssessments = (subject.assessments || []).filter((assessment) => !assessment.completed);
 
   if (tab === "reader") {
-    const pageCount = selectedDocument?.uploadGroupId
-      ? subject.documents.filter((documentRecord) => documentRecord.uploadGroupId === selectedDocument.uploadGroupId).length
-      : selectedDocument?.pageNumber
-        ? 1
-        : visibleDocuments.length;
+    const pageCount = selectedDocument
+      ? Array.isArray(selectedDocument.pages) && selectedDocument.pages.length
+        ? selectedDocument.pages.length
+        : selectedDocument?.uploadGroupId
+          ? subject.documents.filter((documentRecord) => documentRecord.uploadGroupId === selectedDocument.uploadGroupId).length
+          : selectedDocument?.pageNumber
+            ? 1
+            : 1
+      : visibleDocuments.length;
     return {
       big: `${pageCount || visibleDocuments.length || 0} ${pageCount === 1 ? "page" : "pages"}`,
       rest: selectedDocument ? `to finish in ${selectedDocument.title}.` : "ready to read in this subject."
@@ -3397,7 +3738,7 @@ function renderDocumentGroupRows(group, { reviewedSection = false } = {}) {
     ? `
       <button type="button" class="documents-date-button" data-document-group-toggle="${group.id}">
         <strong>${escapeHtml(group.added)}</strong>
-        <span>${isExpanded ? "Hide pages" : `${group.documents.length} pages`}</span>
+        <span>${isExpanded ? "Hide pages" : `${getBundlePageCount(group)} pages`}</span>
       </button>
     `
     : `<span class="documents-date-button"><strong>${escapeHtml(group.added)}</strong></span>`;
@@ -3717,6 +4058,7 @@ function renderReader() {
   }
 
   elements.readerTitle.textContent = selectedDocument.title;
+  const subject = getSelectedSubject();
   const readableContent = selectedDocument.content
     ? selectedDocument.content
     : "This file has been uploaded, but preview text is not available yet. The document can still be attached to assessments.";
@@ -3786,6 +4128,201 @@ function renderReader() {
     return;
   }
 
+  if (isWholeStudyDocument(selectedDocument)) {
+    if (selectedDocument.studyPlanStatus === "idle" && subject) {
+      void ensureDocumentStudyPlan(selectedDocument, subject);
+    }
+
+    const sections = getDocumentSections(selectedDocument);
+    const currentSectionIndex = getCurrentDocumentSectionIndex(selectedDocument);
+    const currentSection = sections[currentSectionIndex] || null;
+    const completedIds = new Set(Array.isArray(selectedDocument.completedSectionIds) ? selectedDocument.completedSectionIds : []);
+    const allSectionsComplete = Boolean(sections.length) && sections.every((section) => completedIds.has(section.id));
+    const importantTerms = [...new Set([...(selectedDocument.importantTerms || []), ...(currentSection?.importantTerms || [])])];
+    const quiz = normaliseStudyQuiz(selectedDocument.endQuiz);
+    const quizAnswers = selectedDocument.quizSubmission?.answers && typeof selectedDocument.quizSubmission.answers === "object"
+      ? selectedDocument.quizSubmission.answers
+      : {};
+    const progressRatio = getDocumentProgressRatio(selectedDocument);
+    const sectionButtonsMarkup = sections
+      .map(
+        (section, index) => `
+          <button
+            type="button"
+            class="document-chip${index === currentSectionIndex ? " document-chip--active" : ""}${completedIds.has(section.id) ? " document-chip--done" : ""}"
+            data-reader-section-index="${index}"
+          >
+            ${escapeHtml(section.title)}
+          </button>
+        `
+      )
+      .join("");
+    const quizMarkup =
+      allSectionsComplete && quiz
+        ? `
+          <section class="reader-quiz-card">
+            <div class="section-heading section-heading--stacked section-heading--compact">
+              <div>
+                <p class="eyebrow">End quiz</p>
+                <h3>${escapeHtml(quiz.title || "Quick check")}</h3>
+              </div>
+            </div>
+            <p class="helper-text">Pass ${quiz.passingScore}/${quiz.questions.length} to earn ${documentQuizPassPoints} points.</p>
+            <div class="reader-quiz-list">
+              ${quiz.questions
+                .map(
+                  (question, questionIndex) => `
+                    <article class="reader-quiz-question">
+                      <strong>${escapeHtml(`Q${questionIndex + 1}. ${question.prompt}`)}</strong>
+                      <div class="reader-quiz-options">
+                        ${question.options
+                          .map(
+                            (option) => `
+                              <label class="revision-option">
+                                <input type="radio" name="document-quiz-${question.id}" value="${escapeHtml(option)}" data-document-quiz-id="${question.id}" ${quizAnswers[question.id] === option ? "checked" : ""} />
+                                <span>${escapeHtml(option)}</span>
+                              </label>
+                            `
+                          )
+                          .join("")}
+                      </div>
+                      ${
+                        selectedDocument.quizSubmission
+                          ? `<p class="helper-text helper-text--tiny">${escapeHtml(question.explanation || "")}</p>`
+                          : ""
+                      }
+                    </article>
+                  `
+                )
+                .join("")}
+            </div>
+            <div class="reader-actions">
+              <button type="button" class="primary-button" id="submit-document-quiz-button">Submit quiz</button>
+            </div>
+            ${
+              selectedDocument.quizSubmission
+                ? `<div class="upload-status">Score: ${selectedDocument.quizSubmission.score}/${selectedDocument.quizSubmission.total} · ${selectedDocument.quizSubmission.passed ? `Passed and earned ${documentQuizPassPoints} points.` : "Not passed yet. Review the sections and try again."}</div>`
+                : ""
+            }
+          </section>
+        `
+        : "";
+
+    elements.readerContent.innerHTML = `
+      ${reviewToggleMarkup}
+      <div class="reader-document-progress">
+        <div class="progress-meter progress-meter--wide">
+          <span class="progress-meter__bar" style="width:${Math.round(progressRatio * 100)}%"></span>
+        </div>
+        <span class="helper-text">${sections.length ? `${completedIds.size} of ${sections.length} sections completed` : "Preparing sections..."}</span>
+        <button type="button" class="ghost-button ghost-button--small" id="reader-resume-button" ${!sections.length ? "disabled" : ""}>Resume</button>
+        <button type="button" class="ghost-button ghost-button--small" id="reader-complete-section-button" ${!currentSection ? "disabled" : ""}>${currentSection && completedIds.has(currentSection.id) ? "Undo section" : "Complete section"}</button>
+      </div>
+      ${previewImageMarkup}
+      <div class="reader-section-strip">${sectionButtonsMarkup || `<span class="helper-text">${selectedDocument.studyPlanStatus === "loading" ? "Breaking this document into sections..." : "Preparing study sections..."}</span>`}</div>
+      ${
+        currentSection
+          ? `
+            <section class="reader-study-card">
+              <div class="section-heading section-heading--stacked section-heading--compact">
+                <div>
+                  <p class="eyebrow">Current section</p>
+                  <h3>${escapeHtml(currentSection.title)}</h3>
+                </div>
+              </div>
+              ${currentSection.summary ? `<p class="helper-text">${escapeHtml(currentSection.summary)}</p>` : ""}
+              <div class="reader-content__text reader-content__text--study">${buildReaderTextMarkup(currentSection.sectionText, importantTerms)}</div>
+            </section>
+          `
+          : `<div class="empty-state">PaperPanda is organising this document into study sections.</div>`
+      }
+      ${quizMarkup}
+      ${openOriginalMarkup}
+    `;
+
+    document.getElementById("reader-reviewed-toggle")?.addEventListener("change", (event) => {
+      if (!subject) {
+        return;
+      }
+      setDocumentReviewedState(subject, [selectedDocument.id], event.target.checked);
+      renderDocuments();
+      renderReader();
+      renderOverview();
+    });
+    document.getElementById("reader-resume-button")?.addEventListener("click", () => {
+      setCurrentDocumentSection(selectedDocument, getResumeDocumentSectionIndex(selectedDocument));
+      renderReader();
+    });
+    document.getElementById("reader-complete-section-button")?.addEventListener("click", () => {
+      if (!currentSection) {
+        return;
+      }
+      markDocumentSectionComplete(selectedDocument, currentSection.id, !completedIds.has(currentSection.id));
+      renderReader();
+      renderDocuments();
+      renderOverview();
+    });
+    elements.readerContent.querySelectorAll("[data-reader-section-index]").forEach((button) => {
+      button.addEventListener("click", () => {
+        setCurrentDocumentSection(selectedDocument, Number(button.dataset.readerSectionIndex || 0));
+        renderReader();
+      });
+    });
+    elements.readerContent.querySelectorAll("[data-document-quiz-id]").forEach((input) => {
+      input.addEventListener("change", () => {
+        const questionId = input.dataset.documentQuizId;
+        if (!questionId) {
+          return;
+        }
+        selectedDocument.quizSubmission = {
+          ...(selectedDocument.quizSubmission || {}),
+          answers: {
+            ...(selectedDocument.quizSubmission?.answers || {}),
+            [questionId]: input.value
+          }
+        };
+        persistSubjects();
+      });
+    });
+    document.getElementById("submit-document-quiz-button")?.addEventListener("click", () => {
+      if (!quiz) {
+        return;
+      }
+      const answers = {
+        ...(selectedDocument.quizSubmission?.answers || {})
+      };
+      let score = 0;
+      quiz.questions.forEach((question) => {
+        if (answers[question.id] === question.correctOption) {
+          score += 1;
+        }
+      });
+      selectedDocument.quizSubmission = {
+        answers,
+        score,
+        total: quiz.questions.length,
+        passed: score >= quiz.passingScore,
+        completedAt: new Date().toISOString()
+      };
+      selectedDocument.reviewed = selectedDocument.quizSubmission.passed || selectedDocument.reviewed;
+      if (selectedDocument.quizSubmission.passed) {
+        awardDocumentQuizPointsIfNeeded(selectedDocument);
+      }
+      persistSubjects();
+      renderReader();
+      renderDocuments();
+      renderOverview();
+    });
+    const openOriginalButton = document.getElementById("open-original-button");
+    if (openOriginalButton && selectedDocument.originalFile?.objectUrl) {
+      openOriginalButton.addEventListener("click", () => {
+        window.open(selectedDocument.originalFile.objectUrl, "_blank", "noopener");
+      });
+    }
+    attachReaderActionHandlers();
+    return;
+  }
+
   elements.readerContent.innerHTML = `
     ${reviewToggleMarkup}
     ${previewImageMarkup}
@@ -3793,7 +4330,6 @@ function renderReader() {
     ${openOriginalMarkup}
   `;
   document.getElementById("reader-reviewed-toggle")?.addEventListener("change", (event) => {
-    const subject = getSelectedSubject();
     if (!subject) {
       return;
     }
@@ -3812,13 +4348,17 @@ function renderReader() {
 }
 
 function speakDocument(document) {
+  const selectedSection = isWholeStudyDocument(document) ? getSelectedDocumentSection(document) : null;
+  const sectionText = selectedSection?.sectionText || "";
   const textToRead = normaliseSpeechText(
-    document.content || `${document.title}. Preview text is not available for this file yet.`
+    sectionText || document.content || `${document.title}. Preview text is not available for this file yet.`
   );
   if (!textToRead) {
     elements.askResponse.textContent = "There is no readable text available for this document yet.";
     return;
   }
+
+  const readerSegments = selectedSection ? buildReaderSpeechSegments(selectedSection.sectionText) : [];
 
   speakTextWithOpenAi(textToRead, {
     context: "document",
@@ -3827,6 +4367,23 @@ function speakDocument(document) {
       preparing: "Preparing audio...",
       playing: "Reading document...",
       error: "AI voice playback failed for this document."
+    },
+    chunksOverride: readerSegments.length ? readerSegments : null,
+    onChunkStart: (_chunk, chunkIndex) => {
+      if (selectedSection) {
+        state.activeReaderSectionId = selectedSection.id;
+        state.activeReaderSegmentIndex = Math.min(chunkIndex, Math.max(0, readerSegments.length - 1));
+        renderReader();
+      }
+    },
+    onFinished: () => {
+      if (selectedSection) {
+        state.activeReaderSegmentIndex = -1;
+        state.activeReaderSectionId = "";
+        markDocumentSectionComplete(document, selectedSection.id, true);
+        renderReader();
+        renderOverview();
+      }
     }
   }).catch((error) => {
     console.error("OpenAI speech failed.", error);
@@ -3893,6 +4450,10 @@ function stopListening() {
   }
   if (state.askResponseSpeaking) {
     state.askResponseSpeaking = false;
+  }
+  if (state.activeReaderSegmentIndex !== -1 || state.activeReaderSectionId) {
+    state.activeReaderSegmentIndex = -1;
+    state.activeReaderSectionId = "";
   }
   currentAudioContext = "";
   renderAskVoiceControls();
@@ -4084,7 +4645,7 @@ function renderAttachNotesModal() {
                 <span>${escapeHtml(group.title)}</span>
               </label>
               <div class="attach-notes-page__meta">
-                ${escapeHtml(group.type)} · ${group.documents.length} ${group.documents.length === 1 ? "page" : "pages"} · Added ${escapeHtml(group.added)}
+                ${escapeHtml(group.type)} · ${getBundlePageCount(group)} ${getBundlePageCount(group) === 1 ? "page" : "pages"} · Added ${escapeHtml(group.added)}
               </div>
             </div>
           </article>
@@ -5000,7 +5561,7 @@ function renderTaskView() {
                               <span class="task-note-row__icon">📕</span>
                               <span class="task-note-row__copy">
                                 <strong>${escapeHtml(documentBundle.title)}</strong>
-                                <span>${escapeHtml(`${documentBundle.documents.length} ${documentBundle.documents.length === 1 ? "page" : "pages"}`)}</span>
+                                <span>${escapeHtml(`${getBundlePageCount(documentBundle)} ${getBundlePageCount(documentBundle) === 1 ? "page" : "pages"}`)}</span>
                               </span>
                               <span class="task-note-row__chevron">›</span>
                             </button>
@@ -5808,6 +6369,16 @@ function createDocumentRecord({ title, type, content }) {
     previewImageUrl: null,
     reviewed: false,
     reviewMode: "",
+    pages: [],
+    studyOverview: "",
+    studyPlanStatus: "idle",
+    studySections: [],
+    completedSectionIds: [],
+    currentSectionIndex: 0,
+    importantTerms: [],
+    endQuiz: null,
+    quizSubmission: null,
+    pointsAwarded: false,
     flags: {
       classNotes: false,
       assessment: false,
@@ -5816,8 +6387,162 @@ function createDocumentRecord({ title, type, content }) {
   };
 }
 
+function normaliseStudySection(section, index) {
+  return {
+    id: String(section?.id || `section-${index + 1}`).trim(),
+    title: String(section?.title || `Section ${index + 1}`).trim(),
+    summary: String(section?.summary || "").trim(),
+    sectionText: String(section?.sectionText || "").trim(),
+    importantTerms: Array.isArray(section?.importantTerms)
+      ? section.importantTerms.map((term) => String(term || "").trim()).filter(Boolean)
+      : []
+  };
+}
+
+function normaliseStudyQuiz(quiz) {
+  if (!quiz || typeof quiz !== "object") {
+    return null;
+  }
+
+  const questions = Array.isArray(quiz.questions)
+    ? quiz.questions
+        .map((question, index) => ({
+          id: String(question?.id || `quiz-${index + 1}`).trim(),
+          prompt: String(question?.prompt || "").trim(),
+          options: Array.isArray(question?.options)
+            ? question.options.map((option) => String(option || "").trim()).filter(Boolean).slice(0, 4)
+            : [],
+          correctOption: String(question?.correctOption || "").trim(),
+          explanation: String(question?.explanation || "").trim()
+        }))
+        .filter(
+          (question) =>
+            question.prompt &&
+            question.options.length === 4 &&
+            question.correctOption &&
+            question.options.includes(question.correctOption)
+        )
+    : [];
+
+  if (!questions.length) {
+    return null;
+  }
+
+  return {
+    title: String(quiz.title || "Quick check").trim(),
+    passingScore: Math.max(1, Math.min(questions.length, Number(quiz.passingScore || 3) || 3)),
+    questions
+  };
+}
+
+function buildFallbackStudyPlan(documentRecord) {
+  const sourceText = String(documentRecord.content || "").trim();
+  const pages = Array.isArray(documentRecord.pages) ? documentRecord.pages : [];
+  const rawSections = pages.length
+    ? pages.map((page) => ({
+        title: `Page ${page.pageNumber}`,
+        sectionText: String(page.text || "").replace(/^Page\s+\d+\s*/i, "").trim()
+      }))
+    : [{ title: "Overview", sectionText: sourceText }];
+
+  const usableSections = rawSections
+    .map((section, index) => normaliseStudySection({
+      id: `section-${index + 1}`,
+      title: section.title,
+      summary: "",
+      sectionText: section.sectionText || sourceText,
+      importantTerms: extractImportantTermsFromText(section.sectionText || sourceText).slice(0, 8)
+    }, index))
+    .filter((section) => section.sectionText);
+
+  const sections = usableSections.length
+    ? usableSections
+    : [normaliseStudySection({
+        id: "section-1",
+        title: "Overview",
+        summary: "",
+        sectionText: sourceText || "No readable text is available for this document yet.",
+        importantTerms: []
+      }, 0)];
+
+  const quizTerms = extractImportantTermsFromText(sourceText).slice(0, 4);
+  const quiz = normaliseStudyQuiz({
+    title: `${documentRecord.title} quick check`,
+    passingScore: Math.min(3, Math.max(1, quizTerms.length || 3)),
+    questions: (quizTerms.length ? quizTerms : ["main idea", "key example", "important term", "summary"]).slice(0, 4).map((term, index) => ({
+      id: `quiz-${index + 1}`,
+      prompt: `Which option best matches this document term or focus: ${term}?`,
+      options: [
+        `The part about ${term}`,
+        "An unrelated example",
+        "A random detail",
+        "Something not in the document"
+      ],
+      correctOption: `The part about ${term}`,
+      explanation: `Look back for the section that explains ${term}.`
+    }))
+  });
+
+  return {
+    overview: "",
+    importantTerms: extractImportantTermsFromText(sourceText).slice(0, 20),
+    sections,
+    quiz
+  };
+}
+
+function createWholeStudyDocumentRecord(fileName, flags, originalFile, extracted = {}) {
+  const sanitizedName = fileName.replace(/\.[^.]+$/, "");
+  const pages = Array.isArray(extracted?.pages)
+    ? extracted.pages.map((page) => ({
+        pageNumber: Number(page?.pageNumber || 0),
+        text: String(page?.text || "").trim(),
+        imageUrl: page?.imageUrl || null
+      }))
+    : [];
+  const firstPagePreview = pages.find((page) => page.imageUrl)?.imageUrl || null;
+  const fullText = String(extracted?.fullText || "").trim();
+  const record = createDocumentWithFlags(
+    {
+      title: sanitizedName,
+      type: flags.classNotes ? "Class Notes" : flags.assessment ? "Assessment" : flags.homework ? "Homework" : "Document",
+      content: fullText || "No readable text was detected in this document."
+    },
+    flags
+  );
+  record.originalFile = originalFile;
+  record.previewImageUrl = firstPagePreview;
+  record.pages = pages;
+  return record;
+}
+
 function normaliseWhitespace(value) {
   return value.replace(/\u0000/g, "").replace(/\s+/g, " ").trim();
+}
+
+function extractImportantTermsFromText(value, limit = 12) {
+  const stopWords = new Set([
+    "the", "and", "that", "with", "from", "this", "have", "into", "your", "about", "these", "those",
+    "their", "there", "which", "while", "will", "were", "been", "when", "where", "what", "because",
+    "should", "would", "could", "them", "they", "then", "than", "each", "also", "using", "used",
+    "after", "before", "under", "over", "more", "most", "some", "such", "just", "very", "much",
+    "into", "onto", "page", "pages", "term", "week"
+  ]);
+  const counts = new Map();
+  String(value || "")
+    .toLowerCase()
+    .match(/[a-z][a-z0-9-]{3,}/g)
+    ?.forEach((term) => {
+      if (stopWords.has(term)) {
+        return;
+      }
+      counts.set(term, (counts.get(term) || 0) + 1);
+    });
+
+  return [...counts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .slice(0, limit)
+    .map(([term]) => term);
 }
 
 function xmlToText(xmlText, tagNames) {
@@ -6207,16 +6932,12 @@ async function readUploadedDocument(file, flags) {
 
   if (file.type.startsWith("text/") || /\.(txt|md|csv)$/i.test(lowerName)) {
     const text = await file.text();
-    const records = flags.classNotes
-      ? splitClassNotesByDate(file.name, text, flags, originalFile)
-      : [createDocumentWithFlags({
-            title: file.name.replace(/\.[^.]+$/, ""),
-            type: flags.homework ? "Homework" : flags.assessment ? "Assessment" : "Document",
-            content: text.trim()
-          }, flags)];
-    records.forEach((record) => {
-      record.originalFile = originalFile;
-    });
+    const records = [
+      createWholeStudyDocumentRecord(file.name, flags, originalFile, {
+        fullText: text.trim(),
+        pages: []
+      })
+    ];
     return {
       records
     };
@@ -6224,9 +6945,7 @@ async function readUploadedDocument(file, flags) {
 
   if (lowerName.endsWith(".pdf")) {
     const pdfData = await extractPdfData(file);
-    const records = flags.homework
-      ? [createWholePdfRecord(file.name, flags, originalFile, pdfData)]
-      : createPdfPageRecords(file.name, flags, originalFile, pdfData.pages);
+    const records = [createWholeStudyDocumentRecord(file.name, flags, originalFile, pdfData)];
     return {
       records
     };
@@ -6234,16 +6953,12 @@ async function readUploadedDocument(file, flags) {
 
   if (lowerName.endsWith(".docx")) {
     const content = await extractDocxText(file);
-    const records = flags.classNotes
-      ? splitClassNotesByDate(file.name, content || "No readable text was detected in this document.", flags, originalFile)
-      : [createDocumentWithFlags({
-          title: file.name.replace(/\.[^.]+$/, ""),
-          type: flags.homework ? "Homework" : flags.assessment ? "Assessment" : "DOCX",
-          content: content || "No readable text was detected in this document."
-        }, flags)];
-    records.forEach((record) => {
-      record.originalFile = originalFile;
-    });
+    const records = [
+      createWholeStudyDocumentRecord(file.name, flags, originalFile, {
+        fullText: content || "No readable text was detected in this document.",
+        pages: []
+      })
+    ];
     return {
       records
     };
@@ -6251,16 +6966,12 @@ async function readUploadedDocument(file, flags) {
 
   if (lowerName.endsWith(".pptx")) {
     const content = await extractPptxText(file);
-    const records = flags.classNotes
-      ? splitClassNotesByDate(file.name, content || "No readable text was detected in this presentation.", flags, originalFile)
-      : [createDocumentWithFlags({
-          title: file.name.replace(/\.[^.]+$/, ""),
-          type: flags.homework ? "Homework" : flags.assessment ? "Assessment" : "PPTX",
-          content: content || "No readable text was detected in this presentation."
-        }, flags)];
-    records.forEach((record) => {
-      record.originalFile = originalFile;
-    });
+    const records = [
+      createWholeStudyDocumentRecord(file.name, flags, originalFile, {
+        fullText: content || "No readable text was detected in this presentation.",
+        pages: []
+      })
+    ];
     return {
       records
     };
@@ -6634,6 +7345,12 @@ async function processFiles(fileList) {
     elements.documentUpload.value = "";
     clearUploadOptions();
     render();
+    processedUploads
+      .flatMap(({ records }) => records)
+      .filter((record) => isWholeStudyDocument(record))
+      .forEach((record) => {
+        void ensureDocumentStudyPlan(record, subject);
+      });
     elements.uploadStatus.textContent = `${files.length} document${files.length === 1 ? "" : "s"} uploaded.`;
     closeUploadModal();
   } catch (error) {
