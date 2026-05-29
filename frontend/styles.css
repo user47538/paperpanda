@@ -3019,6 +3019,7 @@ input[type="date"] {
 
 .subject-tile {
   position: relative;
+  display: grid;
   min-height: 120px;
   padding: 14px;
   border-radius: 24px;
@@ -3044,14 +3045,16 @@ input[type="date"] {
 }
 
 .subject-tile__code {
+  width: 40px;
   min-width: 40px;
   height: 40px;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.72);
+  background: #FFFFFF;
   box-shadow: inset 0 0 0 1px rgba(26, 23, 38, 0.05);
   display: grid;
   place-items: center;
   overflow: hidden;
+  justify-self: start;
 }
 
 .subject-tile--dark,
@@ -3062,8 +3065,8 @@ input[type="date"] {
 
 .subject-tile--dark .subject-tile__code,
 .subject-tile--active .subject-tile__code {
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
+  background: #FFFFFF;
+  color: var(--ink);
 }
 
 .subject-tile--dark .subject-tile__meta,
