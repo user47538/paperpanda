@@ -2858,6 +2858,23 @@ function openDashboard(nextView = "home") {
   void loadRevisionCatalogue();
 }
 
+function resetRevisionState() {
+  state.generatedRevisionTest = null;
+  state.revisionResponses = {};
+  state.revisionSubmission = null;
+  state.revisionViewMode = "draft";
+  state.activeSavedRevisionTestId = "";
+  state.revisionReturnContext = null;
+  state.generatingDocumentRevisionId = "";
+  if (elements.revisionTestStatus) {
+    elements.revisionTestStatus.textContent = "";
+  }
+  if (elements.revisionFeedback) {
+    elements.revisionFeedback.classList.add("hidden");
+    elements.revisionFeedback.innerHTML = "";
+  }
+}
+
 function showLanding() {
   stopListening();
   stopAskMicrophone({ preserveStatus: true });
@@ -2870,6 +2887,7 @@ function showLanding() {
   elements.taskView.classList.add("hidden");
   elements.revisionView.classList.add("hidden");
   elements.landingPanel.classList.remove("hidden");
+  resetRevisionState();
   state.selectedDocumentId = null;
   state.currentView = "home";
   elements.studentPasswordInput.value = "";
@@ -8012,6 +8030,7 @@ function render() {
 }
 
 function signInToAccount(account) {
+  resetRevisionState();
   state.studentName = account.name;
   state.currentUserEmail = account.email;
   state.studentGrade = normaliseGrade(account.grade);
