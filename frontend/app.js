@@ -451,6 +451,8 @@ const state = {
   revisionSubmission: null,
   revisionViewMode: "draft",
   activeSavedRevisionTestId: "",
+  revisionReturnContext: null,
+  generatingDocumentRevisionId: "",
   upcomingModalOpen: false,
   upcomingModalMode: "upcoming",
   pendingFiles: [],
@@ -1664,6 +1666,9 @@ async function generateRevisionTest({
   state.revisionSubmission = null;
   state.revisionViewMode = "draft";
   state.activeSavedRevisionTestId = "";
+  state.revisionReturnContext = {
+    view: "home"
+  };
 
   const payload = await requestApi("/api/revision/generate-test", {
     grade: state.studentGrade,
@@ -1698,6 +1703,12 @@ async function generateDocumentRevisionTest(documentRecord, subject) {
   state.revisionSubmission = null;
   state.revisionViewMode = "draft";
   state.activeSavedRevisionTestId = "";
+  state.revisionReturnContext = {
+    view: "subjects",
+    subjectId: subject.id,
+    documentId: documentRecord.id,
+    activeSubjectTab: "reader"
+  };
 
   const payload = await requestApi("/api/document/revision-test", {
     grade: state.studentGrade,
@@ -1721,6 +1732,7 @@ async function generateDocumentRevisionTest(documentRecord, subject) {
 }
 
 function openRevisionTestView() {
+  state.generatingDocumentRevisionId = "";
   state.currentView = "revision";
   render();
 }
@@ -1748,10 +1760,15 @@ function renderRevisionTestView() {
 
   elements.revisionViewTitle.textContent = test.title || "Revision test";
   elements.revisionTestHeading.textContent = test.title || "Generated test";
+  elements.closeRevisionViewButton.textContent = state.revisionReturnContext?.view === "subjects" ? "Back to document" : "Back to home";
+  const revisionScoreMarkup = state.revisionSubmission
+    ? `<div class="revision-test-meta-score">${escapeHtml(`${state.revisionSubmission.totalScore || 0}/${state.revisionSubmission.totalAvailable || 0}`)}</div>`
+    : "";
   elements.revisionTestMeta.innerHTML = `
     <div class="document-chip">${escapeHtml(test.subjectName || "")}</div>
     <div class="document-chip">${escapeHtml(test.grade || `Year ${state.studentGrade}`)}</div>
     <div class="document-chip">${escapeHtml(test.focus || "Revision focus")}</div>
+    ${revisionScoreMarkup}
   `;
 
   elements.revisionTestContent.innerHTML = (Array.isArray(test.sections) ? test.sections : [])
@@ -1782,16 +1799,32 @@ function renderRevisionTestView() {
                   </div>
                 `
                 : `<textarea class="reader-editor revision-answer-editor" data-revision-question="${questionId}" placeholder="Write your answer here...">${escapeHtml(responseValue)}</textarea>`;
+              const feedbackMarkup = feedback
+                ? `
+                  <div class="revision-question__feedback">
+                    <div class="revision-question__score${(feedback?.score || 0) < (feedback?.marks || question.marks || 0) ? " revision-question__score--incorrect" : ""}">
+                      ${escapeHtml(`${feedback.score || 0}/${feedback.marks || question.marks || 0}`)}
+                    </div>
+                    <p class="revision-question__feedback-copy">${escapeHtml(feedback.feedback || "")}</p>
+                    ${
+                      feedback.correctOption
+                        ? `<p class="revision-question__answer revision-question__answer--correct"><strong>Correct answer:</strong> <span>${escapeHtml(feedback.correctOption)}</span></p>`
+                        : ""
+                    }
+                    ${
+                      feedback.studentAnswer
+                        ? `<p class="revision-question__answer revision-question__answer--student"><strong>Your answer:</strong> <span>${escapeHtml(feedback.studentAnswer)}</span></p>`
+                        : ""
+                    }
+                  </div>
+                `
+                : "";
               return `
                 <article class="revision-question">
                   <div class="revision-question__meta">${escapeHtml(type)} · ${escapeHtml(String(question.marks || 0))} marks · ${escapeHtml(question.skill || "")}</div>
                   <h5>${escapeHtml(`Q${question.number || ""}. ${question.prompt || ""}`)}</h5>
                   ${inputMarkup}
-                  ${
-                    feedback
-                      ? `<div class="revision-question__feedback"><strong>${escapeHtml(`${feedback.score || 0}/${feedback.marks || question.marks || 0}`)}</strong><p>${escapeHtml(feedback.feedback || "")}</p>${feedback.correctOption ? `<p><strong>Correct answer:</strong> ${escapeHtml(feedback.correctOption)}</p>` : ""}${feedback.studentAnswer ? `<p><strong>Your answer:</strong> ${escapeHtml(feedback.studentAnswer)}</p>` : ""}</div>`
-                      : ""
-                  }
+                  ${feedbackMarkup}
                 </article>
               `;
             })
@@ -1821,8 +1854,8 @@ function renderRevisionTestView() {
   if (state.revisionSubmission) {
     elements.revisionFeedback.classList.remove("hidden");
     elements.revisionFeedback.innerHTML = `
-      <strong>${escapeHtml(`Score: ${state.revisionSubmission.totalScore || 0}/${state.revisionSubmission.totalAvailable || 0}`)}</strong>
-      <p>${escapeHtml(state.revisionSubmission.overallFeedback || "")}</p>
+      <div class="revision-feedback__summary-score">${escapeHtml(`${state.revisionSubmission.totalScore || 0}/${state.revisionSubmission.totalAvailable || 0}`)}</div>
+      <p class="revision-feedback__summary-copy">${escapeHtml(state.revisionSubmission.overallFeedback || "")}</p>
     `;
   } else {
     elements.revisionFeedback.classList.add("hidden");
@@ -4404,7 +4437,14 @@ function renderReader() {
       }
       <div class="reader-actions">
         <button type="button" class="ghost-button" id="open-original-button">Open original file</button>
-        <button type="button" class="primary-button" id="open-document-revision-button">Revision test</button>
+        <button
+          type="button"
+          class="primary-button"
+          id="open-document-revision-button"
+          ${state.generatingDocumentRevisionId === selectedDocument.id ? "disabled" : ""}
+        >
+          ${state.generatingDocumentRevisionId === selectedDocument.id ? "Producing..." : "Revision test"}
+        </button>
       </div>
     `;
 
@@ -4445,6 +4485,9 @@ function renderReader() {
           setCurrentDocumentSection(selectedDocument, matchingSectionIndex);
         }
         renderReader();
+        requestAnimationFrame(() => {
+          elements.readerContent.querySelector(".reader-preview--page")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        });
       });
     });
     elements.readerContent.querySelectorAll("[data-reader-section-index]").forEach((button) => {
@@ -4463,11 +4506,13 @@ function renderReader() {
       if (!subject) {
         return;
       }
-      elements.uploadStatus.textContent = "Generating revision test...";
+      state.generatingDocumentRevisionId = selectedDocument.id;
+      renderReader();
       try {
         await generateDocumentRevisionTest(selectedDocument, subject);
-        elements.uploadStatus.textContent = "";
       } catch (error) {
+        state.generatingDocumentRevisionId = "";
+        renderReader();
         elements.uploadStatus.textContent = error instanceof Error ? error.message : "Revision test generation failed.";
       }
     });
@@ -4510,15 +4555,18 @@ function speakDocument(document) {
   const currentPage = isWholeStudyDocument(document) ? getDocumentPages(document)[getCurrentDocumentPageIndex(document)] || null : null;
   const pageText = getDocumentPageText(currentPage);
   const sectionText = selectedSection?.sectionText || "";
+  const prefersPageText = Boolean(isWholeStudyDocument(document) && currentPage);
   const textToRead = normaliseSpeechText(
-    pageText || sectionText || document.content || `${document.title}. Preview text is not available for this file yet.`
+    prefersPageText
+      ? pageText || `${document.title}. Readable text is not available for this page yet.`
+      : sectionText || document.content || `${document.title}. Preview text is not available for this file yet.`
   );
   if (!textToRead) {
     elements.askResponse.textContent = "There is no readable text available for this document yet.";
     return;
   }
 
-  const readerSegments = buildReaderSpeechSegments(pageText || sectionText);
+  const readerSegments = buildReaderSpeechSegments(prefersPageText ? pageText : sectionText);
 
   speakTextWithOpenAi(textToRead, {
     context: "document",
@@ -8225,6 +8273,18 @@ elements.closeTaskViewButton.addEventListener("click", () => {
   render();
 });
 elements.closeRevisionViewButton.addEventListener("click", () => {
+  const returnContext = state.revisionReturnContext;
+  if (returnContext?.view === "subjects") {
+    state.currentView = "subjects";
+    state.selectedSubjectId = returnContext.subjectId || state.selectedSubjectId;
+    state.activeSubjectTab = returnContext.activeSubjectTab || "reader";
+    state.selectedDocumentId = returnContext.documentId || state.selectedDocumentId;
+    render();
+    requestAnimationFrame(() => {
+      elements.readerContent?.scrollIntoView({ block: "start", behavior: "smooth" });
+    });
+    return;
+  }
   state.currentView = "home";
   render();
 });
