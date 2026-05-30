@@ -420,6 +420,7 @@ const state = {
   selectedSubjectId: subjectSeed[0].id,
   activeSubjectTab: "reader",
   selectedDocumentId: null,
+  currentDocumentPageIndexes: {},
   activeReaderSegmentIndex: -1,
   activeReaderSectionId: "",
   askDocumentId: null,
@@ -1286,6 +1287,38 @@ function setDocumentReviewedState(subject, documentIds, reviewed) {
 function getSelectedDocumentIndex() {
   const documents = getVisibleSubjectDocuments(getSelectedSubject() || { documents: [] });
   return documents.findIndex((documentRecord) => documentRecord.id === state.selectedDocumentId);
+}
+
+function getDocumentPages(documentRecord) {
+  return Array.isArray(documentRecord?.pages)
+    ? documentRecord.pages.filter((page) => page?.imageUrl)
+    : [];
+}
+
+function getCurrentDocumentPageIndex(documentRecord) {
+  if (!documentRecord?.id) {
+    return 0;
+  }
+  const pages = getDocumentPages(documentRecord);
+  if (!pages.length) {
+    return 0;
+  }
+  const savedIndex = Number(state.currentDocumentPageIndexes?.[documentRecord.id] || 0) || 0;
+  return Math.min(Math.max(savedIndex, 0), pages.length - 1);
+}
+
+function setCurrentDocumentPageIndex(documentRecord, nextIndex) {
+  if (!documentRecord?.id) {
+    return;
+  }
+  const pages = getDocumentPages(documentRecord);
+  if (!pages.length) {
+    return;
+  }
+  state.currentDocumentPageIndexes = {
+    ...state.currentDocumentPageIndexes,
+    [documentRecord.id]: Math.min(Math.max(Number(nextIndex) || 0, 0), pages.length - 1)
+  };
 }
 
 function selectAdjacentDocument(direction) {
@@ -3588,7 +3621,7 @@ function renderSubjectList() {
       return `
         <button
           type="button"
-          class="subject-tile subject-tile--home${subject.id === state.selectedSubjectId ? " subject-tile--home-active" : ""}"
+          class="subject-tile subject-tile--home subject-tile--${palette[index % palette.length]}${subject.id === state.selectedSubjectId ? " subject-tile--home-active" : ""}"
           data-subject-id="${subject.id}"
           style="--subject-outline:${escapeHtml(getSubjectTileOutlineColor(subject, index))}"
         >
@@ -3763,15 +3796,18 @@ function getReaderToolbarMarkup() {
   const selectedIndex = getSelectedDocumentIndex();
   const documentCount = getVisibleSubjectDocuments(getSelectedSubject() || { documents: [] }).length || 0;
   const hasDocument = Boolean(selectedDocument);
+  const pageCount = getDocumentPages(selectedDocument).length;
+  const pageIndex = getCurrentDocumentPageIndex(selectedDocument);
+  const usesPageNavigation = Boolean(selectedDocument && isWholeStudyDocument(selectedDocument) && pageCount > 1);
 
   return `
     <div class="reader-toolbar reader-toolbar--inline">
-      <button type="button" class="table-action" data-reader-action="previous" aria-label="Previous page" ${!hasDocument || selectedIndex <= 0 ? "disabled" : ""}>←</button>
+      <button type="button" class="table-action" data-reader-action="previous" aria-label="Previous page" ${!hasDocument || (usesPageNavigation ? pageIndex <= 0 : selectedIndex <= 0) ? "disabled" : ""}>←</button>
       <button type="button" class="table-action" data-reader-action="listen" ${!hasDocument ? "disabled" : ""}>
         ${selectedDocument && state.listeningDocumentId === selectedDocument.id ? "Stop" : "Listen"}
       </button>
       <button type="button" class="table-action" data-reader-action="ask" ${!hasDocument ? "disabled" : ""}>Ask</button>
-      <button type="button" class="table-action" data-reader-action="next" aria-label="Next page" ${!hasDocument || selectedIndex === -1 || selectedIndex >= documentCount - 1 ? "disabled" : ""}>→</button>
+      <button type="button" class="table-action" data-reader-action="next" aria-label="Next page" ${!hasDocument || (usesPageNavigation ? pageIndex >= pageCount - 1 : selectedIndex === -1 || selectedIndex >= documentCount - 1) ? "disabled" : ""}>→</button>
     </div>
   `;
 }
@@ -4126,21 +4162,24 @@ function renderReader() {
     : "";
   const pagePreviewStackMarkup =
     isWholeStudyDocument(selectedDocument) && Array.isArray(selectedDocument.pages)
-      ? selectedDocument.pages
-          .filter((page) => page?.imageUrl)
-          .map(
-            (page, index) => `
-              <figure class="reader-preview reader-preview--page">
-                <img class="reader-preview-image" src="${escapeHtml(page.imageUrl)}" alt="${escapeHtml(`${selectedDocument.title} page ${page.pageNumber || index + 1}`)} preview" />
-                ${
-                  selectedDocument.pages.length > 1
-                    ? `<figcaption class="reader-preview-caption">Page ${escapeHtml(String(page.pageNumber || index + 1))}</figcaption>`
-                    : ""
-                }
-              </figure>
-            `
-          )
-          .join("")
+      ? (() => {
+          const pages = getDocumentPages(selectedDocument);
+          const pageIndex = getCurrentDocumentPageIndex(selectedDocument);
+          const currentPage = pages[pageIndex] || null;
+          if (!currentPage) {
+            return "";
+          }
+          return `
+            <figure class="reader-preview reader-preview--page">
+              <img class="reader-preview-image" src="${escapeHtml(currentPage.imageUrl)}" alt="${escapeHtml(`${selectedDocument.title} page ${currentPage.pageNumber || pageIndex + 1}`)} preview" />
+              ${
+                pages.length > 1
+                  ? `<figcaption class="reader-preview-caption">Page ${escapeHtml(String(currentPage.pageNumber || pageIndex + 1))} of ${escapeHtml(String(pages.length))}</figcaption>`
+                  : ""
+              }
+            </figure>
+          `;
+        })()
       : "";
   const reviewToggleMarkup = `
     <div class="reader-controls-row">
@@ -4277,12 +4316,6 @@ function renderReader() {
       pagePreviewStackMarkup
         ? `
           <section class="reader-pages-card">
-            <div class="section-heading section-heading--stacked section-heading--compact">
-              <div>
-                <p class="eyebrow">Document pages</p>
-                <h3>${escapeHtml(selectedDocument.title)}</h3>
-              </div>
-            </div>
             <div class="reader-preview-stack">${pagePreviewStackMarkup}</div>
           </section>
         `
@@ -4299,6 +4332,7 @@ function renderReader() {
         <button type="button" class="ghost-button ghost-button--small" id="reader-complete-section-button" ${!currentSection ? "disabled" : ""}>${currentSection && completedIds.has(currentSection.id) ? "Undo section" : "Complete section"}</button>
       </div>
       <div class="reader-section-strip">${sectionButtonsMarkup || `<span class="helper-text">${selectedDocument.studyPlanStatus === "loading" ? "Breaking this document into sections..." : "Preparing study sections..."}</span>`}</div>
+      ${documentPagesMarkup || previewImageMarkup}
       ${
         currentSection
           ? `
@@ -4316,7 +4350,6 @@ function renderReader() {
           : `<div class="empty-state">PaperPanda is organising this document into study sections.</div>`
       }
       ${quizMarkup}
-      ${documentPagesMarkup || previewImageMarkup}
       ${openOriginalMarkup}
     `;
 
@@ -4482,14 +4515,25 @@ function attachReaderActionHandlers() {
       if (!selectedDocument && action !== "previous" && action !== "next") {
         return;
       }
+      const usesPageNavigation = Boolean(selectedDocument && isWholeStudyDocument(selectedDocument) && getDocumentPages(selectedDocument).length > 1);
 
       if (action === "previous") {
-        selectAdjacentDocument(-1);
+        if (usesPageNavigation && selectedDocument) {
+          setCurrentDocumentPageIndex(selectedDocument, getCurrentDocumentPageIndex(selectedDocument) - 1);
+          renderReader();
+        } else {
+          selectAdjacentDocument(-1);
+        }
         return;
       }
 
       if (action === "next") {
-        selectAdjacentDocument(1);
+        if (usesPageNavigation && selectedDocument) {
+          setCurrentDocumentPageIndex(selectedDocument, getCurrentDocumentPageIndex(selectedDocument) + 1);
+          renderReader();
+        } else {
+          selectAdjacentDocument(1);
+        }
         return;
       }
 
