@@ -2397,13 +2397,13 @@ input[type="date"] {
 
 .subject-list--row .subject-tile {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
+  grid-template-columns: 38px minmax(0, 1fr);
   grid-template-rows: auto;
   align-items: center;
-  column-gap: 10px;
+  column-gap: 12px;
   row-gap: 0;
   min-height: 48px;
-  padding: 7px 9px;
+  padding: 7px 10px;
   border-radius: 14px;
   background: var(--card);
   box-shadow: var(--shadow-sm);
@@ -2412,8 +2412,8 @@ input[type="date"] {
 }
 
 .subject-list--row .subject-tile__code {
-  min-width: 34px;
-  height: 34px;
+  min-width: 38px;
+  height: 38px;
   border-radius: 10px;
   background: var(--bg);
   font-family: var(--font-display);
@@ -2425,8 +2425,8 @@ input[type="date"] {
 
 .subject-list--row .subject-tile__title {
   align-self: center;
-  font-size: 9px;
-  line-height: 1;
+  font-size: 9.5px;
+  line-height: 1.05;
 }
 
 .subject-list--row .subject-tile__meta {
@@ -3237,6 +3237,12 @@ input[type="date"] {
 .subject-tile--home .subject-tile__meta,
 .subject-tile--home-active .subject-tile__meta {
   color: var(--muted);
+}
+
+.subject-tile--home.subject-tile--dark .subject-tile__code,
+.subject-tile--home-active.subject-tile--dark .subject-tile__code {
+  background: #1B1825;
+  color: #fff;
 }
 
 .subject-tile--lilac { background: #E7E2FB; }

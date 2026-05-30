@@ -928,11 +928,34 @@ function isWholeStudyDocument(documentRecord) {
   );
 }
 
+function shouldRegroupLegacyStudySections(documentRecord, storedSections) {
+  const pageCount = Array.isArray(documentRecord?.pages) ? documentRecord.pages.length : 0;
+  if (!pageCount || storedSections.length !== pageCount) {
+    return false;
+  }
+
+  return storedSections.every(
+    (section) =>
+      /^page\s+\d+$/i.test(String(section.title || "").trim()) &&
+      !String(section.summary || "").trim()
+  );
+}
+
 function getDocumentSections(documentRecord) {
   const storedSections = Array.isArray(documentRecord?.studySections)
     ? documentRecord.studySections.map(normaliseStudySection).filter((section) => section.sectionText)
     : [];
   if (storedSections.length) {
+    if (shouldRegroupLegacyStudySections(documentRecord, storedSections)) {
+      const regroupedSections = buildFallbackStudyPlan(documentRecord).sections;
+      documentRecord.studySections = regroupedSections;
+      documentRecord.currentSectionIndex = Math.min(
+        Number(documentRecord.currentSectionIndex || 0) || 0,
+        Math.max(0, regroupedSections.length - 1)
+      );
+      persistSubjects();
+      return regroupedSections;
+    }
     return storedSections;
   }
   return buildFallbackStudyPlan(documentRecord).sections;
@@ -957,7 +980,8 @@ function getCurrentDocumentSectionIndex(documentRecord) {
 
 function getSelectedDocumentSection(documentRecord) {
   const sections = getDocumentSections(documentRecord);
-  return sections[getCurrentDocumentSectionIndex(documentRecord)] || null;
+  const pageBoundSectionIndex = findSectionIndexForPage(documentRecord, getCurrentDocumentPageIndex(documentRecord));
+  return sections[pageBoundSectionIndex >= 0 ? pageBoundSectionIndex : getCurrentDocumentSectionIndex(documentRecord)] || null;
 }
 
 function getResumeDocumentSectionIndex(documentRecord) {
@@ -988,11 +1012,24 @@ function markDocumentSectionComplete(documentRecord, sectionId, completed = true
   persistSubjects();
 }
 
+function findSectionIndexForPage(documentRecord, pageIndex) {
+  const sections = getDocumentSections(documentRecord);
+  const pages = getDocumentPages(documentRecord);
+  const page = pages[pageIndex];
+  const pageNumber = Number(page?.pageNumber || pageIndex + 1) || pageIndex + 1;
+  return sections.findIndex((section) => {
+    if (!section?.pageStart || !section?.pageEnd) {
+      return false;
+    }
+    return pageNumber >= section.pageStart && pageNumber <= section.pageEnd;
+  });
+}
+
 async function ensureDocumentStudyPlan(documentRecord, subject, { force = false } = {}) {
   if (!documentRecord || !subject || !isWholeStudyDocument(documentRecord)) {
     return;
   }
-  if (!force && documentRecord.studyPlanStatus === "ready" && getDocumentSections(documentRecord).length && documentRecord.endQuiz) {
+  if (!force && documentRecord.studyPlanStatus === "ready" && getDocumentSections(documentRecord).length) {
     return;
   }
   if (documentRecord.studyPlanStatus === "loading") {
@@ -1012,13 +1049,12 @@ async function ensureDocumentStudyPlan(documentRecord, subject, { force = false 
       ? payload.sections.map(normaliseStudySection).filter((section) => section.sectionText)
       : [];
     documentRecord.endQuiz = normaliseStudyQuiz(payload?.quiz);
-    documentRecord.studyPlanStatus = documentRecord.studySections.length && documentRecord.endQuiz ? "ready" : "error";
-    if (!documentRecord.studySections.length || !documentRecord.endQuiz) {
+    documentRecord.studyPlanStatus = documentRecord.studySections.length ? "ready" : "error";
+    if (!documentRecord.studySections.length) {
       const fallbackPlan = buildFallbackStudyPlan(documentRecord);
       documentRecord.studyOverview = fallbackPlan.overview;
       documentRecord.importantTerms = fallbackPlan.importantTerms;
       documentRecord.studySections = fallbackPlan.sections;
-      documentRecord.endQuiz = fallbackPlan.quiz;
       documentRecord.studyPlanStatus = "fallback";
     }
   } catch (error) {
@@ -1319,6 +1355,10 @@ function setCurrentDocumentPageIndex(documentRecord, nextIndex) {
     ...state.currentDocumentPageIndexes,
     [documentRecord.id]: Math.min(Math.max(Number(nextIndex) || 0, 0), pages.length - 1)
   };
+}
+
+function getDocumentPageText(page) {
+  return String(page?.text || "").replace(/^Page\s+\d+\s*/i, "").trim();
 }
 
 function selectAdjacentDocument(direction) {
@@ -1638,6 +1678,38 @@ async function generateRevisionTest({
 
   if (!payload?.test) {
     throw new Error("Panda could not generate a practice test yet.");
+  }
+
+  state.generatedRevisionTest = payload.test;
+  state.revisionResponses = {};
+  state.revisionSubmission = null;
+  state.revisionViewMode = "draft";
+  state.activeSavedRevisionTestId = "";
+  openRevisionTestView();
+}
+
+async function generateDocumentRevisionTest(documentRecord, subject) {
+  if (!documentRecord || !subject) {
+    throw new Error("Select a document first.");
+  }
+
+  state.generatedRevisionTest = null;
+  state.revisionResponses = {};
+  state.revisionSubmission = null;
+  state.revisionViewMode = "draft";
+  state.activeSavedRevisionTestId = "";
+
+  const payload = await requestApi("/api/document/revision-test", {
+    grade: state.studentGrade,
+    subjectId: subject.id,
+    subjectName: subject.name,
+    title: documentRecord.title,
+    pageCount: getDocumentPages(documentRecord).length,
+    content: clipText(documentRecord.content || "", 18000)
+  });
+
+  if (!payload?.test) {
+    throw new Error("Panda could not generate a revision test for this document yet.");
   }
 
   state.generatedRevisionTest = payload.test;
@@ -2355,6 +2427,8 @@ function createQuotaFallbackDocument(documentRecord) {
           title: String(section?.title || "").slice(0, 120),
           summary: String(section?.summary || "").slice(0, 400),
           sectionText: String(section?.sectionText || "").slice(0, 2000),
+          pageStart: Number(section?.pageStart || 0) || null,
+          pageEnd: Number(section?.pageEnd || 0) || null,
           importantTerms: Array.isArray(section?.importantTerms) ? section.importantTerms.slice(0, 8) : []
         }))
       : [],
@@ -3250,7 +3324,7 @@ async function requestDocumentStudyPlan(documentRecord, subject) {
     title: documentRecord.title,
     type: documentRecord.type,
     pageCount: Array.isArray(documentRecord.pages) ? documentRecord.pages.length : 0,
-    content: clipText(documentRecord.content || "", 28000)
+    content: clipText(documentRecord.content || "", 18000)
   });
 }
 
@@ -4160,21 +4234,24 @@ function renderReader() {
       </div>
     `
     : "";
+  const pageList = getDocumentPages(selectedDocument);
+  const currentPageIndex = getCurrentDocumentPageIndex(selectedDocument);
+  const currentPage = pageList[currentPageIndex] || null;
   const pagePreviewStackMarkup =
     isWholeStudyDocument(selectedDocument) && Array.isArray(selectedDocument.pages)
       ? (() => {
-          const pages = getDocumentPages(selectedDocument);
-          const pageIndex = getCurrentDocumentPageIndex(selectedDocument);
-          const currentPage = pages[pageIndex] || null;
-          if (!currentPage) {
+          const pages = pageList;
+          const pageIndex = currentPageIndex;
+          const activePage = currentPage;
+          if (!activePage) {
             return "";
           }
           return `
             <figure class="reader-preview reader-preview--page">
-              <img class="reader-preview-image" src="${escapeHtml(currentPage.imageUrl)}" alt="${escapeHtml(`${selectedDocument.title} page ${currentPage.pageNumber || pageIndex + 1}`)} preview" />
+              <img class="reader-preview-image" src="${escapeHtml(activePage.imageUrl)}" alt="${escapeHtml(`${selectedDocument.title} page ${activePage.pageNumber || pageIndex + 1}`)} preview" />
               ${
                 pages.length > 1
-                  ? `<figcaption class="reader-preview-caption">Page ${escapeHtml(String(currentPage.pageNumber || pageIndex + 1))} of ${escapeHtml(String(pages.length))}</figcaption>`
+                  ? `<figcaption class="reader-preview-caption">Page ${escapeHtml(String(activePage.pageNumber || pageIndex + 1))} of ${escapeHtml(String(pages.length))}</figcaption>`
                   : ""
               }
             </figure>
@@ -4239,16 +4316,26 @@ function renderReader() {
     }
 
     const sections = getDocumentSections(selectedDocument);
-    const currentSectionIndex = getCurrentDocumentSectionIndex(selectedDocument);
+    const pageBoundSectionIndex = pageList.length ? findSectionIndexForPage(selectedDocument, currentPageIndex) : -1;
+    const currentSectionIndex =
+      pageBoundSectionIndex >= 0 ? pageBoundSectionIndex : getCurrentDocumentSectionIndex(selectedDocument);
     const currentSection = sections[currentSectionIndex] || null;
     const completedIds = new Set(Array.isArray(selectedDocument.completedSectionIds) ? selectedDocument.completedSectionIds : []);
-    const allSectionsComplete = Boolean(sections.length) && sections.every((section) => completedIds.has(section.id));
     const importantTerms = [...new Set([...(selectedDocument.importantTerms || []), ...(currentSection?.importantTerms || [])])];
-    const quiz = normaliseStudyQuiz(selectedDocument.endQuiz);
-    const quizAnswers = selectedDocument.quizSubmission?.answers && typeof selectedDocument.quizSubmission.answers === "object"
-      ? selectedDocument.quizSubmission.answers
-      : {};
     const progressRatio = getDocumentProgressRatio(selectedDocument);
+    const pageButtonsMarkup = pageList
+      .map(
+        (page, index) => `
+          <button
+            type="button"
+            class="document-chip${index === currentPageIndex ? " document-chip--active" : ""}"
+            data-reader-page-index="${index}"
+          >
+            ${escapeHtml(`Page ${String(page.pageNumber || index + 1)}`)}
+          </button>
+        `
+      )
+      .join("");
     const sectionButtonsMarkup = sections
       .map(
         (section, index) => `
@@ -4262,56 +4349,6 @@ function renderReader() {
         `
       )
       .join("");
-    const quizMarkup =
-      allSectionsComplete && quiz
-        ? `
-          <section class="reader-quiz-card">
-            <div class="section-heading section-heading--stacked section-heading--compact">
-              <div>
-                <p class="eyebrow">End quiz</p>
-                <h3>${escapeHtml(quiz.title || "Quick check")}</h3>
-              </div>
-            </div>
-            <p class="helper-text">Pass ${quiz.passingScore}/${quiz.questions.length} to earn ${documentQuizPassPoints} points.</p>
-            <div class="reader-quiz-list">
-              ${quiz.questions
-                .map(
-                  (question, questionIndex) => `
-                    <article class="reader-quiz-question">
-                      <strong>${escapeHtml(`Q${questionIndex + 1}. ${question.prompt}`)}</strong>
-                      <div class="reader-quiz-options">
-                        ${question.options
-                          .map(
-                            (option) => `
-                              <label class="revision-option">
-                                <input type="radio" name="document-quiz-${question.id}" value="${escapeHtml(option)}" data-document-quiz-id="${question.id}" ${quizAnswers[question.id] === option ? "checked" : ""} />
-                                <span>${escapeHtml(option)}</span>
-                              </label>
-                            `
-                          )
-                          .join("")}
-                      </div>
-                      ${
-                        selectedDocument.quizSubmission
-                          ? `<p class="helper-text helper-text--tiny">${escapeHtml(question.explanation || "")}</p>`
-                          : ""
-                      }
-                    </article>
-                  `
-                )
-                .join("")}
-            </div>
-            <div class="reader-actions">
-              <button type="button" class="primary-button" id="submit-document-quiz-button">Submit quiz</button>
-            </div>
-            ${
-              selectedDocument.quizSubmission
-                ? `<div class="upload-status">Score: ${selectedDocument.quizSubmission.score}/${selectedDocument.quizSubmission.total} · ${selectedDocument.quizSubmission.passed ? `Passed and earned ${documentQuizPassPoints} points.` : "Not passed yet. Review the sections and try again."}</div>`
-                : ""
-            }
-          </section>
-        `
-        : "";
     const documentPagesMarkup =
       pagePreviewStackMarkup
         ? `
@@ -4320,6 +4357,7 @@ function renderReader() {
           </section>
         `
         : "";
+    const currentPageText = getDocumentPageText(currentPage);
 
     elements.readerContent.innerHTML = `
       ${reviewToggleMarkup}
@@ -4331,26 +4369,43 @@ function renderReader() {
         <button type="button" class="ghost-button ghost-button--small" id="reader-resume-button" ${!sections.length ? "disabled" : ""}>Resume</button>
         <button type="button" class="ghost-button ghost-button--small" id="reader-complete-section-button" ${!currentSection ? "disabled" : ""}>${currentSection && completedIds.has(currentSection.id) ? "Undo section" : "Complete section"}</button>
       </div>
-      <div class="reader-section-strip">${sectionButtonsMarkup || `<span class="helper-text">${selectedDocument.studyPlanStatus === "loading" ? "Breaking this document into sections..." : "Preparing study sections..."}</span>`}</div>
+      <div class="reader-section-strip">${pageButtonsMarkup || `<span class="helper-text">${selectedDocument.studyPlanStatus === "loading" ? "Preparing document pages..." : "Preparing document pages..."}</span>`}</div>
       ${documentPagesMarkup || previewImageMarkup}
+      ${
+        currentPageText
+          ? `
+            <section class="reader-study-card">
+              <div class="section-heading section-heading--stacked section-heading--compact">
+                <div>
+                  <p class="eyebrow">Current page</p>
+                  <h3>${escapeHtml(`Page ${String(currentPage?.pageNumber || currentPageIndex + 1)}`)}</h3>
+                </div>
+              </div>
+              <div class="reader-content__text reader-content__text--study">${buildReaderTextMarkup(currentPageText, importantTerms)}</div>
+            </section>
+          `
+          : ""
+      }
       ${
         currentSection
           ? `
             <section class="reader-study-card">
               <div class="section-heading section-heading--stacked section-heading--compact">
                 <div>
-                  <p class="eyebrow">Current section</p>
+                  <p class="eyebrow">Study section</p>
                   <h3>${escapeHtml(currentSection.title)}</h3>
                 </div>
               </div>
               ${currentSection.summary ? `<p class="helper-text">${escapeHtml(currentSection.summary)}</p>` : ""}
-              <div class="reader-content__text reader-content__text--study">${buildReaderTextMarkup(currentSection.sectionText, importantTerms)}</div>
+              <div class="reader-section-strip reader-section-strip--study">${sectionButtonsMarkup}</div>
             </section>
           `
           : `<div class="empty-state">PaperPanda is organising this document into study sections.</div>`
       }
-      ${quizMarkup}
-      ${openOriginalMarkup}
+      <div class="reader-actions">
+        <button type="button" class="ghost-button" id="open-original-button">Open original file</button>
+        <button type="button" class="primary-button" id="open-document-revision-button">Revision test</button>
+      </div>
     `;
 
     document.getElementById("reader-reviewed-toggle")?.addEventListener("change", (event) => {
@@ -4363,7 +4418,13 @@ function renderReader() {
       renderOverview();
     });
     document.getElementById("reader-resume-button")?.addEventListener("click", () => {
-      setCurrentDocumentSection(selectedDocument, getResumeDocumentSectionIndex(selectedDocument));
+      const resumeIndex = getResumeDocumentSectionIndex(selectedDocument);
+      setCurrentDocumentSection(selectedDocument, resumeIndex);
+      const resumeSection = sections[resumeIndex];
+      if (pageList.length && resumeSection?.pageStart) {
+        const nextPageIndex = Math.max(0, pageList.findIndex((page) => Number(page?.pageNumber || 0) === resumeSection.pageStart));
+        setCurrentDocumentPageIndex(selectedDocument, nextPageIndex);
+      }
       renderReader();
     });
     document.getElementById("reader-complete-section-button")?.addEventListener("click", () => {
@@ -4375,56 +4436,40 @@ function renderReader() {
       renderDocuments();
       renderOverview();
     });
-    elements.readerContent.querySelectorAll("[data-reader-section-index]").forEach((button) => {
+    elements.readerContent.querySelectorAll("[data-reader-page-index]").forEach((button) => {
       button.addEventListener("click", () => {
-        setCurrentDocumentSection(selectedDocument, Number(button.dataset.readerSectionIndex || 0));
+        const pageIndex = Number(button.dataset.readerPageIndex || 0);
+        setCurrentDocumentPageIndex(selectedDocument, pageIndex);
+        const matchingSectionIndex = findSectionIndexForPage(selectedDocument, pageIndex);
+        if (matchingSectionIndex >= 0) {
+          setCurrentDocumentSection(selectedDocument, matchingSectionIndex);
+        }
         renderReader();
       });
     });
-    elements.readerContent.querySelectorAll("[data-document-quiz-id]").forEach((input) => {
-      input.addEventListener("change", () => {
-        const questionId = input.dataset.documentQuizId;
-        if (!questionId) {
-          return;
+    elements.readerContent.querySelectorAll("[data-reader-section-index]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const sectionIndex = Number(button.dataset.readerSectionIndex || 0);
+        const nextSection = sections[sectionIndex];
+        setCurrentDocumentSection(selectedDocument, sectionIndex);
+        if (nextSection?.pageStart) {
+          const nextPageIndex = Math.max(0, pageList.findIndex((page) => Number(page?.pageNumber || 0) === nextSection.pageStart));
+          setCurrentDocumentPageIndex(selectedDocument, nextPageIndex);
         }
-        selectedDocument.quizSubmission = {
-          ...(selectedDocument.quizSubmission || {}),
-          answers: {
-            ...(selectedDocument.quizSubmission?.answers || {}),
-            [questionId]: input.value
-          }
-        };
-        persistSubjects();
+        renderReader();
       });
     });
-    document.getElementById("submit-document-quiz-button")?.addEventListener("click", () => {
-      if (!quiz) {
+    document.getElementById("open-document-revision-button")?.addEventListener("click", async () => {
+      if (!subject) {
         return;
       }
-      const answers = {
-        ...(selectedDocument.quizSubmission?.answers || {})
-      };
-      let score = 0;
-      quiz.questions.forEach((question) => {
-        if (answers[question.id] === question.correctOption) {
-          score += 1;
-        }
-      });
-      selectedDocument.quizSubmission = {
-        answers,
-        score,
-        total: quiz.questions.length,
-        passed: score >= quiz.passingScore,
-        completedAt: new Date().toISOString()
-      };
-      selectedDocument.reviewed = selectedDocument.quizSubmission.passed || selectedDocument.reviewed;
-      if (selectedDocument.quizSubmission.passed) {
-        awardDocumentQuizPointsIfNeeded(selectedDocument);
+      elements.uploadStatus.textContent = "Generating revision test...";
+      try {
+        await generateDocumentRevisionTest(selectedDocument, subject);
+        elements.uploadStatus.textContent = "";
+      } catch (error) {
+        elements.uploadStatus.textContent = error instanceof Error ? error.message : "Revision test generation failed.";
       }
-      persistSubjects();
-      renderReader();
-      renderDocuments();
-      renderOverview();
     });
     const openOriginalButton = document.getElementById("open-original-button");
     if (openOriginalButton && selectedDocument.originalFile?.objectUrl) {
@@ -4462,16 +4507,18 @@ function renderReader() {
 
 function speakDocument(document) {
   const selectedSection = isWholeStudyDocument(document) ? getSelectedDocumentSection(document) : null;
+  const currentPage = isWholeStudyDocument(document) ? getDocumentPages(document)[getCurrentDocumentPageIndex(document)] || null : null;
+  const pageText = getDocumentPageText(currentPage);
   const sectionText = selectedSection?.sectionText || "";
   const textToRead = normaliseSpeechText(
-    sectionText || document.content || `${document.title}. Preview text is not available for this file yet.`
+    pageText || sectionText || document.content || `${document.title}. Preview text is not available for this file yet.`
   );
   if (!textToRead) {
     elements.askResponse.textContent = "There is no readable text available for this document yet.";
     return;
   }
 
-  const readerSegments = selectedSection ? buildReaderSpeechSegments(selectedSection.sectionText) : [];
+  const readerSegments = buildReaderSpeechSegments(pageText || sectionText);
 
   speakTextWithOpenAi(textToRead, {
     context: "document",
@@ -4483,8 +4530,8 @@ function speakDocument(document) {
     },
     chunksOverride: readerSegments.length ? readerSegments : null,
     onChunkStart: (_chunk, chunkIndex) => {
-      if (selectedSection) {
-        state.activeReaderSectionId = selectedSection.id;
+      if (selectedSection || currentPage) {
+        state.activeReaderSectionId = selectedSection?.id || "";
         state.activeReaderSegmentIndex = Math.min(chunkIndex, Math.max(0, readerSegments.length - 1));
         renderReader();
       }
@@ -4519,7 +4566,12 @@ function attachReaderActionHandlers() {
 
       if (action === "previous") {
         if (usesPageNavigation && selectedDocument) {
-          setCurrentDocumentPageIndex(selectedDocument, getCurrentDocumentPageIndex(selectedDocument) - 1);
+          const nextPageIndex = getCurrentDocumentPageIndex(selectedDocument) - 1;
+          setCurrentDocumentPageIndex(selectedDocument, nextPageIndex);
+          const matchingSectionIndex = findSectionIndexForPage(selectedDocument, nextPageIndex);
+          if (matchingSectionIndex >= 0) {
+            setCurrentDocumentSection(selectedDocument, matchingSectionIndex);
+          }
           renderReader();
         } else {
           selectAdjacentDocument(-1);
@@ -4529,7 +4581,12 @@ function attachReaderActionHandlers() {
 
       if (action === "next") {
         if (usesPageNavigation && selectedDocument) {
-          setCurrentDocumentPageIndex(selectedDocument, getCurrentDocumentPageIndex(selectedDocument) + 1);
+          const nextPageIndex = getCurrentDocumentPageIndex(selectedDocument) + 1;
+          setCurrentDocumentPageIndex(selectedDocument, nextPageIndex);
+          const matchingSectionIndex = findSectionIndexForPage(selectedDocument, nextPageIndex);
+          if (matchingSectionIndex >= 0) {
+            setCurrentDocumentSection(selectedDocument, matchingSectionIndex);
+          }
           renderReader();
         } else {
           selectAdjacentDocument(1);
@@ -6518,6 +6575,8 @@ function normaliseStudySection(section, index) {
     title: String(section?.title || `Section ${index + 1}`).trim(),
     summary: String(section?.summary || "").trim(),
     sectionText: String(section?.sectionText || "").trim(),
+    pageStart: Number(section?.pageStart || 0) || null,
+    pageEnd: Number(section?.pageEnd || 0) || null,
     importantTerms: Array.isArray(section?.importantTerms)
       ? section.importantTerms.map((term) => String(term || "").trim()).filter(Boolean)
       : []
@@ -6560,22 +6619,58 @@ function normaliseStudyQuiz(quiz) {
   };
 }
 
+function summariseSectionText(value, maxLength = 180) {
+  const text = normaliseWhitespace(value);
+  if (!text) {
+    return "";
+  }
+  if (text.length <= maxLength) {
+    return text;
+  }
+  const sentence = text.slice(0, maxLength).match(/^(.+?[.!?])(?:\s|$)/);
+  if (sentence?.[1]) {
+    return sentence[1];
+  }
+  return `${text.slice(0, maxLength).trim()}…`;
+}
+
 function buildFallbackStudyPlan(documentRecord) {
   const sourceText = String(documentRecord.content || "").trim();
   const pages = Array.isArray(documentRecord.pages) ? documentRecord.pages : [];
-  const rawSections = pages.length
-    ? pages.map((page) => ({
-        title: `Page ${page.pageNumber}`,
-        sectionText: String(page.text || "").replace(/^Page\s+\d+\s*/i, "").trim()
-      }))
-    : [{ title: "Overview", sectionText: sourceText }];
+  const usablePages = pages
+    .map((page, index) => ({
+      pageNumber: Number(page?.pageNumber || index + 1) || index + 1,
+      text: getDocumentPageText(page)
+    }))
+    .filter((page) => page.text);
+  const rawSections = usablePages.length
+    ? (() => {
+        const targetSectionCount = Math.min(7, Math.max(3, Math.ceil(usablePages.length / 12)));
+        const chunkSize = Math.max(1, Math.ceil(usablePages.length / targetSectionCount));
+        return Array.from({ length: Math.ceil(usablePages.length / chunkSize) }, (_, index) => {
+          const group = usablePages.slice(index * chunkSize, (index + 1) * chunkSize);
+          const startPage = group[0]?.pageNumber || 1;
+          const endPage = group[group.length - 1]?.pageNumber || startPage;
+          const sectionText = group.map((page) => page.text).join("\n\n");
+          return {
+            title: startPage === endPage ? `Page ${startPage}` : `Pages ${startPage}-${endPage}`,
+            summary: summariseSectionText(sectionText),
+            sectionText,
+            pageStart: startPage,
+            pageEnd: endPage
+          };
+        }).filter((section) => section.sectionText);
+      })()
+    : [{ title: "Overview", summary: summariseSectionText(sourceText), sectionText: sourceText, pageStart: null, pageEnd: null }];
 
   const usableSections = rawSections
     .map((section, index) => normaliseStudySection({
       id: `section-${index + 1}`,
       title: section.title,
-      summary: "",
+      summary: section.summary || "",
       sectionText: section.sectionText || sourceText,
+      pageStart: section.pageStart,
+      pageEnd: section.pageEnd,
       importantTerms: extractImportantTermsFromText(section.sectionText || sourceText).slice(0, 8)
     }, index))
     .filter((section) => section.sectionText);

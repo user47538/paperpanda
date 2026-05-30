@@ -683,20 +683,140 @@ app.post("/api/document/study-plan", async (request, response) => {
       return;
     }
 
-    if (quiz.questions.length !== 4) {
-      response.status(500).json({ error: "The study plan did not contain a usable document quiz." });
-      return;
-    }
-
     response.json({
       overview: String(parsed?.overview || "").trim(),
       importantTerms,
       sections,
-      quiz
+      quiz: quiz.questions.length === 4 ? quiz : null
     });
   } catch (error) {
     response.status(500).json({
       error: error instanceof Error ? error.message : "Document study plan generation failed."
+    });
+  }
+});
+
+app.post("/api/document/revision-test", async (request, response) => {
+  try {
+    const grade = String(request.body?.grade || "").trim();
+    const subjectId = String(request.body?.subjectId || "").trim();
+    const subjectName = String(request.body?.subjectName || "").trim();
+    const title = String(request.body?.title || "").trim();
+    const pageCount = Number(request.body?.pageCount || 0);
+    const content = cleanDocumentStudyText(request.body?.content);
+
+    if (!grade || !subjectId || !subjectName || !title || !content) {
+      response.status(400).json({ error: "grade, subjectId, subjectName, title, and content are required." });
+      return;
+    }
+
+    const responsePayload = await callOpenAiJson("responses", {
+      model: "gpt-4o-mini",
+      input: [
+        {
+          role: "system",
+          content: [
+            {
+              type: "input_text",
+              text:
+                "You build Australian school revision tests from one study document. Return only JSON. Create exactly 15 questions total using this structure: 8 multiple-choice, 5 short-answer, and 2 extended-response. Base every question directly on the supplied document only. Do not include answers in the student-facing instructions. Every question must include an id, number, type, prompt, marks, skill, and answerGuide. Every multiple-choice question must include exactly 4 options and a correctOption that matches one option exactly."
+            }
+          ]
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: JSON.stringify(
+                {
+                  document: {
+                    grade,
+                    subjectId,
+                    subjectName,
+                    title,
+                    pageCount,
+                    content
+                  },
+                  outputSchema: {
+                    title: "string",
+                    subjectId: "string",
+                    subjectName: "string",
+                    grade: "string",
+                    focus: "string",
+                    estimatedMinutes: "number",
+                    instructions: "string",
+                    sections: [
+                      {
+                        title: "string",
+                        sectionType: "reading | language | application | writing",
+                        stimulusTitle: "string",
+                        stimulusText: "string",
+                        questions: [
+                          {
+                            id: "string",
+                            number: "number",
+                            type: "multiple-choice | short-answer | extended-response",
+                            prompt: "string",
+                            options: ["string"],
+                            correctOption: "string",
+                            answerGuide: "string",
+                            marks: "number",
+                            skill: "string"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  rules: [
+                    "Create exactly 15 questions total.",
+                    "Use exactly 8 multiple-choice questions, exactly 5 short-answer questions, and exactly 2 extended-response questions.",
+                    "Base the questions only on the supplied document.",
+                    "If the document is literary or humanities based, prefer comprehension, inference, vocabulary in context, evidence use, themes, and interpretation.",
+                    "If the document is maths or science based, prefer concept checking, worked reasoning, and applied interpretation.",
+                    "Use clear student-friendly wording."
+                  ]
+                },
+                null,
+                2
+              )
+            }
+          ]
+        }
+      ],
+      text: {
+        format: {
+          type: "json_object"
+        }
+      },
+      max_output_tokens: 5000
+    });
+
+    const parsed = extractResponseJson(responsePayload);
+    const questions = flattenRevisionQuestions(parsed);
+    const multipleChoiceCount = questions.filter((question) => String(question.type || "").toLowerCase() === "multiple-choice").length;
+    const shortAnswerCount = questions.filter((question) => String(question.type || "").toLowerCase() === "short-answer").length;
+    const extendedResponseCount = questions.filter((question) => String(question.type || "").toLowerCase() === "extended-response").length;
+    if (questions.length !== 15 || multipleChoiceCount !== 8 || shortAnswerCount !== 5 || extendedResponseCount !== 2) {
+      response.status(500).json({
+        error: "Document revision test generation did not return the required question structure. Please try again."
+      });
+      return;
+    }
+
+    response.json({
+      test: {
+        ...parsed,
+        title: parsed?.title || `${title} revision test`,
+        subjectId: parsed?.subjectId || subjectId,
+        subjectName: parsed?.subjectName || subjectName,
+        grade: parsed?.grade || `Year ${grade}`,
+        focus: parsed?.focus || title
+      }
+    });
+  } catch (error) {
+    response.status(500).json({
+      error: error instanceof Error ? error.message : "Document revision test generation failed."
     });
   }
 });
