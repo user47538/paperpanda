@@ -2881,8 +2881,13 @@ input[type="date"] {
   display: flex;
   align-items: flex-start;
   gap: 12px;
+  width: 100%;
   padding: 14px;
   border-radius: 16px;
+  border: none;
+  text-align: left;
+  font: inherit;
+  color: inherit;
   cursor: default;
 }
 
@@ -2892,6 +2897,11 @@ input[type="date"] {
 .dock-tile--mint { background: var(--mint); }
 .dock-tile--yellow { background: var(--yellow); }
 .dock-tile--bg { background: var(--bg); }
+
+.dock-tile[data-open-dock-watch],
+.dock-tile[data-open-dock-homework] {
+  cursor: pointer;
+}
 
 .dock-tile__emoji {
   display: inline-grid;

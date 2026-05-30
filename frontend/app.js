@@ -909,6 +909,13 @@ function getSelectedSubject() {
   return state.subjects.find((subject) => subject.id === state.selectedSubjectId);
 }
 
+function getSubjectWatchItems(subject) {
+  const subjectId = subject?.id || "";
+  return Array.isArray(subject?.watch)
+    ? subject.watch.filter((item) => item?.url && (!item.subjectId || item.subjectId === subjectId))
+    : [];
+}
+
 function isHomeworkDocument(documentRecord) {
   return Boolean(documentRecord?.flags?.homework);
 }
@@ -1391,9 +1398,7 @@ function syncAutoWatchForSubject(subject) {
     return;
   }
 
-  const manualWatchItems = Array.isArray(subject.watch)
-    ? subject.watch.filter((item) => item?.source !== "auto-document")
-    : [];
+  const manualWatchItems = getSubjectWatchItems(subject).filter((item) => item?.source !== "auto-document");
   const autoWatchItems = getDocumentGroupsFromDocuments(Array.isArray(subject.documents) ? subject.documents : [])
     .flatMap((bundle) =>
       extractYouTubeLinks(bundle.content).map((url) => ({
@@ -1401,7 +1406,8 @@ function syncAutoWatchForSubject(subject) {
         title: `${bundle.title} video`,
         url,
         source: "auto-document",
-        sourceDocumentTitle: bundle.title
+        sourceDocumentTitle: bundle.title,
+        subjectId: subject.id
       }))
     );
 
@@ -1436,7 +1442,7 @@ function renderSubjectTabs() {
   const counts = {
     reader: getAllDocumentBundles(subject).length,
     homework: getHomeworkBundles(subject).length,
-    watch: Array.isArray(subject.watch) ? subject.watch.length : 0,
+    watch: getSubjectWatchItems(subject).length,
     assessments: Array.isArray(subject.assessments) ? subject.assessments.filter((assessment) => !assessment.completed).length : 0
   };
 
@@ -1508,21 +1514,26 @@ function renderDockContext() {
 
   if (state.activeSubjectTab === "watch") {
     elements.dockContextTitle.textContent = "Watch picks";
-    const watchItems = Array.isArray(subject.watch) ? subject.watch.slice(0, 3) : [];
+    const watchItems = getSubjectWatchItems(subject).slice(0, 3);
     elements.dockContextBody.innerHTML = watchItems.length
       ? watchItems
           .map(
             (item) => `
-              <article class="dock-tile dock-tile--mint">
+              <button type="button" class="dock-tile dock-tile--mint" data-open-dock-watch="${escapeHtml(item.url)}">
                 <div class="dock-tile__copy">
                   <strong>${escapeHtml(item.title)}</strong>
                   <span>${escapeHtml(item.sourceDocumentTitle || item.url)}</span>
                 </div>
-              </article>
+              </button>
             `
           )
           .join("")
       : `<div class="empty-state empty-state--compact">No WATCH links for this subject yet.</div>`;
+    elements.dockContextBody.querySelectorAll("[data-open-dock-watch]").forEach((button) => {
+      button.addEventListener("click", () => {
+        window.open(button.dataset.openDockWatch, "_blank", "noopener");
+      });
+    });
     return;
   }
 
@@ -1532,16 +1543,21 @@ function renderDockContext() {
     ? homeworkBundles
         .map(
           (bundle, index) => `
-            <article class="dock-tile dock-tile--${["peach", "yellow", "lilac"][index % 3]}">
+            <button type="button" class="dock-tile dock-tile--${["peach", "yellow", "lilac"][index % 3]}" data-open-dock-homework="${bundle.id}">
               <div class="dock-tile__copy">
                 <strong>${escapeHtml(bundle.title)}</strong>
                 <span>${escapeHtml(getBundleWorkNotes(bundle) ? "Writing started" : "Needs a draft")}</span>
               </div>
-            </article>
+            </button>
           `
         )
         .join("")
     : `<div class="empty-state empty-state--compact">No stacked tasks yet.</div>`;
+  elements.dockContextBody.querySelectorAll("[data-open-dock-homework]").forEach((button) => {
+    button.addEventListener("click", () => {
+      openTaskView({ kind: "homework", id: button.dataset.openDockHomework });
+    });
+  });
 }
 
 async function loadRevisionCatalogue(force = false) {
@@ -2526,7 +2542,14 @@ function hydrateStoredSubject(subject, index) {
     ...subject,
     documents: Array.isArray(subject.documents) ? subject.documents.map(normaliseDocument) : [],
     assessments: Array.isArray(subject.assessments) ? subject.assessments.map(normaliseAssessment) : [],
-    watch: Array.isArray(subject.watch) ? subject.watch : [],
+    watch: Array.isArray(subject.watch)
+      ? subject.watch
+          .filter((item) => item?.url)
+          .map((item) => ({
+            ...item,
+            subjectId: item.subjectId || ""
+          }))
+      : [],
     askHistory: Array.isArray(subject.askHistory) ? subject.askHistory : [],
     savedRevisionTests: Array.isArray(subject.savedRevisionTests)
       ? subject.savedRevisionTests.map(normaliseSavedRevisionTest)
@@ -3006,7 +3029,7 @@ function isBundleListening(bundle) {
 function getHomeWatchEntries(limit = 2) {
   return state.subjects
     .flatMap((subject) =>
-      (Array.isArray(subject.watch) ? subject.watch : []).map((item) => ({
+      getSubjectWatchItems(subject).map((item) => ({
         subject,
         item
       }))
@@ -3645,7 +3668,7 @@ function getSubjectTabCounts(subject) {
   return {
     reader: getVisibleSubjectDocuments(subject).length,
     homework: getHomeworkBundles(subject).length,
-    watch: Array.isArray(subject.watch) ? subject.watch.length : 0,
+    watch: getSubjectWatchItems(subject).length,
     assessments: (subject.assessments || []).filter((assessment) => !assessment.completed).length
   };
 }
@@ -3655,7 +3678,7 @@ function getSubjectHeroCopy(subject, tab) {
   const selectedDocument = getSelectedDocument();
   const nextAssessment = getNextSubjectAssessment(subject);
   const homeworkBundles = getHomeworkBundles(subject);
-  const watchCount = Array.isArray(subject.watch) ? subject.watch.length : 0;
+  const watchCount = getSubjectWatchItems(subject).length;
   const activeAssessments = (subject.assessments || []).filter((assessment) => !assessment.completed);
 
   if (tab === "reader") {
@@ -4207,7 +4230,7 @@ function renderWatchList() {
   }
 
   elements.watchStatus.textContent = "";
-  const watchItems = Array.isArray(subject.watch) ? subject.watch : [];
+  const watchItems = getSubjectWatchItems(subject);
   if (!watchItems.length) {
     elements.watchList.innerHTML = `
       <div class="empty-state">
@@ -7700,12 +7723,22 @@ async function processFiles(fileList) {
       return;
     }
     const finalTitle = watchTitle || watchUrl;
-    if ((subject.watch || []).some((item) => item.title.toLowerCase() === finalTitle.toLowerCase())) {
+    if (getSubjectWatchItems(subject).some((item) => item.title.toLowerCase() === finalTitle.toLowerCase())) {
       elements.uploadStatus.textContent = "A WATCH item with that name already exists in this subject.";
       return;
     }
     subject.watch = Array.isArray(subject.watch) ? subject.watch : [];
-    subject.watch.unshift({ id: createId(), title: finalTitle, url: watchUrl, addedAt: new Date().toISOString() });
+    subject.watch.unshift({
+      id: createId(),
+      title: finalTitle,
+      url: watchUrl,
+      addedAt: new Date().toISOString(),
+      source: "manual",
+      subjectId: subject.id
+    });
+    state.selectedSubjectId = subject.id;
+    state.currentView = "subjects";
+    state.activeSubjectTab = "watch";
     persistSubjects();
     render();
     elements.uploadStatus.textContent = "WATCH item added.";
@@ -7764,6 +7797,19 @@ async function processFiles(fileList) {
     }
 
     persistSubjects();
+    if (flags.homework) {
+      state.selectedSubjectId = subject.id;
+      state.currentView = "subjects";
+      state.activeSubjectTab = "homework";
+    } else if (flags.assessment) {
+      state.selectedSubjectId = subject.id;
+      state.currentView = "subjects";
+      state.activeSubjectTab = "assessments";
+    } else if (flags.classNotes) {
+      state.selectedSubjectId = subject.id;
+      state.currentView = "subjects";
+      state.activeSubjectTab = "reader";
+    }
     state.selectedDocumentId = getVisibleSubjectDocuments(subject)[0]?.id || null;
     elements.documentUpload.value = "";
     clearUploadOptions();
