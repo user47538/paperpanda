@@ -1414,6 +1414,47 @@ input[type="date"] {
   line-height: 1.7;
 }
 
+.reader-card--revision {
+  background: #FFFFFF;
+  border-radius: 34px;
+  padding: 0;
+  overflow: hidden;
+  box-shadow: 0 22px 46px rgba(26, 23, 38, 0.1);
+}
+
+.reader-card--revision .section-heading {
+  margin: 0;
+  padding: 28px 34px 18px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.reader-card--revision .revision-test-meta-block,
+.reader-card--revision .revision-generated-test,
+.reader-card--revision .reader-actions--revision,
+.reader-card--revision .upload-status,
+.reader-card--revision .revision-feedback {
+  padding-left: 34px;
+  padding-right: 34px;
+}
+
+.reader-card--revision .revision-test-meta-block {
+  padding-top: 22px;
+}
+
+.reader-card--revision .reader-actions--revision {
+  padding-top: 12px;
+  padding-bottom: 8px;
+}
+
+.reader-card--revision .upload-status {
+  padding-top: 8px;
+}
+
+.reader-card--revision .revision-feedback {
+  padding-bottom: 34px;
+}
+
 @media (max-width: 920px) {
   .revision-options {
     grid-template-columns: 1fr;

@@ -2849,8 +2849,8 @@ function applyBackgrounds() {
 
 function renderAiConnectionState() {
   if (elements.aiConnectionStatus) {
-    elements.aiConnectionStatus.textContent =
-      `AI answers and natural voice are provided by the backend service at ${API_BASE_URL}.`;
+    elements.aiConnectionStatus.textContent = "";
+    elements.aiConnectionStatus.classList.add("hidden");
   }
 }
 
@@ -8414,10 +8414,7 @@ elements.subjectTabs?.querySelectorAll("[data-viewer-tab]").forEach((button) => 
       return;
     }
     state.activeSubjectTab = nextTab;
-    renderSubjectsHero();
-    renderSubjectHeader();
-    renderSubjectTabs();
-    renderDockContext();
+    render();
   });
 });
 elements.upcomingAssessmentsButton.addEventListener("click", openUpcomingModal);
