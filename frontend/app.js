@@ -3581,7 +3581,7 @@ function renderSubjectList() {
       return `
         <button
           type="button"
-          class="subject-tile subject-tile--${palette[index % palette.length]}${subject.id === state.selectedSubjectId ? " subject-tile--active" : ""}"
+          class="subject-tile subject-tile--home${subject.id === state.selectedSubjectId ? " subject-tile--home-active" : ""}"
           data-subject-id="${subject.id}"
           style="--subject-outline:${escapeHtml(getSubjectTileOutlineColor(subject, index))}"
         >

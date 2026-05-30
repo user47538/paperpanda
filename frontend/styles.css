@@ -3172,6 +3172,11 @@ input[type="date"] {
   row-gap: 10px;
 }
 
+.subject-tile--home {
+  background: #fff;
+  color: var(--ink);
+}
+
 .subject-tile__title {
   font-family: var(--font-display);
   font-size: 15px;
@@ -3206,6 +3211,13 @@ input[type="date"] {
   color: #fff;
 }
 
+.subject-tile--home-active {
+  background: #fff;
+  color: var(--ink);
+  border: 1px solid var(--subject-outline, var(--ink));
+  box-shadow: 0 0 0 1px var(--subject-outline, var(--ink));
+}
+
 .subject-tile--dark .subject-tile__code,
 .subject-tile--active .subject-tile__code {
   background: #FFFFFF;
@@ -3215,6 +3227,11 @@ input[type="date"] {
 .subject-tile--dark .subject-tile__meta,
 .subject-tile--active .subject-tile__meta {
   color: rgba(255, 255, 255, 0.7);
+}
+
+.subject-tile--home .subject-tile__meta,
+.subject-tile--home-active .subject-tile__meta {
+  color: var(--muted);
 }
 
 .subject-tile--lilac { background: #E7E2FB; }
@@ -3231,6 +3248,11 @@ input[type="date"] {
 
 .subject-tile--active::after,
 .subject-tile--dark::after {
+  content: none;
+}
+
+.subject-tile--home::after,
+.subject-tile--home-active::after {
   content: none;
 }
 
