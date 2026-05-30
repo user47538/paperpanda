@@ -585,6 +585,7 @@ const elements = {
   viewerPanelReader: document.getElementById("viewer-panel-reader"),
   viewerPanelHomework: document.getElementById("viewer-panel-homework"),
   viewerPanelWatch: document.getElementById("viewer-panel-watch"),
+  watchAddLinkButton: document.getElementById("watch-add-link-button"),
   viewerPanelAssessments: document.getElementById("viewer-panel-assessments"),
   documentsBody: document.getElementById("documents-body"),
   documentsToggleButton: document.getElementById("documents-toggle-button"),
@@ -1470,10 +1471,10 @@ function renderPendingUpload() {
 function renderUploadAssessmentTaskOptions() {
   const subject = getUploadSubject();
   const isAssessment = getSelectedUploadType() === "assessment";
-  elements.uploadAssessmentTaskWrap.classList.toggle("hidden", !isAssessment);
-  elements.uploadDueDateWrap.classList.toggle("hidden", !isAssessment);
-  elements.uploadWatchUrlWrap.classList.toggle("hidden", getSelectedUploadType() !== "watch");
-  elements.uploadWatchTitleWrap.classList.toggle("hidden", getSelectedUploadType() !== "watch");
+  elements.uploadAssessmentTaskWrap.classList.toggle("upload-field--hidden", !isAssessment);
+  elements.uploadDueDateWrap.classList.toggle("upload-field--hidden", !isAssessment);
+  elements.uploadWatchUrlWrap.classList.toggle("upload-field--hidden", getSelectedUploadType() !== "watch");
+  elements.uploadWatchTitleWrap.classList.toggle("upload-field--hidden", getSelectedUploadType() !== "watch");
 
   if (!subject || !isAssessment) {
     elements.uploadAssessmentTaskSelect.innerHTML = `<option value="">Create new assessment</option>`;
@@ -1802,20 +1803,24 @@ function renderRevisionTestView() {
               const feedbackMarkup = feedback
                 ? `
                   <div class="revision-question__feedback">
-                    <div class="revision-question__score${(feedback?.score || 0) < (feedback?.marks || question.marks || 0) ? " revision-question__score--incorrect" : ""}">
-                      ${escapeHtml(`${feedback.score || 0}/${feedback.marks || question.marks || 0}`)}
+                    <div class="revision-question__score-wrap">
+                      <div class="revision-question__score${(feedback?.score || 0) < (feedback?.marks || question.marks || 0) ? " revision-question__score--incorrect" : ""}">
+                        ${escapeHtml(`${feedback.score || 0}/${feedback.marks || question.marks || 0}`)}
+                      </div>
                     </div>
                     <p class="revision-question__feedback-copy">${escapeHtml(feedback.feedback || "")}</p>
-                    ${
-                      feedback.correctOption
-                        ? `<p class="revision-question__answer revision-question__answer--correct"><strong>Correct answer:</strong> <span>${escapeHtml(feedback.correctOption)}</span></p>`
-                        : ""
-                    }
-                    ${
-                      feedback.studentAnswer
-                        ? `<p class="revision-question__answer revision-question__answer--student"><strong>Your answer:</strong> <span>${escapeHtml(feedback.studentAnswer)}</span></p>`
-                        : ""
-                    }
+                    <div class="revision-question__answers">
+                      ${
+                        feedback.correctOption
+                          ? `<p class="revision-question__answer revision-question__answer--correct"><strong>Correct answer:</strong><span>${escapeHtml(feedback.correctOption)}</span></p>`
+                          : ""
+                      }
+                      ${
+                        feedback.studentAnswer
+                          ? `<p class="revision-question__answer revision-question__answer--student"><strong>Your answer:</strong><span>${escapeHtml(feedback.studentAnswer)}</span></p>`
+                          : ""
+                      }
+                    </div>
                   </div>
                 `
                 : "";
@@ -1854,8 +1859,9 @@ function renderRevisionTestView() {
   if (state.revisionSubmission) {
     elements.revisionFeedback.classList.remove("hidden");
     elements.revisionFeedback.innerHTML = `
-      <div class="revision-feedback__summary-score">${escapeHtml(`${state.revisionSubmission.totalScore || 0}/${state.revisionSubmission.totalAvailable || 0}`)}</div>
-      <p class="revision-feedback__summary-copy">${escapeHtml(state.revisionSubmission.overallFeedback || "")}</p>
+      <div class="revision-feedback__summary">
+        <p class="revision-feedback__summary-copy">${escapeHtml(state.revisionSubmission.overallFeedback || "")}</p>
+      </div>
     `;
   } else {
     elements.revisionFeedback.classList.add("hidden");
@@ -2853,6 +2859,7 @@ function openDashboard(nextView = "home") {
   elements.appShell.classList.remove("hidden");
   elements.welcomeHeading.textContent = "";
   hydrateSettingsView();
+  resetRevisionState();
   state.currentView = nextView;
   render();
   void loadRevisionCatalogue();
@@ -3619,6 +3626,21 @@ function getSubjectTileOutlineColor(subject, paletteIndex) {
   }[["dark", "lilac", "peach", "yellow", "sky", "mint"][paletteIndex % 6]] || "#DAD0FA";
 }
 
+function getSubjectTileCodeBackground(subject, paletteIndex) {
+  if (subject.id === "maths" || subject.id === "wellbeing") {
+    return "#1B1825";
+  }
+
+  return {
+    dark: "#FFFFFF",
+    lilac: "#DAD0FA",
+    peach: "#F9D8BE",
+    yellow: "#FFE79E",
+    sky: "#C8E2F6",
+    mint: "#CDEEDB"
+  }[["dark", "lilac", "peach", "yellow", "sky", "mint"][paletteIndex % 6]] || "#DAD0FA";
+}
+
 function getSubjectTabCounts(subject) {
   return {
     reader: getVisibleSubjectDocuments(subject).length,
@@ -3746,9 +3768,9 @@ function renderSubjectList() {
       return `
         <button
           type="button"
-          class="subject-tile subject-tile--home subject-tile--${palette[index % palette.length]}${subject.id === state.selectedSubjectId ? " subject-tile--home-active" : ""}"
+          class="subject-tile subject-tile--home${subject.id === state.selectedSubjectId ? " subject-tile--home-active" : ""}"
           data-subject-id="${subject.id}"
-          style="--subject-outline:${escapeHtml(getSubjectTileOutlineColor(subject, index))}"
+          style="--subject-outline:${escapeHtml(getSubjectTileOutlineColor(subject, index))}; --subject-code-bg:${escapeHtml(getSubjectTileCodeBackground(subject, index))}"
         >
           <span class="subject-tile__code">${getSubjectTileCodeMarkup(subject)}</span>
           <span class="subject-tile__title">${escapeHtml(subject.name)}</span>
@@ -4187,8 +4209,16 @@ function renderWatchList() {
   elements.watchStatus.textContent = "";
   const watchItems = Array.isArray(subject.watch) ? subject.watch : [];
   if (!watchItems.length) {
-    elements.watchList.innerHTML = `<div class="empty-state">No WATCH items for this subject yet.</div>`;
+    elements.watchList.innerHTML = `
+      <div class="empty-state">
+        No WATCH items for this subject yet.
+        <div class="documents-footer" style="margin-top:16px;">
+          <button type="button" class="ghost-button" id="watch-empty-add-link-button">Add a YouTube link</button>
+        </div>
+      </div>
+    `;
     elements.watchToggleButton.classList.add("hidden");
+    document.getElementById("watch-empty-add-link-button")?.addEventListener("click", openWatchUploadModal);
     renderDockContext();
     return;
   }
@@ -5210,11 +5240,56 @@ function buildAssessmentTaskStages(assessment, linkedDocumentBundles) {
 }
 
 function buildSpecificAssessmentStages(assessment, linkedTitles = [], topicHints = [], workLength = 0) {
+  const isLikelyTest = /(?:^|\b)(test|exam|quiz|semester test|topic test)\b/i.test(
+    `${assessment.componentTask || ""} ${assessment.title || ""} ${assessment.description || ""}`
+  );
+  const directiveClues = linkedTitles.filter((title) => /^(Choose|View|Plan|Decide|Review)\b/i.test(String(title || "")));
+  const noteTitles = linkedTitles.filter((title) => !directiveClues.includes(title));
   const topicsLabel = topicHints.length
     ? `Review these topics: ${topicHints.join(", ")}`
     : `List the exact topics covered in ${assessment.componentTask || assessment.title}`;
-  const firstNote = linkedTitles[0] ? `Read ${linkedTitles[0]} and highlight the formulas or key points that match the task` : "Read the attached notes and mark the most important ideas";
-  const secondNote = linkedTitles[1] ? `Use ${linkedTitles[1]} for practice questions or worked examples` : "Complete 3 short practice questions that match the task";
+  const firstNote = noteTitles[0] ? `Read ${noteTitles[0]} and highlight the formulas or key points that match the task` : "Read the attached notes and mark the most important ideas";
+  const secondNote = noteTitles[1] ? `Use ${noteTitles[1]} for practice questions or worked examples` : "Complete 3 short practice questions that match the task";
+
+  if (!isLikelyTest) {
+    return [
+      {
+        title: "Understand the task",
+        items: [
+          `Read the assessment sheet for ${assessment.componentTask || assessment.title}`,
+          directiveClues[0] || "Highlight the exact product you need to submit and any required sections or components",
+          assessment.weighting ? `Note the weighting, due date, and conditions (${assessment.weighting})` : "Note the due date and any submission conditions"
+        ],
+        doneCount: workLength > 40 ? 2 : workLength > 10 ? 1 : 0
+      },
+      {
+        title: "Plan",
+        items: [
+          noteTitles[0] ? `Use ${noteTitles[0]} to identify the key ideas, evidence, or examples you need` : "List the key ideas, evidence, or examples you need to include",
+          directiveClues[1] || (topicHints.length ? `Plan where these ideas or topics will appear: ${topicHints.slice(0, 4).join(", ")}` : "Plan the required sections in the order you will complete them"),
+          "Decide what your final structure or layout will look like before you start drafting"
+        ],
+        doneCount: noteTitles.length || directiveClues.length ? (workLength > 120 ? 2 : 1) : 0
+      },
+      {
+        title: "Draft",
+        items: [
+          "Draft each required section one at a time",
+          "Check that each section connects back to the task sheet and uses the right style or format",
+          directiveClues[2] || "Choose how you will produce the final version and tidy the presentation"
+        ],
+        doneCount: workLength > 180 ? 1 : 0
+      },
+      {
+        title: "Final check",
+        items: [
+          directiveClues[3] || "Read through the whole task once more and check that every required part is included",
+          "Fix any missing details, spelling, layout, or submission issues before handing it in"
+        ],
+        doneCount: assessment.completed ? 2 : 0
+      }
+    ];
+  }
 
   return [
     {
@@ -5426,6 +5501,49 @@ async function openRevisionTestFromTask(config) {
   });
 }
 
+function extractAssessmentSpecificClues(sourceText, topicHints = []) {
+  const text = String(sourceText || "");
+  const clues = [];
+
+  const pushClue = (value) => {
+    const nextValue = String(value || "").replace(/\s+/g, " ").trim();
+    if (nextValue && !clues.includes(nextValue)) {
+      clues.push(nextValue);
+    }
+  };
+
+  if (/\bchoose (?:a|the) play\b/i.test(text)) {
+    pushClue("Choose the play you want to focus on");
+  }
+  if (/\bview (?:a|the) production\b|\bwatch (?:a|the) production\b/i.test(text)) {
+    pushClue("View a production of the chosen play and take notes on important moments");
+  }
+
+  const sectionTerms = [
+    "newspaper title",
+    "front page news",
+    "additional news report",
+    "obituaries",
+    "advertisements",
+    "editorial",
+    "review",
+    "headline"
+  ].filter((term) => new RegExp(`\\b${term.replace(/\s+/g, "\\s+")}\\b`, "i").test(text));
+  if (sectionTerms.length) {
+    pushClue(`Plan these required sections: ${sectionTerms.join(", ")}`);
+  }
+
+  if (/\bdigital\b|\bhard copy\b|\bhandwritten\b/i.test(text)) {
+    pushClue("Decide whether the final piece will be digital or hard copy and match the required format");
+  }
+
+  if (topicHints.length) {
+    pushClue(`Review these topics: ${topicHints.slice(0, 5).join(", ")}`);
+  }
+
+  return clues;
+}
+
 async function simplifyHomeworkBundle(homeworkBundle, subject) {
   const prompt = [
     "Break this homework into exactly 4 checkbox steps.",
@@ -5457,19 +5575,36 @@ async function simplifyAssessmentTask(assessment, subject) {
   const linkedDocumentBundles = getLinkedDocumentBundles(subject, assessment.linkedDocumentIds);
   const revisionEntry = state.revisionCatalogue.find((entry) => entry.subjectId === subject.id);
   const topicHints = Array.isArray(revisionEntry?.topics) ? revisionEntry.topics.slice(0, 6) : [];
+  const linkedBundleContent = linkedDocumentBundles
+    .slice(0, 3)
+    .map((bundle) => `${bundle.title}\n${clipText(bundle.content || "", 2200)}`);
+  const sourceText = [
+    assessment.description || "",
+    `Task: ${assessment.componentTask || assessment.title}`,
+    `Subject: ${subject.name}`,
+    ...linkedBundleContent
+  ].filter(Boolean).join("\n\n");
+  const isLikelyTest = /(?:^|\b)(test|exam|quiz|semester test|topic test)\b/i.test(
+    `${assessment.componentTask || ""} ${assessment.title || ""} ${assessment.description || ""}`
+  );
+  const preferredTitles = isLikelyTest
+    ? ["Preparation", "Practice", "Test day", "Review"]
+    : ["Understand the task", "Plan", "Draft", "Final check"];
   const prompt = [
     "Break this assessment into exactly 4 named stages for a student checklist.",
-    "Use these exact stage titles in order: Preparation, Practice, Test day, Review.",
-    "Make the checklist items specific to the actual task and subject, not generic study advice.",
+    `Use these exact stage titles in order: ${preferredTitles.join(", ")}.`,
+    "Read the actual assessment notification and attached notes carefully before writing the checklist.",
+    "Make the checklist items specific to the actual task, deliverables, format, and subject content, not generic study advice.",
+    "If the task is a project or assignment, turn the real required components into steps.",
     "If the task is a test or exam, include the actual topics to review by name where possible.",
     "Return only valid JSON with this exact shape:",
-    '[{"title":"Preparation","items":["item 1","item 2","item 3"]},{"title":"Practice","items":["item 1","item 2","item 3"]},{"title":"Test day","items":["item 1","item 2"]},{"title":"Review","items":["item 1","item 2"]}]',
+    `[{"title":"${preferredTitles[0]}","items":["item 1","item 2","item 3"]},{"title":"${preferredTitles[1]}","items":["item 1","item 2","item 3"]},{"title":"${preferredTitles[2]}","items":["item 1","item 2"]},{"title":"${preferredTitles[3]}","items":["item 1","item 2"]}]`,
     `Assessment: ${assessment.componentTask || assessment.title}`,
     `Subject: ${subject.name}`,
     `Due: ${formatAssessmentDueLabel(assessment.dueDate)}`,
     topicHints.length ? `Likely topics: ${topicHints.join(", ")}` : "",
-    clipText(assessment.description || "", 800),
-    ...linkedDocumentBundles.slice(0, 2).map((bundle) => `${bundle.title}\n${clipText(bundle.content || "", 700)}`)
+    clipText(assessment.description || "", 1600),
+    ...linkedBundleContent
   ].filter(Boolean).join("\n\n");
   const answer = await requestAskAnswer(prompt, subject, buildTaskAskDocument(subject, {
     kind: "assessment",
@@ -5477,12 +5612,13 @@ async function simplifyAssessmentTask(assessment, subject) {
     linkedDocumentBundles
   }));
   const trimmedAnswer = String(answer || "").trim();
-  const parsedStages = trimmedAnswer.startsWith("[") ? parseAssessmentStages(trimmedAnswer) : [];
+  const parsedStages = parseAssessmentStages(trimmedAnswer);
+  const clueStages = extractAssessmentSpecificClues(sourceText, topicHints);
   const nextStages = hasUsableAssessmentStages(parsedStages)
     ? parsedStages
     : buildSpecificAssessmentStages(
         assessment,
-        linkedDocumentBundles.slice(0, 2).map((bundle) => bundle.title),
+        [...linkedDocumentBundles.slice(0, 2).map((bundle) => bundle.title), ...clueStages],
         topicHints.slice(0, 4),
         String(assessment?.workNotes || "").trim().length
       ).map((stage) => ({ title: stage.title, items: stage.items }));
@@ -5508,6 +5644,7 @@ function buildTaskAskDocument(subject, taskContext) {
         `Distribution: ${formatAssessmentDueLabel(taskContext.assessment.distributionDate || "TBC")}`,
         `Due: ${formatAssessmentDueLabel(taskContext.assessment.dueDate)}`,
         `Weighting: ${taskContext.assessment.weighting || "TBC"}`,
+        taskContext.assessment.workNotes || "",
         ...taskContext.linkedDocumentBundles.map((bundle) => `${bundle.title}\n${clipText(bundle.content || "", 1200)}`)
       ]
         .filter(Boolean)
@@ -7668,6 +7805,17 @@ function clearPendingUpload() {
   renderPendingUpload();
 }
 
+function openWatchUploadModal() {
+  openUploadModal();
+  elements.uploadWatch.checked = true;
+  elements.uploadClassNotes.checked = false;
+  elements.uploadAssessment.checked = false;
+  elements.uploadHomework.checked = false;
+  syncUploadOptions();
+  renderUploadAssessmentTaskOptions();
+  elements.uploadWatchUrl.focus();
+}
+
 function syncUploadOptions() {
   elements.uploadDueDateWrap.classList.toggle("upload-field--hidden", !elements.uploadAssessment.checked);
   elements.uploadAssessmentTaskWrap.classList.toggle("upload-field--hidden", !elements.uploadAssessment.checked);
@@ -8353,6 +8501,7 @@ elements.watchToggleButton.addEventListener("click", () => {
   state.watchExpanded = !state.watchExpanded;
   renderWatchList();
 });
+elements.watchAddLinkButton?.addEventListener("click", openWatchUploadModal);
 elements.watchRescanButton.addEventListener("click", handleWatchRescan);
 elements.processUploadButton.addEventListener("click", handleProcessUpload);
 elements.clearUploadButton.addEventListener("click", () => {

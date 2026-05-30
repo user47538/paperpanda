@@ -1271,7 +1271,7 @@ input[type="date"] {
   font-weight: 600;
 }
 
-.revision-generated-test { margin-top: 20px; }
+.revision-generated-test { margin-top: 24px; }
 .revision-test-section, .revision-test-question {
   background: var(--card);
   border: 0;
@@ -1279,8 +1279,8 @@ input[type="date"] {
   box-shadow: var(--shadow-sm);
   padding: 28px 32px;
 }
-.revision-test-section + .revision-test-section { margin-top: 18px; }
-.revision-test-section-list, .revision-test-question-list { display: grid; gap: 18px; }
+.revision-test-section + .revision-test-section { margin-top: 22px; }
+.revision-test-section-list, .revision-test-question-list { display: grid; gap: 22px; }
 .revision-test-question { background: var(--bg); box-shadow: none; }
 .revision-test-meta, .revision-test-question-type {
   font-family: var(--font-body);
@@ -1292,15 +1292,15 @@ input[type="date"] {
 }
 
 .revision-test-question h5 {
-  margin: 16px 0 20px;
+  margin: 18px 0 22px;
   line-height: 1.45;
 }
 
 .revision-options {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-  margin-top: 14px;
+  gap: 18px;
+  margin-top: 18px;
 }
 
 .revision-option {
@@ -1308,61 +1308,68 @@ input[type="date"] {
   border: 0;
   border-radius: 14px;
   box-shadow: var(--shadow-sm);
-  padding: 18px 20px;
+  padding: 20px 22px;
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  min-height: 84px;
-  line-height: 1.45;
+  min-height: 102px;
+  line-height: 1.55;
 }
 .revision-option input { accent-color: var(--ink); }
-.revision-option span { display: block; }
+.revision-option span { display: block; padding-top: 2px; }
 
-.revision-response-editor { margin-top: 20px; min-height: 130px; padding: 22px 24px; }
-.revision-response-editor--extended { min-height: 240px; }
+.revision-response-editor { margin-top: 24px; min-height: 150px; padding: 28px 30px; }
+.revision-response-editor--extended { min-height: 280px; }
 
 .revision-test-meta-block {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
+  margin-bottom: 10px;
 }
 
 .revision-test-meta-score {
   margin-left: auto;
   color: #d94a36;
   font-family: "Bradley Hand", "Segoe Print", "Comic Sans MS", cursive;
-  font-size: 44px;
+  font-size: 38px;
   line-height: 1;
   font-weight: 700;
   transform: rotate(-4deg);
-  padding-left: 16px;
+  padding: 6px 0 10px 20px;
 }
 
-.revision-feedback { margin-top: 18px; display: grid; gap: 14px; }
+.revision-feedback { margin-top: 24px; display: grid; gap: 16px; }
 .revision-feedback__summary, .revision-feedback__item {
   background: var(--card);
   border: 0;
   border-radius: 18px;
   box-shadow: var(--shadow-sm);
-  padding: 24px 28px 28px;
+  padding: 28px 32px 32px;
 }
 
 .revision-question__feedback {
-  margin-top: 24px;
-  padding-top: 22px;
+  margin-top: 26px;
+  padding-top: 24px;
   border-top: 1px solid var(--hairline);
   display: grid;
-  gap: 16px;
+  gap: 18px;
+}
+
+.revision-question__score-wrap {
+  min-height: 38px;
+  display: flex;
+  align-items: flex-start;
 }
 
 .revision-question__score {
   color: #d94a36;
   font-family: "Bradley Hand", "Segoe Print", "Comic Sans MS", cursive;
-  font-size: 24px;
+  font-size: 22px;
   font-weight: 700;
   line-height: 1;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 
 .revision-question__score--incorrect {
@@ -1374,29 +1381,32 @@ input[type="date"] {
   line-height: 1.6;
 }
 
+.revision-question__answers {
+  display: grid;
+  gap: 12px;
+}
+
 .revision-question__answer {
   margin: 0;
   line-height: 1.6;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: baseline;
+}
+
+.revision-question__answer strong {
+  flex: 0 0 auto;
 }
 
 .revision-question__answer span {
   display: inline-block;
-  margin-left: 8px;
+  flex: 1 1 260px;
 }
 
 .revision-question__answer--correct,
 .revision-question__answer--student {
   color: #d94a36;
-}
-
-.revision-feedback__summary-score {
-  color: #d94a36;
-  font-family: "Bradley Hand", "Segoe Print", "Comic Sans MS", cursive;
-  font-size: 52px;
-  line-height: 1;
-  font-weight: 700;
-  transform: rotate(-4deg);
-  margin-bottom: 14px;
 }
 
 .revision-feedback__summary-copy {
@@ -3287,6 +3297,11 @@ input[type="date"] {
 .subject-tile--home {
   background: #fff;
   color: var(--ink);
+}
+
+.subject-tile--home .subject-tile__code,
+.subject-tile--home-active .subject-tile__code {
+  background: var(--subject-code-bg, #FFFFFF);
 }
 
 .subject-tile--home.subject-tile--lilac,
