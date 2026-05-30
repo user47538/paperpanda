@@ -38,7 +38,14 @@ const pandaEmojiChoices = [
   { id: "party", label: "Party", src: "/panda-emojis/panda-party-256.png" },
   { id: "shades", label: "Shades", src: "/panda-emojis/panda-shades-256.png" },
   { id: "spew", label: "Spew", src: "/panda-emojis/panda-spew-256.png" },
-  { id: "yawn", label: "Yawn", src: "/panda-emojis/panda-yawn-256.png" }
+  { id: "yawn", label: "Yawn", src: "/panda-emojis/panda-yawn-256.png" },
+  { id: "happy", label: "Happy", src: "/panda-emojis-2ndedition/panda-happy-256.png" },
+  { id: "smart", label: "Smart", src: "/panda-emojis-2ndedition/panda-smart-256.png" },
+  { id: "sick", label: "Sick", src: "/panda-emojis-2ndedition/panda-sick-256.png" },
+  { id: "crying", label: "Crying", src: "/panda-emojis-2ndedition/panda-crying-256.png" },
+  { id: "dead", label: "Dead", src: "/panda-emojis-2ndedition/panda-dead-256.png" },
+  { id: "swear", label: "Swear", src: "/panda-emojis-2ndedition/panda-swear-256.png" },
+  { id: "gun", label: "Gun", src: "/panda-emojis-2ndedition/panda-gun-256.png" }
 ];
 
 const subjectSeed = [
@@ -4266,6 +4273,20 @@ function renderReader() {
           </section>
         `
         : "";
+    const documentPagesMarkup =
+      pagePreviewStackMarkup
+        ? `
+          <section class="reader-pages-card">
+            <div class="section-heading section-heading--stacked section-heading--compact">
+              <div>
+                <p class="eyebrow">Document pages</p>
+                <h3>${escapeHtml(selectedDocument.title)}</h3>
+              </div>
+            </div>
+            <div class="reader-preview-stack">${pagePreviewStackMarkup}</div>
+          </section>
+        `
+        : "";
 
     elements.readerContent.innerHTML = `
       ${reviewToggleMarkup}
@@ -4277,7 +4298,6 @@ function renderReader() {
         <button type="button" class="ghost-button ghost-button--small" id="reader-resume-button" ${!sections.length ? "disabled" : ""}>Resume</button>
         <button type="button" class="ghost-button ghost-button--small" id="reader-complete-section-button" ${!currentSection ? "disabled" : ""}>${currentSection && completedIds.has(currentSection.id) ? "Undo section" : "Complete section"}</button>
       </div>
-      <div class="reader-preview-stack">${pagePreviewStackMarkup || previewImageMarkup}</div>
       <div class="reader-section-strip">${sectionButtonsMarkup || `<span class="helper-text">${selectedDocument.studyPlanStatus === "loading" ? "Breaking this document into sections..." : "Preparing study sections..."}</span>`}</div>
       ${
         currentSection
@@ -4296,6 +4316,7 @@ function renderReader() {
           : `<div class="empty-state">PaperPanda is organising this document into study sections.</div>`
       }
       ${quizMarkup}
+      ${documentPagesMarkup || previewImageMarkup}
       ${openOriginalMarkup}
     `;
 

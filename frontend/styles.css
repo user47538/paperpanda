@@ -2878,7 +2878,8 @@ input[type="date"] {
 }
 
 .reader-study-card,
-.reader-quiz-card {
+.reader-quiz-card,
+.reader-pages-card {
   display: grid;
   gap: 12px;
   padding: 18px;
@@ -2889,6 +2890,10 @@ input[type="date"] {
 
 .reader-quiz-card {
   margin-top: 16px;
+}
+
+.reader-pages-card {
+  margin-top: 18px;
 }
 
 .reader-content__text--study {
