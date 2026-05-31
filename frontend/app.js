@@ -923,13 +923,17 @@ function getManualSubjectWatchItems(subject) {
     : [];
 }
 
+function getWatchSourceDocuments(subject) {
+  return getVisibleSubjectDocuments(subject).filter((documentRecord) => !documentRecord?.flags?.assessment);
+}
+
 function getAutoSubjectWatchItems(subject) {
   if (!subject) {
     return [];
   }
   const hiddenUrls = getSubjectHiddenWatchUrls(subject);
   const manualUrls = new Set(getManualSubjectWatchItems(subject).map((item) => item.url));
-  return getDocumentGroupsFromDocuments(Array.isArray(subject.documents) ? subject.documents : [])
+  return getDocumentGroupsFromDocuments(getWatchSourceDocuments(subject))
     .flatMap((bundle) =>
       extractYouTubeLinks(bundle.content).map((url) => ({
         id: `watch-${bundle.id}-${url}`,
@@ -6594,7 +6598,7 @@ function renderPractice() {
   }
 
   const focusBundle = homeworkBundles[0];
-  const nextBundles = homeworkBundles.slice(1, 3);
+  const nextBundles = homeworkBundles.slice(1);
   const focusSteps = buildHomeworkTaskSteps(focusBundle);
   const readPrompt = `Read this homework aloud and help me understand the instructions: ${focusBundle.title}`;
   const simplifyPrompt = `Simplify the homework task and explain it in smaller steps: ${focusBundle.title}\n\n${focusBundle.content || ""}`;
