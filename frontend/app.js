@@ -954,6 +954,22 @@ function isHomeworkDocument(documentRecord) {
   return Boolean(documentRecord?.flags?.homework || String(documentRecord?.type || "").toLowerCase() === "homework");
 }
 
+function getReaderDocuments(subject) {
+  return getVisibleSubjectDocuments(subject);
+}
+
+function getSubjectHomeworkBundles(subject) {
+  return getHomeworkBundles(subject);
+}
+
+function getSubjectWatchLinks(subject) {
+  return getSubjectWatchItems(subject);
+}
+
+function getActiveSubjectAssessments(subject) {
+  return (Array.isArray(subject?.assessments) ? subject.assessments : []).filter((assessment) => !assessment.completed);
+}
+
 function getVisibleSubjectDocuments(subject) {
   return getSortedDocuments(subject).filter((documentRecord) => !isHomeworkDocument(documentRecord));
 }
@@ -1548,25 +1564,25 @@ function renderDockContext() {
   }
 
   if (state.activeSubjectTab === "watch") {
-    const watchItems = getSubjectWatchItems(subject);
-    elements.dockContextTitle.textContent = "Watch list";
+    const watchItems = getSubjectWatchLinks(subject);
+    elements.dockContextTitle.textContent = "Watch";
     elements.dockContextBody.innerHTML = watchItems.length
-      ? `<article class="dock-tile dock-tile--mint"><div class="dock-tile__copy"><strong>${escapeHtml(`${watchItems.length} video link${watchItems.length === 1 ? "" : "s"}`)}</strong><span>Open and manage these from the main Watch list above.</span></div></article>`
-      : `<div class="empty-state empty-state--compact">No WATCH links for this subject yet.</div>`;
+      ? `<article class="dock-tile dock-tile--mint"><div class="dock-tile__copy"><strong>${escapeHtml(`${watchItems.length} subject-specific link${watchItems.length === 1 ? "" : "s"}`)}</strong><span>Use the main Watch panel above to open, add, or remove links for ${escapeHtml(subject.name)} only.</span></div></article>`
+      : `<div class="empty-state empty-state--compact">No WATCH links for ${escapeHtml(subject.name)} yet.</div>`;
     return;
   }
 
   if (state.activeSubjectTab === "homework") {
-    const focusBundle = getHomeworkBundles(subject)[0] || null;
-    elements.dockContextTitle.textContent = "Current task";
+    const focusBundle = getSubjectHomeworkBundles(subject)[0] || null;
+    elements.dockContextTitle.textContent = "Homework";
     elements.dockContextBody.innerHTML = focusBundle
-      ? `<article class="dock-tile dock-tile--peach"><div class="dock-tile__copy"><strong>${escapeHtml(focusBundle.title)}</strong><span>${escapeHtml(getBundleWorkNotes(focusBundle) ? "Writing started" : "Ready to begin in the main Homework panel.")}</span></div></article>`
-      : `<div class="empty-state empty-state--compact">No homework items for this subject yet.</div>`;
+      ? `<article class="dock-tile dock-tile--peach"><div class="dock-tile__copy"><strong>${escapeHtml(focusBundle.title)}</strong><span>${escapeHtml(getBundleWorkNotes(focusBundle) ? "Continue this in the main Homework panel." : "Begin this in the main Homework panel.")}</span></div></article>`
+      : `<div class="empty-state empty-state--compact">No homework items for ${escapeHtml(subject.name)} yet.</div>`;
     return;
   }
 
   if (state.activeSubjectTab === "assessments") {
-    const nextAssessment = (Array.isArray(subject.assessments) ? subject.assessments : []).find((assessment) => !assessment.completed) || null;
+    const nextAssessment = getActiveSubjectAssessments(subject)[0] || null;
     elements.dockContextTitle.textContent = "Assessment focus";
     elements.dockContextBody.innerHTML = nextAssessment
       ? `<article class="dock-tile dock-tile--lilac"><div class="dock-tile__copy"><strong>${escapeHtml(nextAssessment.componentTask || nextAssessment.title)}</strong><span>${escapeHtml(nextAssessment.dueDate || "Check the schedule in the main Assessments panel.")}</span></div></article>`
@@ -3006,7 +3022,7 @@ function getAllHomeworkBundles() {
 }
 
 function getAllDocumentBundles(subject) {
-  return getDocumentBundlesByFilter(subject, (documentRecord) => !isHomeworkDocument(documentRecord));
+  return getDocumentGroupsFromDocuments(getReaderDocuments(subject));
 }
 
 function getUnreadDocumentMetrics() {
@@ -3718,20 +3734,20 @@ function getSubjectTileCodeBackground(subject, paletteIndex) {
 
 function getSubjectTabCounts(subject) {
   return {
-    reader: getVisibleSubjectDocuments(subject).length,
-    homework: getHomeworkBundles(subject).length,
-    watch: getSubjectWatchItems(subject).length,
-    assessments: (subject.assessments || []).filter((assessment) => !assessment.completed).length
+    reader: getReaderDocuments(subject).length,
+    homework: getSubjectHomeworkBundles(subject).length,
+    watch: getSubjectWatchLinks(subject).length,
+    assessments: getActiveSubjectAssessments(subject).length
   };
 }
 
 function getSubjectHeroCopy(subject, tab) {
-  const visibleDocuments = getVisibleSubjectDocuments(subject);
+  const visibleDocuments = getReaderDocuments(subject);
   const selectedDocument = getSelectedDocument();
   const nextAssessment = getNextSubjectAssessment(subject);
-  const homeworkBundles = getHomeworkBundles(subject);
-  const watchCount = getSubjectWatchItems(subject).length;
-  const activeAssessments = (subject.assessments || []).filter((assessment) => !assessment.completed);
+  const homeworkBundles = getSubjectHomeworkBundles(subject);
+  const watchCount = getSubjectWatchLinks(subject).length;
+  const activeAssessments = getActiveSubjectAssessments(subject);
 
   if (tab === "reader") {
     const pageCount = selectedDocument
@@ -4282,7 +4298,7 @@ function renderWatchList() {
   }
 
   elements.watchStatus.textContent = "";
-  const watchItems = getSubjectWatchItems(subject);
+  const watchItems = getSubjectWatchLinks(subject);
   if (!watchItems.length) {
     elements.watchList.innerHTML = `
       <div class="empty-state">
@@ -6566,7 +6582,7 @@ function renderPractice() {
     return;
   }
 
-  const homeworkBundles = getHomeworkBundles(subject);
+  const homeworkBundles = getSubjectHomeworkBundles(subject);
   if (!homeworkBundles.length) {
     elements.practiceList.innerHTML = `<div class="empty-state">No homework items for this subject yet.</div>`;
     if (elements.subjectHomeworkUpcomingList) {
