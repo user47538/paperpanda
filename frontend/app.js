@@ -913,13 +913,56 @@ function getSelectedSubject() {
 }
 
 function getSubjectHiddenWatchUrls(subject) {
-  return new Set(Array.isArray(subject?.hiddenWatchUrls) ? subject.hiddenWatchUrls.filter(Boolean) : []);
+  return new Set(
+    Array.isArray(subject?.hiddenWatchUrls)
+      ? subject.hiddenWatchUrls.map((url) => normaliseWatchUrl(url)).filter(Boolean)
+      : []
+  );
+}
+
+function normaliseWatchUrl(value) {
+  const rawValue = String(value || "").trim();
+  if (!rawValue) {
+    return "";
+  }
+
+  try {
+    const parsedUrl = new URL(rawValue);
+    const host = parsedUrl.hostname.replace(/^www\./i, "").toLowerCase();
+
+    if (host === "youtu.be") {
+      const videoId = parsedUrl.pathname.replace(/^\/+/, "").trim();
+      return videoId ? `https://youtu.be/${videoId}` : "";
+    }
+
+    if (host === "youtube.com" || host === "m.youtube.com") {
+      const videoId = parsedUrl.searchParams.get("v");
+      if (videoId) {
+        return `https://www.youtube.com/watch?v=${videoId}`;
+      }
+    }
+
+    parsedUrl.hash = "";
+    return parsedUrl.toString().replace(/\/$/, "");
+  } catch (error) {
+    return rawValue.replace(/\/$/, "");
+  }
+}
+
+function isSupportedWatchUrl(value) {
+  const normalisedUrl = normaliseWatchUrl(value);
+  return /^https?:\/\/(?:www\.)?(?:youtube\.com|m\.youtube\.com|youtu\.be)\//i.test(normalisedUrl);
 }
 
 function getManualSubjectWatchItems(subject) {
   const subjectId = subject?.id || "";
   return Array.isArray(subject?.watch)
-    ? subject.watch.filter((item) => item?.url && (item.source || "manual") === "manual" && item.subjectId === subjectId)
+    ? subject.watch
+        .filter((item) => item?.url && (item.source || "manual") === "manual" && item.subjectId === subjectId)
+        .map((item) => ({
+          ...item,
+          url: normaliseWatchUrl(item.url) || String(item.url || "").trim()
+        }))
     : [];
 }
 
@@ -927,25 +970,49 @@ function getWatchSourceDocuments(subject) {
   return getVisibleSubjectDocuments(subject).filter((documentRecord) => !documentRecord?.flags?.assessment);
 }
 
-function getAutoSubjectWatchItems(subject) {
+function getAutoSubjectWatchItems(subject, { suppressManualUrls = true } = {}) {
   if (!subject) {
     return [];
   }
   const hiddenUrls = getSubjectHiddenWatchUrls(subject);
-  const manualUrls = new Set(getManualSubjectWatchItems(subject).map((item) => item.url));
+  const manualUrls = new Set(getManualSubjectWatchItems(subject).map((item) => normaliseWatchUrl(item.url)));
   return getDocumentGroupsFromDocuments(getWatchSourceDocuments(subject))
     .flatMap((bundle) =>
-      extractYouTubeLinks(bundle.content).map((url) => ({
-        id: `watch-${bundle.id}-${url}`,
-        title: `${bundle.title} video`,
-        url,
-        source: "auto-document",
-        sourceDocumentTitle: bundle.title,
-        subjectId: subject.id,
-        addedAt: getBundlePrimaryDocument(bundle)?.addedAt || bundle.addedAt || new Date().toISOString()
-      }))
+      extractYouTubeLinks(bundle.content).map((url) => {
+        const normalisedUrl = normaliseWatchUrl(url);
+        return {
+          id: `watch-${bundle.id}-${normalisedUrl || url}`,
+          title: `${bundle.title} video`,
+          url: normalisedUrl || url,
+          source: "auto-document",
+          sourceDocumentTitle: bundle.title,
+          subjectId: subject.id,
+          addedAt: getBundlePrimaryDocument(bundle)?.addedAt || bundle.addedAt || new Date().toISOString()
+        };
+      })
     )
-    .filter((item) => !hiddenUrls.has(item.url) && !manualUrls.has(item.url));
+    .filter((item) => item.url)
+    .filter((item) => !hiddenUrls.has(item.url) && (!suppressManualUrls || !manualUrls.has(item.url)));
+}
+
+function findSubjectWatchItemByUrl(subject, url) {
+  const normalisedUrl = normaliseWatchUrl(url);
+  if (!subject || !normalisedUrl) {
+    return null;
+  }
+
+  return getSubjectWatchItems(subject).find((item) => normaliseWatchUrl(item.url) === normalisedUrl) || null;
+}
+
+function subjectHasAutoWatchUrl(subject, url) {
+  const normalisedUrl = normaliseWatchUrl(url);
+  if (!subject || !normalisedUrl) {
+    return false;
+  }
+
+  return getAutoSubjectWatchItems(subject, { suppressManualUrls: false }).some(
+    (item) => normaliseWatchUrl(item.url) === normalisedUrl
+  );
 }
 
 function getSubjectWatchItems(subject) {
@@ -1468,6 +1535,7 @@ function syncAutoWatchForAllSubjects() {
 }
 
 function removeManualWatchDuplicatesFromOtherSubjects(targetSubjectId, url, itemId) {
+  const normalisedUrl = normaliseWatchUrl(url);
   state.subjects.forEach((subject) => {
     if (subject.id === targetSubjectId) {
       return;
@@ -1476,7 +1544,7 @@ function removeManualWatchDuplicatesFromOtherSubjects(targetSubjectId, url, item
       if (item.id === itemId) {
         return false;
       }
-      return item.url !== url;
+      return normaliseWatchUrl(item.url) !== normalisedUrl;
     });
   });
 }
@@ -1570,27 +1638,21 @@ function renderDockContext() {
   if (state.activeSubjectTab === "watch") {
     const watchItems = getSubjectWatchLinks(subject);
     elements.dockContextTitle.textContent = "Watch";
-    elements.dockContextBody.innerHTML = watchItems.length
-      ? `<article class="dock-tile dock-tile--mint"><div class="dock-tile__copy"><strong>${escapeHtml(`${watchItems.length} subject-specific link${watchItems.length === 1 ? "" : "s"}`)}</strong><span>Use the main Watch panel above to open, add, or remove links for ${escapeHtml(subject.name)} only.</span></div></article>`
-      : `<div class="empty-state empty-state--compact">No WATCH links for ${escapeHtml(subject.name)} yet.</div>`;
+    elements.dockContextBody.innerHTML = `<article class="dock-tile dock-tile--mint"><div class="dock-tile__copy"><strong>${escapeHtml(`${watchItems.length} subject-specific link${watchItems.length === 1 ? "" : "s"}`)}</strong><span>Watch links stay in the main Watch panel so they do not mix with Reader, Homework, or Assessments.</span></div></article>`;
     return;
   }
 
   if (state.activeSubjectTab === "homework") {
-    const focusBundle = getSubjectHomeworkBundles(subject)[0] || null;
+    const homeworkCount = getSubjectHomeworkBundles(subject).length;
     elements.dockContextTitle.textContent = "Homework";
-    elements.dockContextBody.innerHTML = focusBundle
-      ? `<article class="dock-tile dock-tile--peach"><div class="dock-tile__copy"><strong>${escapeHtml(focusBundle.title)}</strong><span>${escapeHtml(getBundleWorkNotes(focusBundle) ? "Continue this in the main Homework panel." : "Begin this in the main Homework panel.")}</span></div></article>`
-      : `<div class="empty-state empty-state--compact">No homework items for ${escapeHtml(subject.name)} yet.</div>`;
+    elements.dockContextBody.innerHTML = `<article class="dock-tile dock-tile--peach"><div class="dock-tile__copy"><strong>${escapeHtml(`${homeworkCount} homework item${homeworkCount === 1 ? "" : "s"} in ${subject.name}`)}</strong><span>Homework stays in the main Homework panel so it does not appear as separate context content.</span></div></article>`;
     return;
   }
 
   if (state.activeSubjectTab === "assessments") {
-    const nextAssessment = getActiveSubjectAssessments(subject)[0] || null;
+    const assessmentCount = getActiveSubjectAssessments(subject).length;
     elements.dockContextTitle.textContent = "Assessment focus";
-    elements.dockContextBody.innerHTML = nextAssessment
-      ? `<article class="dock-tile dock-tile--lilac"><div class="dock-tile__copy"><strong>${escapeHtml(nextAssessment.componentTask || nextAssessment.title)}</strong><span>${escapeHtml(nextAssessment.dueDate || "Check the schedule in the main Assessments panel.")}</span></div></article>`
-      : `<div class="empty-state empty-state--compact">No active assessments for this subject.</div>`;
+    elements.dockContextBody.innerHTML = `<article class="dock-tile dock-tile--lilac"><div class="dock-tile__copy"><strong>${escapeHtml(`${assessmentCount} active assessment${assessmentCount === 1 ? "" : "s"}`)}</strong><span>Assessments stay in the main Assessments panel so each subject tab remains separate.</span></div></article>`;
     return;
   }
 
@@ -4358,10 +4420,16 @@ function renderWatchList() {
       if (button.dataset.watchAction === "delete") {
         if (item.source === "auto-document") {
           const hiddenUrls = getSubjectHiddenWatchUrls(subject);
-          hiddenUrls.add(item.url);
+          hiddenUrls.add(normaliseWatchUrl(item.url) || item.url);
           subject.hiddenWatchUrls = [...hiddenUrls];
         } else {
+          const normalisedUrl = normaliseWatchUrl(item.url);
           subject.watch = (Array.isArray(subject.watch) ? subject.watch : []).filter((entry) => entry.id !== item.id);
+          if (subjectHasAutoWatchUrl(subject, normalisedUrl)) {
+            const hiddenUrls = getSubjectHiddenWatchUrls(subject);
+            hiddenUrls.add(normalisedUrl);
+            subject.hiddenWatchUrls = [...hiddenUrls];
+          }
         }
         persistSubjects();
         render();
@@ -7789,17 +7857,27 @@ async function processFiles(fileList) {
   }
 
   if (flags.watch) {
-    const watchUrl = elements.uploadWatchUrl.value.trim();
+    const watchUrl = normaliseWatchUrl(elements.uploadWatchUrl.value);
     const watchTitle = elements.uploadWatchTitle.value.trim();
-    if (!watchUrl) {
-      elements.uploadStatus.textContent = "Add a YouTube link for WATCH.";
+    if (!watchUrl || !isSupportedWatchUrl(watchUrl)) {
+      elements.uploadStatus.textContent = "Add a valid YouTube link for WATCH.";
+      return;
+    }
+    const existingWatchItem = findSubjectWatchItemByUrl(subject, watchUrl);
+    if (existingWatchItem) {
+      subject.hiddenWatchUrls = (Array.isArray(subject.hiddenWatchUrls) ? subject.hiddenWatchUrls : []).filter(
+        (url) => normaliseWatchUrl(url) !== watchUrl
+      );
+      state.selectedSubjectId = subject.id;
+      state.currentView = "subjects";
+      state.activeSubjectTab = "watch";
+      persistSubjects();
+      render();
+      elements.uploadStatus.textContent = "That WATCH link is already in this subject.";
+      closeUploadModal();
       return;
     }
     const finalTitle = watchTitle || watchUrl;
-    if (getSubjectWatchItems(subject).some((item) => item.title.toLowerCase() === finalTitle.toLowerCase())) {
-      elements.uploadStatus.textContent = "A WATCH item with that name already exists in this subject.";
-      return;
-    }
     subject.watch = Array.isArray(subject.watch) ? subject.watch : [];
     const watchItem = {
       id: createId(),
@@ -7810,7 +7888,9 @@ async function processFiles(fileList) {
       subjectId: subject.id
     };
     subject.watch.unshift(watchItem);
-    subject.hiddenWatchUrls = (Array.isArray(subject.hiddenWatchUrls) ? subject.hiddenWatchUrls : []).filter((url) => url !== watchUrl);
+    subject.hiddenWatchUrls = (Array.isArray(subject.hiddenWatchUrls) ? subject.hiddenWatchUrls : []).filter(
+      (url) => normaliseWatchUrl(url) !== watchUrl
+    );
     removeManualWatchDuplicatesFromOtherSubjects(subject.id, watchUrl, watchItem.id);
     state.selectedSubjectId = subject.id;
     state.currentView = "subjects";
