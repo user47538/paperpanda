@@ -951,7 +951,7 @@ function getSubjectWatchItems(subject) {
 }
 
 function isHomeworkDocument(documentRecord) {
-  return Boolean(documentRecord?.flags?.homework);
+  return Boolean(documentRecord?.flags?.homework || String(documentRecord?.type || "").toLowerCase() === "homework");
 }
 
 function getVisibleSubjectDocuments(subject) {
@@ -1548,51 +1548,34 @@ function renderDockContext() {
   }
 
   if (state.activeSubjectTab === "watch") {
-    elements.dockContextTitle.textContent = "Watch picks";
-    const watchItems = getSubjectWatchItems(subject).slice(0, 3);
+    const watchItems = getSubjectWatchItems(subject);
+    elements.dockContextTitle.textContent = "Watch list";
     elements.dockContextBody.innerHTML = watchItems.length
-      ? watchItems
-          .map(
-            (item) => `
-              <button type="button" class="dock-tile dock-tile--mint" data-open-dock-watch="${escapeHtml(item.url)}">
-                <div class="dock-tile__copy">
-                  <strong>${escapeHtml(item.title)}</strong>
-                  <span>${escapeHtml(item.sourceDocumentTitle || item.url)}</span>
-                </div>
-              </button>
-            `
-          )
-          .join("")
+      ? `<article class="dock-tile dock-tile--mint"><div class="dock-tile__copy"><strong>${escapeHtml(`${watchItems.length} video link${watchItems.length === 1 ? "" : "s"}`)}</strong><span>Open and manage these from the main Watch list above.</span></div></article>`
       : `<div class="empty-state empty-state--compact">No WATCH links for this subject yet.</div>`;
-    elements.dockContextBody.querySelectorAll("[data-open-dock-watch]").forEach((button) => {
-      button.addEventListener("click", () => {
-        window.open(button.dataset.openDockWatch, "_blank", "noopener");
-      });
-    });
     return;
   }
 
-  elements.dockContextTitle.textContent = "Today’s stack";
-  const homeworkBundles = getHomeworkBundles(subject).slice(0, 3);
-  elements.dockContextBody.innerHTML = homeworkBundles.length
-    ? homeworkBundles
-        .map(
-          (bundle, index) => `
-            <button type="button" class="dock-tile dock-tile--${["peach", "yellow", "lilac"][index % 3]}" data-open-dock-homework="${bundle.id}">
-              <div class="dock-tile__copy">
-                <strong>${escapeHtml(bundle.title)}</strong>
-                <span>${escapeHtml(getBundleWorkNotes(bundle) ? "Writing started" : "Needs a draft")}</span>
-              </div>
-            </button>
-          `
-        )
-        .join("")
-    : `<div class="empty-state empty-state--compact">No stacked tasks yet.</div>`;
-  elements.dockContextBody.querySelectorAll("[data-open-dock-homework]").forEach((button) => {
-    button.addEventListener("click", () => {
-      openTaskView({ kind: "homework", id: button.dataset.openDockHomework });
-    });
-  });
+  if (state.activeSubjectTab === "homework") {
+    const focusBundle = getHomeworkBundles(subject)[0] || null;
+    elements.dockContextTitle.textContent = "Current task";
+    elements.dockContextBody.innerHTML = focusBundle
+      ? `<article class="dock-tile dock-tile--peach"><div class="dock-tile__copy"><strong>${escapeHtml(focusBundle.title)}</strong><span>${escapeHtml(getBundleWorkNotes(focusBundle) ? "Writing started" : "Ready to begin in the main Homework panel.")}</span></div></article>`
+      : `<div class="empty-state empty-state--compact">No homework items for this subject yet.</div>`;
+    return;
+  }
+
+  if (state.activeSubjectTab === "assessments") {
+    const nextAssessment = (Array.isArray(subject.assessments) ? subject.assessments : []).find((assessment) => !assessment.completed) || null;
+    elements.dockContextTitle.textContent = "Assessment focus";
+    elements.dockContextBody.innerHTML = nextAssessment
+      ? `<article class="dock-tile dock-tile--lilac"><div class="dock-tile__copy"><strong>${escapeHtml(nextAssessment.componentTask || nextAssessment.title)}</strong><span>${escapeHtml(nextAssessment.dueDate || "Check the schedule in the main Assessments panel.")}</span></div></article>`
+      : `<div class="empty-state empty-state--compact">No active assessments for this subject.</div>`;
+    return;
+  }
+
+  elements.dockContextTitle.textContent = "Current focus";
+  elements.dockContextBody.innerHTML = `<div class="empty-state empty-state--compact">Choose a tab to keep working in this subject.</div>`;
 }
 
 async function loadRevisionCatalogue(force = false) {
@@ -2731,8 +2714,8 @@ function normaliseDocument(documentRecord) {
     pointsAwarded: Boolean(documentRecord.pointsAwarded),
     flags: {
       classNotes: Boolean(documentRecord.flags?.classNotes || documentRecord.flags?.termOverview),
-      assessment: Boolean(documentRecord.flags?.assessment),
-      homework: Boolean(documentRecord.flags?.homework)
+      assessment: Boolean(documentRecord.flags?.assessment || String(documentRecord.type || "").toLowerCase() === "assessment"),
+      homework: Boolean(documentRecord.flags?.homework || String(documentRecord.type || "").toLowerCase() === "homework")
     }
   };
 }
