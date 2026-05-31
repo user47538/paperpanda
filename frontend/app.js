@@ -1426,6 +1426,23 @@ function syncAutoWatchForAllSubjects() {
   state.subjects.forEach((subject) => syncAutoWatchForSubject(subject));
 }
 
+function removeManualWatchDuplicatesFromOtherSubjects(targetSubjectId, url, itemId) {
+  state.subjects.forEach((subject) => {
+    if (subject.id === targetSubjectId) {
+      return;
+    }
+    subject.watch = (Array.isArray(subject.watch) ? subject.watch : []).filter((item) => {
+      if (item.source === "auto-document") {
+        return true;
+      }
+      if (item.id === itemId) {
+        return false;
+      }
+      return item.url !== url;
+    });
+  });
+}
+
 function renderSubjectHeader() {
   if (!elements.subjectHeader) {
     return;
@@ -2546,10 +2563,16 @@ function hydrateStoredSubject(subject, index) {
     watch: Array.isArray(subject.watch)
       ? subject.watch
           .filter((item) => item?.url)
-          .map((item) => ({
-            ...item,
-            subjectId: item.subjectId || resolvedSubjectId
-          }))
+          .flatMap((item) => {
+            const source = item.source || "manual";
+            if (source === "manual") {
+              if (!item.subjectId || item.subjectId !== resolvedSubjectId) {
+                return [];
+              }
+              return [{ ...item, subjectId: resolvedSubjectId, source: "manual" }];
+            }
+            return [{ ...item, subjectId: resolvedSubjectId, source }];
+          })
       : [],
     askHistory: Array.isArray(subject.askHistory) ? subject.askHistory : [],
     savedRevisionTests: Array.isArray(subject.savedRevisionTests)
@@ -2559,6 +2582,42 @@ function hydrateStoredSubject(subject, index) {
       ? subject.practice
       : structuredClone(subjectTemplateSeed[index]?.practice || [])
   };
+}
+
+function normalizeManualWatchItemsAcrossSubjects() {
+  const latestManualByUrl = new Map();
+
+  state.subjects.forEach((subject) => {
+    const subjectId = subject.id;
+    subject.watch = (Array.isArray(subject.watch) ? subject.watch : [])
+      .filter((item) => item?.url)
+      .map((item) => ({
+        ...item,
+        subjectId: item.subjectId || subjectId
+      }));
+
+    subject.watch.forEach((item) => {
+      if (item.source === "auto-document") {
+        return;
+      }
+      const existing = latestManualByUrl.get(item.url);
+      const itemTime = new Date(item.addedAt || 0).getTime();
+      const existingTime = existing ? new Date(existing.addedAt || 0).getTime() : -1;
+      if (!existing || itemTime >= existingTime) {
+        latestManualByUrl.set(item.url, { ...item, subjectId });
+      }
+    });
+  });
+
+  state.subjects.forEach((subject) => {
+    subject.watch = (Array.isArray(subject.watch) ? subject.watch : []).filter((item) => {
+      if (item.source === "auto-document") {
+        return item.subjectId === subject.id;
+      }
+      const winner = latestManualByUrl.get(item.url);
+      return Boolean(winner && winner.id === item.id && winner.subjectId === subject.id);
+    });
+  });
 }
 
 function persistSubjects() {
@@ -2700,6 +2759,7 @@ function restoreSubjectsForAccount(account) {
   if (!state.subjects.some((subject) => subject.id === state.selectedSubjectId)) {
     state.selectedSubjectId = state.subjects[0]?.id || "";
   }
+  normalizeManualWatchItemsAcrossSubjects();
   const selectedSubject = state.subjects.find((subject) => subject.id === state.selectedSubjectId);
   const firstDocumentId = getVisibleSubjectDocuments(selectedSubject || { documents: [] })[0]?.id || null;
   state.selectedDocumentId = firstDocumentId;
@@ -7725,14 +7785,16 @@ async function processFiles(fileList) {
       return;
     }
     subject.watch = Array.isArray(subject.watch) ? subject.watch : [];
-    subject.watch.unshift({
+    const watchItem = {
       id: createId(),
       title: finalTitle,
       url: watchUrl,
       addedAt: new Date().toISOString(),
       source: "manual",
       subjectId: subject.id
-    });
+    };
+    subject.watch.unshift(watchItem);
+    removeManualWatchDuplicatesFromOtherSubjects(subject.id, watchUrl, watchItem.id);
     state.selectedSubjectId = subject.id;
     state.currentView = "subjects";
     state.activeSubjectTab = "watch";
