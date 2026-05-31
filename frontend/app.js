@@ -912,7 +912,7 @@ function getSelectedSubject() {
 function getSubjectWatchItems(subject) {
   const subjectId = subject?.id || "";
   return Array.isArray(subject?.watch)
-    ? subject.watch.filter((item) => item?.url && (!item.subjectId || item.subjectId === subjectId))
+    ? subject.watch.filter((item) => item?.url && item.subjectId === subjectId)
     : [];
 }
 
@@ -2537,6 +2537,7 @@ function saveStoredSubjectsMap(subjectsByAccount) {
 }
 
 function hydrateStoredSubject(subject, index) {
+  const resolvedSubjectId = String(subject?.id || subjectTemplateSeed[index]?.id || "");
   return {
     ...structuredClone(subjectTemplateSeed[index] || {}),
     ...subject,
@@ -2547,7 +2548,7 @@ function hydrateStoredSubject(subject, index) {
           .filter((item) => item?.url)
           .map((item) => ({
             ...item,
-            subjectId: item.subjectId || ""
+            subjectId: item.subjectId || resolvedSubjectId
           }))
       : [],
     askHistory: Array.isArray(subject.askHistory) ? subject.askHistory : [],
@@ -4235,13 +4236,9 @@ function renderWatchList() {
     elements.watchList.innerHTML = `
       <div class="empty-state">
         No WATCH items for this subject yet.
-        <div class="documents-footer" style="margin-top:16px;">
-          <button type="button" class="ghost-button" id="watch-empty-add-link-button">Add a YouTube link</button>
-        </div>
       </div>
     `;
     elements.watchToggleButton.classList.add("hidden");
-    document.getElementById("watch-empty-add-link-button")?.addEventListener("click", openWatchUploadModal);
     renderDockContext();
     return;
   }
@@ -4289,7 +4286,7 @@ function renderWatchList() {
       }
 
       if (button.dataset.watchAction === "delete") {
-        subject.watch = watchItems.filter((entry) => entry.id !== item.id);
+        subject.watch = (Array.isArray(subject.watch) ? subject.watch : []).filter((entry) => entry.id !== item.id);
         persistSubjects();
         render();
       }
