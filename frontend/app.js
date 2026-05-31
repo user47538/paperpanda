@@ -346,6 +346,7 @@ const subjectTemplateSeed = subjectSeed.map(({ documents, assessments, watch, as
   documents: [],
   assessments: [],
   watch: [],
+  hiddenWatchUrls: [],
   askHistory: []
 }));
 
@@ -748,6 +749,7 @@ function createBaseSubjects() {
     documents: [],
     assessments: [],
     watch: [],
+    hiddenWatchUrls: [],
     askHistory: [],
     savedRevisionTests: []
   }));
@@ -759,6 +761,7 @@ function createInitialSubjectsForAccount(account) {
     documents: [],
     assessments: [],
     watch: [],
+    hiddenWatchUrls: [],
     askHistory: [],
     savedRevisionTests: []
   }));
@@ -909,11 +912,42 @@ function getSelectedSubject() {
   return state.subjects.find((subject) => subject.id === state.selectedSubjectId);
 }
 
-function getSubjectWatchItems(subject) {
+function getSubjectHiddenWatchUrls(subject) {
+  return new Set(Array.isArray(subject?.hiddenWatchUrls) ? subject.hiddenWatchUrls.filter(Boolean) : []);
+}
+
+function getManualSubjectWatchItems(subject) {
   const subjectId = subject?.id || "";
   return Array.isArray(subject?.watch)
-    ? subject.watch.filter((item) => item?.url && item.subjectId === subjectId)
+    ? subject.watch.filter((item) => item?.url && (item.source || "manual") === "manual" && item.subjectId === subjectId)
     : [];
+}
+
+function getAutoSubjectWatchItems(subject) {
+  if (!subject) {
+    return [];
+  }
+  const hiddenUrls = getSubjectHiddenWatchUrls(subject);
+  const manualUrls = new Set(getManualSubjectWatchItems(subject).map((item) => item.url));
+  return getDocumentGroupsFromDocuments(Array.isArray(subject.documents) ? subject.documents : [])
+    .flatMap((bundle) =>
+      extractYouTubeLinks(bundle.content).map((url) => ({
+        id: `watch-${bundle.id}-${url}`,
+        title: `${bundle.title} video`,
+        url,
+        source: "auto-document",
+        sourceDocumentTitle: bundle.title,
+        subjectId: subject.id,
+        addedAt: getBundlePrimaryDocument(bundle)?.addedAt || bundle.addedAt || new Date().toISOString()
+      }))
+    )
+    .filter((item) => !hiddenUrls.has(item.url) && !manualUrls.has(item.url));
+}
+
+function getSubjectWatchItems(subject) {
+  return [...getManualSubjectWatchItems(subject), ...getAutoSubjectWatchItems(subject)].sort(
+    (left, right) => new Date(right.addedAt || 0).getTime() - new Date(left.addedAt || 0).getTime()
+  );
 }
 
 function isHomeworkDocument(documentRecord) {
@@ -1398,28 +1432,15 @@ function syncAutoWatchForSubject(subject) {
     return;
   }
 
-  const manualWatchItems = getSubjectWatchItems(subject).filter((item) => item?.source !== "auto-document");
-  const autoWatchItems = getDocumentGroupsFromDocuments(Array.isArray(subject.documents) ? subject.documents : [])
-    .flatMap((bundle) =>
-      extractYouTubeLinks(bundle.content).map((url) => ({
-        id: `watch-${bundle.id}-${url}`,
-        title: `${bundle.title} video`,
-        url,
-        source: "auto-document",
-        sourceDocumentTitle: bundle.title,
-        subjectId: subject.id
-      }))
-    );
-
   const seenUrls = new Set();
-  subject.watch = [...manualWatchItems, ...autoWatchItems].filter((item) => {
-    const key = `${item.source || "manual"}::${item.url || ""}`;
-    if (!item?.url || seenUrls.has(key)) {
+  subject.watch = getManualSubjectWatchItems(subject).filter((item) => {
+    if (!item?.url || seenUrls.has(item.url)) {
       return false;
     }
-    seenUrls.add(key);
+    seenUrls.add(item.url);
     return true;
   });
+  subject.hiddenWatchUrls = Array.from(getSubjectHiddenWatchUrls(subject));
 }
 
 function syncAutoWatchForAllSubjects() {
@@ -1432,9 +1453,6 @@ function removeManualWatchDuplicatesFromOtherSubjects(targetSubjectId, url, item
       return;
     }
     subject.watch = (Array.isArray(subject.watch) ? subject.watch : []).filter((item) => {
-      if (item.source === "auto-document") {
-        return true;
-      }
       if (item.id === itemId) {
         return false;
       }
@@ -2565,15 +2583,13 @@ function hydrateStoredSubject(subject, index) {
           .filter((item) => item?.url)
           .flatMap((item) => {
             const source = item.source || "manual";
-            if (source === "manual") {
-              if (!item.subjectId || item.subjectId !== resolvedSubjectId) {
-                return [];
-              }
-              return [{ ...item, subjectId: resolvedSubjectId, source: "manual" }];
+            if (source !== "manual") {
+              return [];
             }
-            return [{ ...item, subjectId: resolvedSubjectId, source }];
+            return [{ ...item, subjectId: item.subjectId || resolvedSubjectId, source: "manual" }];
           })
       : [],
+    hiddenWatchUrls: Array.isArray(subject.hiddenWatchUrls) ? subject.hiddenWatchUrls.filter(Boolean) : [],
     askHistory: Array.isArray(subject.askHistory) ? subject.askHistory : [],
     savedRevisionTests: Array.isArray(subject.savedRevisionTests)
       ? subject.savedRevisionTests.map(normaliseSavedRevisionTest)
@@ -2591,15 +2607,10 @@ function normalizeManualWatchItemsAcrossSubjects() {
     const subjectId = subject.id;
     subject.watch = (Array.isArray(subject.watch) ? subject.watch : [])
       .filter((item) => item?.url)
-      .map((item) => ({
-        ...item,
-        subjectId: item.subjectId || subjectId
-      }));
+      .filter((item) => (item.source || "manual") === "manual")
+      .map((item) => ({ ...item, source: "manual", subjectId: item.subjectId || subjectId }));
 
     subject.watch.forEach((item) => {
-      if (item.source === "auto-document") {
-        return;
-      }
       const existing = latestManualByUrl.get(item.url);
       const itemTime = new Date(item.addedAt || 0).getTime();
       const existingTime = existing ? new Date(existing.addedAt || 0).getTime() : -1;
@@ -2611,9 +2622,6 @@ function normalizeManualWatchItemsAcrossSubjects() {
 
   state.subjects.forEach((subject) => {
     subject.watch = (Array.isArray(subject.watch) ? subject.watch : []).filter((item) => {
-      if (item.source === "auto-document") {
-        return item.subjectId === subject.id;
-      }
       const winner = latestManualByUrl.get(item.url);
       return Boolean(winner && winner.id === item.id && winner.subjectId === subject.id);
     });
@@ -4303,32 +4311,31 @@ function renderWatchList() {
     return;
   }
 
-  const visibleItems = state.watchExpanded ? watchItems : watchItems.slice(0, 3);
+  const visibleItems = state.watchExpanded ? watchItems : watchItems.slice(0, 6);
 
   elements.watchList.innerHTML = visibleItems
     .map(
       (item) => `
-        <article class="practice-item">
-          <div class="activity-row">
-            <span class="activity-tag">${item.source === "auto-document" ? "Auto watch" : "Watch"}</span>
-          </div>
-          <h4>${escapeHtml(item.title)}</h4>
-          <p class="practice-copy">${escapeHtml(item.url)}</p>
-          ${
-            item.sourceDocumentTitle
-              ? `<p class="practice-copy practice-copy--source">Detected from ${escapeHtml(item.sourceDocumentTitle)}</p>`
-              : ""
-          }
-          <div class="table-actions">
+        <article class="watch-row-card">
+          <button type="button" class="home-watch-row watch-row-card__open" data-watch-action="open" data-watch-id="${item.id}">
+            <span class="home-watch-row__thumb">${item.source === "auto-document" ? "🧬" : "🎬"}</span>
+            <span class="home-watch-row__copy">
+              <strong>${escapeHtml(item.title)}</strong>
+              <span>${escapeHtml(item.sourceDocumentTitle || item.url)}</span>
+            </span>
+          </button>
+          <div class="table-actions watch-row-card__actions">
             <button type="button" class="table-action" data-watch-action="open" data-watch-id="${item.id}">Open</button>
-            <button type="button" class="table-action table-action--danger" data-watch-action="delete" data-watch-id="${item.id}">Delete</button>
+            <button type="button" class="table-action table-action--danger" data-watch-action="delete" data-watch-id="${item.id}">
+              ${item.source === "auto-document" ? "Hide" : "Delete"}
+            </button>
           </div>
         </article>
       `
     )
     .join("");
 
-  const hasExtraWatchItems = watchItems.length > 3;
+  const hasExtraWatchItems = watchItems.length > 6;
   elements.watchToggleButton.classList.toggle("hidden", !hasExtraWatchItems);
   if (hasExtraWatchItems) {
     elements.watchToggleButton.textContent = state.watchExpanded ? "Show less" : "Load more";
@@ -4346,7 +4353,13 @@ function renderWatchList() {
       }
 
       if (button.dataset.watchAction === "delete") {
-        subject.watch = (Array.isArray(subject.watch) ? subject.watch : []).filter((entry) => entry.id !== item.id);
+        if (item.source === "auto-document") {
+          const hiddenUrls = getSubjectHiddenWatchUrls(subject);
+          hiddenUrls.add(item.url);
+          subject.hiddenWatchUrls = [...hiddenUrls];
+        } else {
+          subject.watch = (Array.isArray(subject.watch) ? subject.watch : []).filter((entry) => entry.id !== item.id);
+        }
         persistSubjects();
         render();
       }
@@ -7794,6 +7807,7 @@ async function processFiles(fileList) {
       subjectId: subject.id
     };
     subject.watch.unshift(watchItem);
+    subject.hiddenWatchUrls = (Array.isArray(subject.hiddenWatchUrls) ? subject.hiddenWatchUrls : []).filter((url) => url !== watchUrl);
     removeManualWatchDuplicatesFromOtherSubjects(subject.id, watchUrl, watchItem.id);
     state.selectedSubjectId = subject.id;
     state.currentView = "subjects";

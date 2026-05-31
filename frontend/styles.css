@@ -3876,6 +3876,26 @@ input[type="date"] {
   font-size: 13px;
 }
 
+.watch-row-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 20px;
+  background: var(--bg);
+}
+
+.watch-row-card__open {
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
+.watch-row-card__actions {
+  justify-content: flex-start;
+}
+
 .home-customise-panel {
   display: grid;
   gap: 16px;
