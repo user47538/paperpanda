@@ -61,8 +61,7 @@ const pandaEmojiChoices = [
   { id: "sick", label: "Sick", src: "/panda-emojis-2ndedition/panda-sick-256.png" },
   { id: "crying", label: "Crying", src: "/panda-emojis-2ndedition/panda-crying-256.png" },
   { id: "dead", label: "Dead", src: "/panda-emojis-2ndedition/panda-dead-256.png" },
-  { id: "swear", label: "Swear", src: "/panda-emojis-2ndedition/panda-swear-256.png" },
-  { id: "gun", label: "Gun", src: "/panda-emojis-2ndedition/panda-gun-256.png" }
+  { id: "swear", label: "Swear", src: "/panda-emojis-2ndedition/panda-swear-256.png" }
 ];
 
 const subjectSeed = [
