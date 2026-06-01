@@ -1,5 +1,6 @@
 const accountsStorageKey = "studylift-accounts";
 const sessionStorageKey = "studylift-session";
+const authTokenStorageKey = "paperpanda-session-token";
 const subjectsStorageKey = "paperpanda-subjects-by-account";
 const settingsStorageKey = "studylift-settings";
 const uiVersionStorageKey = "paperpanda-ui-version";
@@ -39,6 +40,8 @@ let previewDatabasePromise = null;
 let currentListenSessionId = 0;
 let currentAudioContext = "";
 let currentSpeechRecognition = null;
+let remoteSubjectsSaveQueuedSnapshot = null;
+let remoteSubjectsSaveInFlight = false;
 const defaultGrade = "7";
 const defaultPageBackgroundColor = "#FBF7F0";
 const documentQuizPassPoints = 10;
@@ -431,6 +434,9 @@ const state = {
   studentName: "",
   currentUserEmail: "",
   studentGrade: defaultGrade,
+  authToken: "",
+  currentUserId: "",
+  currentUserPoints: 0,
   authMode: "signin",
   selectedSubjectId: subjectSeed[0].id,
   activeSubjectTab: "reader",
@@ -1221,13 +1227,34 @@ function awardDocumentQuizPointsIfNeeded(documentRecord) {
   if (!documentRecord?.quizSubmission?.passed || documentRecord.pointsAwarded || !state.currentUserEmail) {
     return;
   }
-  const accounts = loadAccounts();
-  const accountIndex = accounts.findIndex((account) => normaliseAccountKey(account.email) === normaliseAccountKey(state.currentUserEmail));
-  if (accountIndex === -1) {
-    return;
+
+  if (state.authToken) {
+    void requestApi(
+      "/api/account/points/award",
+      { points: documentQuizPassPoints },
+      false,
+      {
+        headers: {
+          ...buildAuthHeaders()
+        }
+      }
+    )
+      .then((payload) => {
+        state.currentUserPoints = Math.max(0, Number(payload?.account?.points || state.currentUserPoints) || 0);
+      })
+      .catch((error) => {
+        console.error("Point award failed.", error);
+      });
+  } else {
+    const accounts = loadAccounts();
+    const accountIndex = accounts.findIndex((account) => normaliseAccountKey(account.email) === normaliseAccountKey(state.currentUserEmail));
+    if (accountIndex === -1) {
+      return;
+    }
+    accounts[accountIndex].points = Math.max(0, Number(accounts[accountIndex].points || 0) || 0) + documentQuizPassPoints;
+    saveAccounts(accounts);
+    state.currentUserPoints = accounts[accountIndex].points;
   }
-  accounts[accountIndex].points = Math.max(0, Number(accounts[accountIndex].points || 0) || 0) + documentQuizPassPoints;
-  saveAccounts(accounts);
   documentRecord.pointsAwarded = true;
 }
 
@@ -2248,20 +2275,30 @@ function saveAccounts(accounts) {
   );
 }
 
-function persistSession(email) {
+function persistSession(email, token = "") {
   window.localStorage.setItem(sessionStorageKey, email);
+  if (token) {
+    window.localStorage.setItem(authTokenStorageKey, token);
+  } else {
+    window.localStorage.removeItem(authTokenStorageKey);
+  }
 }
 
 function clearSession() {
   window.localStorage.removeItem(sessionStorageKey);
+  window.localStorage.removeItem(authTokenStorageKey);
 }
 
-function findAccountByEmail(email) {
+function findLegacyAccountByEmail(email) {
   const normalisedEmail = normaliseAccountKey(email);
   if (!normalisedEmail) {
     return null;
   }
   return loadAccounts().find((account) => normaliseAccountKey(account.email) === normalisedEmail) || null;
+}
+
+function getStoredSessionToken() {
+  return String(window.localStorage.getItem(authTokenStorageKey) || "").trim();
 }
 
 function syncSignInMode() {
@@ -2280,14 +2317,13 @@ function syncSignInMode() {
 }
 
 function hydrateSettingsView() {
-  const account = findAccountByEmail(state.currentUserEmail);
-  if (!account) {
+  if (!state.currentUserEmail) {
     return;
   }
 
-  elements.settingsNameInput.value = account.name || "";
-  elements.settingsEmailInput.value = account.email || "";
-  elements.settingsGradeSelect.value = normaliseGrade(account.grade);
+  elements.settingsNameInput.value = state.studentName || "";
+  elements.settingsEmailInput.value = state.currentUserEmail || "";
+  elements.settingsGradeSelect.value = normaliseGrade(state.studentGrade);
   elements.settingsCurrentPasswordInput.value = "";
   elements.settingsNewPasswordInput.value = "";
   elements.settingsConfirmPasswordInput.value = "";
@@ -2711,7 +2747,69 @@ function normalizeManualWatchItemsAcrossSubjects() {
   });
 }
 
-function persistSubjects() {
+function buildResolvedSubjectsFromStore(account, storedSubjects) {
+  if (Array.isArray(storedSubjects)) {
+    return mergeLegacyGroupedDocuments(
+      removeLegacySeededDocuments(
+        removeLegacySeededAssessments(storedSubjects.map(hydrateStoredSubject))
+      )
+    );
+  }
+
+  return createInitialSubjectsForAccount(account);
+}
+
+function getStoredSubjectsForAccount(account) {
+  const accountKey = normaliseAccountKey(account?.email);
+  if (!accountKey) {
+    return createBaseSubjects();
+  }
+
+  const storedSubjectsMap = loadStoredSubjectsMap();
+  return buildResolvedSubjectsFromStore(account, storedSubjectsMap[accountKey]);
+}
+
+function queueRemoteSubjectsPersist(subjectsSnapshot) {
+  if (!state.authToken) {
+    return;
+  }
+
+  remoteSubjectsSaveQueuedSnapshot = subjectsSnapshot;
+  if (remoteSubjectsSaveInFlight) {
+    return;
+  }
+
+  remoteSubjectsSaveInFlight = true;
+  void (async () => {
+    while (remoteSubjectsSaveQueuedSnapshot) {
+      const snapshot = remoteSubjectsSaveQueuedSnapshot;
+      remoteSubjectsSaveQueuedSnapshot = null;
+      try {
+        await requestApi(
+          "/api/account/subjects",
+          { subjects: snapshot },
+          false,
+          {
+            headers: {
+              ...buildAuthHeaders()
+            },
+            method: "PUT"
+          }
+        );
+      } catch (error) {
+        console.error("Remote subject sync failed.", error);
+        if (elements?.uploadStatus) {
+          elements.uploadStatus.textContent =
+            "Your changes were saved on this device, but PaperPanda could not sync them to the shared account just now.";
+        }
+      }
+    }
+
+    remoteSubjectsSaveInFlight = false;
+  })();
+}
+
+function persistSubjects({ skipRemoteSync = false } = {}) {
   if (!state.currentUserEmail) {
     return;
   }
@@ -2738,6 +2836,10 @@ function persistSubjects() {
           "Browser storage is full. Your latest changes will stay available until refresh, but they could not be saved persistently.";
       }
     }
+  }
+
+  if (!skipRemoteSync) {
+    queueRemoteSubjectsPersist(persistableSubjects);
   }
 
   syncPreviewPersistence();
@@ -2832,7 +2934,7 @@ function restoreSubjects() {
   state.subjects = createBaseSubjects();
 }
 
-function restoreSubjectsForAccount(account) {
+function restoreSubjectsForAccount(account, subjectsOverride = null, { skipRemoteSync = false } = {}) {
   const accountKey = normaliseAccountKey(account?.email);
   if (!accountKey) {
     state.subjects = createBaseSubjects();
@@ -2840,20 +2942,10 @@ function restoreSubjectsForAccount(account) {
   }
 
   const storedSubjectsMap = loadStoredSubjectsMap();
-  const storedSubjects = storedSubjectsMap[accountKey];
-  if (Array.isArray(storedSubjects)) {
-    state.subjects = mergeLegacyGroupedDocuments(
-      removeLegacySeededDocuments(
-        removeLegacySeededAssessments(storedSubjects.map(hydrateStoredSubject))
-      )
-    );
-    storedSubjectsMap[accountKey] = createPersistableSubjects(state.subjects);
-    saveStoredSubjectsMap(storedSubjectsMap);
-  } else {
-    state.subjects = createInitialSubjectsForAccount(account);
-    storedSubjectsMap[accountKey] = createPersistableSubjects(state.subjects);
-    saveStoredSubjectsMap(storedSubjectsMap);
-  }
+  const resolvedSubjects = buildResolvedSubjectsFromStore(account, subjectsOverride ?? storedSubjectsMap[accountKey]);
+  state.subjects = resolvedSubjects;
+  storedSubjectsMap[accountKey] = createPersistableSubjects(state.subjects);
+  saveStoredSubjectsMap(storedSubjectsMap);
 
   if (!state.subjects.some((subject) => subject.id === state.selectedSubjectId)) {
     state.selectedSubjectId = state.subjects[0]?.id || "";
@@ -2869,26 +2961,94 @@ function restoreSubjectsForAccount(account) {
   state.documentsExpanded = false;
 
   syncAutoWatchForAllSubjects();
-  persistSubjects();
+  persistSubjects({ skipRemoteSync });
   hydratePreviewImages();
 }
 
-function restoreSessionUser() {
+function applyAuthenticatedAccount(account, { token = "", subjects = null, skipRemoteSync = false } = {}) {
+  state.studentName = String(account?.name || "").trim();
+  state.currentUserEmail = normaliseAccountKey(account?.email);
+  state.studentGrade = normaliseGrade(account?.grade);
+  state.currentUserId = String(account?.id || "");
+  state.currentUserPoints = Math.max(0, Number(account?.points || 0) || 0);
+  state.authToken = token || state.authToken;
+  persistSession(state.currentUserEmail, state.authToken);
+  restoreSubjectsForAccount(account, subjects, { skipRemoteSync });
+}
+
+async function restoreSessionUser() {
+  const savedToken = getStoredSessionToken();
+  if (savedToken) {
+    try {
+      const session = await requestApiGet("/api/auth/session", {
+        headers: {
+          Authorization: `Bearer ${savedToken}`
+        }
+      });
+      state.authToken = savedToken;
+      applyAuthenticatedAccount(session.account, {
+        token: savedToken,
+        subjects: session.subjects,
+        skipRemoteSync: true
+      });
+      openDashboard("home");
+      return;
+    } catch (error) {
+      console.error("Session restore failed.", error);
+      clearSession();
+      state.authToken = "";
+    }
+  }
+
   const savedEmail = window.localStorage.getItem(sessionStorageKey);
   if (!savedEmail) {
     return;
   }
 
-  const account = findAccountByEmail(savedEmail);
+  const account = findLegacyAccountByEmail(savedEmail);
   if (!account) {
     clearSession();
     return;
   }
 
-  state.currentUserEmail = account.email;
+  try {
+    let payload;
+    try {
+      payload = await requestApi("/api/auth/register", {
+        name: account.name,
+        email: account.email,
+        password: account.password,
+        grade: normaliseGrade(account.grade),
+        subjects: createPersistableSubjects(getStoredSubjectsForAccount(account))
+      });
+    } catch (registerError) {
+      if (!(registerError instanceof Error) || registerError.status !== 409) {
+        throw registerError;
+      }
+      payload = await requestApi("/api/auth/signin", {
+        email: account.email,
+        password: account.password
+      });
+    }
+
+    state.authToken = payload.token || "";
+    applyAuthenticatedAccount(payload.account, {
+      token: payload.token || "",
+      subjects: payload.subjects,
+      skipRemoteSync: true
+    });
+    openDashboard("home");
+    return;
+  } catch (error) {
+    console.error("Legacy account migration failed.", error);
+  }
+
   state.studentName = account.name;
+  state.currentUserEmail = account.email;
   state.studentGrade = normaliseGrade(account.grade);
-  restoreSubjectsForAccount(account);
+  state.currentUserPoints = Math.max(0, Number(account.points || 0) || 0);
+  state.authToken = "";
+  restoreSubjectsForAccount(account, getStoredSubjectsForAccount(account), { skipRemoteSync: true });
   openDashboard("home");
 }
 
@@ -3486,8 +3646,12 @@ function buildReaderTextMarkup(sectionText, importantTerms = []) {
     .join(" ");
 }
 
-async function requestApiGet(endpoint) {
-  const response = await fetch(`${API_BASE_URL}${endpoint}`);
+async function requestApiGet(endpoint, options = {}) {
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    headers: {
+      ...(options.headers || {})
+    }
+  });
   if (!response.ok) {
     let message = "The request failed.";
     try {
@@ -3499,20 +3663,32 @@ async function requestApiGet(endpoint) {
         message = fallbackText;
       }
     }
-    throw new Error(message);
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
   }
 
   return response.json();
 }
 
-async function requestApi(endpoint, payload, expectBlob = false) {
+function buildAuthHeaders() {
+  return state.authToken
+    ? {
+        Authorization: `Bearer ${state.authToken}`
+      }
+    : {};
+}
+
+async function requestApi(endpoint, payload, expectBlob = false, options = {}) {
+  const headers = {
+    "Content-Type": "application/json",
+    ...(options.headers || {})
+  };
   let response;
   try {
     response = await window.fetch(`${API_BASE_URL}${endpoint}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
+      method: options.method || "POST",
+      headers,
       body: JSON.stringify(payload)
     });
   } catch (error) {
@@ -3530,7 +3706,9 @@ async function requestApi(endpoint, payload, expectBlob = false) {
         message = responseText;
       }
     }
-    throw new Error(message);
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
   }
 
   return expectBlob ? response.blob() : response.json();
@@ -3553,7 +3731,9 @@ async function requestApiFormData(endpoint, formData) {
   }
 
   if (!response.ok) {
-    throw new Error(parsedPayload?.error || responseText || "Request failed.");
+    const error = new Error(parsedPayload?.error || responseText || "Request failed.");
+    error.status = response.status;
+    throw error;
   }
 
   return parsedPayload || {};
@@ -8313,9 +8493,8 @@ function openAssessmentScheduleUpload() {
   elements.assessmentScheduleUpload.click();
 }
 
-function saveAccountSettings() {
-  const currentAccount = findAccountByEmail(state.currentUserEmail);
-  if (!currentAccount) {
+async function saveAccountSettings() {
+  if (!state.currentUserEmail || !state.authToken) {
     elements.settingsStatus.textContent = "Account could not be found.";
     return;
   }
@@ -8328,48 +8507,54 @@ function saveAccountSettings() {
     return;
   }
 
-  const accounts = loadAccounts();
-  const emailTaken = accounts.some(
-    (account) => account.email.toLowerCase() === nextEmail && account.email.toLowerCase() !== currentAccount.email.toLowerCase()
-  );
-  if (emailTaken) {
-    elements.settingsStatus.textContent = "That email is already in use.";
-    return;
-  }
+  const currentEmail = state.currentUserEmail;
 
-  const updatedAccounts = accounts.map((account) =>
-    account.email.toLowerCase() === currentAccount.email.toLowerCase()
-      ? { ...account, name: nextName, email: nextEmail, grade: nextGrade }
-      : account
-  );
-  if (nextEmail !== currentAccount.email.toLowerCase()) {
-    const storedSubjectsMap = loadStoredSubjectsMap();
-    const currentKey = normaliseAccountKey(currentAccount.email);
-    const nextKey = normaliseAccountKey(nextEmail);
-    if (storedSubjectsMap[currentKey]) {
-      storedSubjectsMap[nextKey] = storedSubjectsMap[currentKey];
-      delete storedSubjectsMap[currentKey];
-      saveStoredSubjectsMap(storedSubjectsMap);
+  try {
+    const payload = await requestApi(
+      "/api/account",
+      {
+        name: nextName,
+        email: nextEmail,
+        grade: nextGrade
+      },
+      false,
+      {
+        method: "PATCH",
+        headers: {
+          ...buildAuthHeaders()
+        }
+      }
+    );
+    if (nextEmail !== currentEmail.toLowerCase()) {
+      const storedSubjectsMap = loadStoredSubjectsMap();
+      const currentKey = normaliseAccountKey(currentEmail);
+      const nextKey = normaliseAccountKey(nextEmail);
+      if (storedSubjectsMap[currentKey]) {
+        storedSubjectsMap[nextKey] = storedSubjectsMap[currentKey];
+        delete storedSubjectsMap[currentKey];
+        saveStoredSubjectsMap(storedSubjectsMap);
+      }
     }
+    applyAuthenticatedAccount(payload.account, {
+      token: state.authToken,
+      subjects: state.subjects,
+      skipRemoteSync: true
+    });
+    elements.welcomeHeading.textContent = "";
+    elements.settingsStatus.textContent = "Account saved.";
+    state.generatedRevisionTest = null;
+    state.revisionResponses = {};
+    state.revisionSubmission = null;
+    state.revisionViewMode = "draft";
+    state.activeSavedRevisionTestId = "";
+    void loadRevisionCatalogue(true);
+  } catch (error) {
+    elements.settingsStatus.textContent = error instanceof Error ? error.message : "Account update failed.";
   }
-  saveAccounts(updatedAccounts);
-  state.studentName = nextName;
-  state.currentUserEmail = nextEmail;
-  state.studentGrade = nextGrade;
-  persistSession(nextEmail);
-  elements.welcomeHeading.textContent = "";
-  elements.settingsStatus.textContent = "Account saved.";
-  state.generatedRevisionTest = null;
-  state.revisionResponses = {};
-  state.revisionSubmission = null;
-  state.revisionViewMode = "draft";
-  state.activeSavedRevisionTestId = "";
-  void loadRevisionCatalogue(true);
 }
 
-function savePasswordSettings() {
-  const currentAccount = findAccountByEmail(state.currentUserEmail);
-  if (!currentAccount) {
+async function savePasswordSettings() {
+  if (!state.currentUserEmail || !state.authToken) {
     elements.settingsStatus.textContent = "Account could not be found.";
     return;
   }
@@ -8377,11 +8562,6 @@ function savePasswordSettings() {
   const currentPassword = elements.settingsCurrentPasswordInput.value;
   const newPassword = elements.settingsNewPasswordInput.value;
   const confirmPassword = elements.settingsConfirmPasswordInput.value;
-
-  if (currentPassword !== currentAccount.password) {
-    elements.settingsStatus.textContent = "Current password is incorrect.";
-    return;
-  }
 
   if (!newPassword) {
     elements.settingsStatus.textContent = "Enter a new password.";
@@ -8393,16 +8573,27 @@ function savePasswordSettings() {
     return;
   }
 
-  const updatedAccounts = loadAccounts().map((account) =>
-    account.email.toLowerCase() === currentAccount.email.toLowerCase()
-      ? { ...account, password: newPassword }
-      : account
-  );
-  saveAccounts(updatedAccounts);
-  elements.settingsCurrentPasswordInput.value = "";
-  elements.settingsNewPasswordInput.value = "";
-  elements.settingsConfirmPasswordInput.value = "";
-  elements.settingsStatus.textContent = "Password updated.";
+  try {
+    await requestApi(
+      "/api/account/password",
+      {
+        currentPassword,
+        newPassword
+      },
+      false,
+      {
+        headers: {
+          ...buildAuthHeaders()
+        }
+      }
+    );
+    elements.settingsCurrentPasswordInput.value = "";
+    elements.settingsNewPasswordInput.value = "";
+    elements.settingsConfirmPasswordInput.value = "";
+    elements.settingsStatus.textContent = "Password updated.";
+  } catch (error) {
+    elements.settingsStatus.textContent = error instanceof Error ? error.message : "Password update failed.";
+  }
 }
 
 function render() {
@@ -8435,13 +8626,16 @@ function render() {
   }
 }
 
-function signInToAccount(account) {
+function signInToAccount(account, subjects = null) {
   resetRevisionState();
+  state.authToken = "";
+  state.currentUserId = "";
+  state.currentUserPoints = Math.max(0, Number(account?.points || 0) || 0);
   state.studentName = account.name;
   state.currentUserEmail = account.email;
   state.studentGrade = normaliseGrade(account.grade);
   persistSession(account.email);
-  restoreSubjectsForAccount(account);
+  restoreSubjectsForAccount(account, subjects, { skipRemoteSync: true });
   openDashboard("home");
 }
 
@@ -8453,13 +8647,13 @@ function setAuthMode(mode, { clearStatus = true } = {}) {
   syncSignInMode();
 }
 
-function handleDashboardOpen() {
+async function handleDashboardOpen() {
   const studentName = elements.studentNameInput.value.trim();
   const studentGrade = normaliseGrade(elements.studentGradeSelect.value);
   const studentEmail = normaliseAccountKey(elements.studentEmailInput.value);
   const password = String(elements.studentPasswordInput.value || "");
   const confirmPassword = String(elements.studentPasswordConfirmInput.value || "");
-  const existingAccount = findAccountByEmail(studentEmail);
+  const existingLegacyAccount = findLegacyAccountByEmail(studentEmail);
   const isCreateMode = state.authMode === "create";
 
   elements.signInStatus.textContent = "";
@@ -8469,27 +8663,55 @@ function handleDashboardOpen() {
     return;
   }
 
-  if (existingAccount) {
-    if (existingAccount.password === password) {
-      signInToAccount(existingAccount);
-      return;
-    }
-
-    if (isCreateMode) {
-      setAuthMode("signin", { clearStatus: false });
-      elements.signInStatus.textContent = "That email already has an account. Sign in with the saved password.";
-      return;
-    }
-
-    elements.signInStatus.textContent = "That password is incorrect.";
-    return;
-  }
-
   if (!isCreateMode) {
-    if (studentName || confirmPassword) {
-      setAuthMode("create", { clearStatus: false });
-    } else {
-      elements.signInStatus.textContent = "No account was found for that email. Switch to Create account first.";
+    try {
+      const payload = await requestApi("/api/auth/signin", {
+        email: studentEmail,
+        password
+      });
+      state.authToken = payload.token || "";
+      applyAuthenticatedAccount(payload.account, {
+        token: payload.token || "",
+        subjects: payload.subjects,
+        skipRemoteSync: true
+      });
+      openDashboard("home");
+      return;
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.status === 404 &&
+        existingLegacyAccount &&
+        existingLegacyAccount.password === password
+      ) {
+        try {
+          const payload = await requestApi("/api/auth/register", {
+            name: existingLegacyAccount.name,
+            email: existingLegacyAccount.email,
+            password,
+            grade: normaliseGrade(existingLegacyAccount.grade),
+            subjects: createPersistableSubjects(getStoredSubjectsForAccount(existingLegacyAccount))
+          });
+          state.authToken = payload.token || "";
+          applyAuthenticatedAccount(payload.account, {
+            token: payload.token || "",
+            subjects: payload.subjects,
+            skipRemoteSync: true
+          });
+          openDashboard("home");
+          return;
+        } catch (migrationError) {
+          elements.signInStatus.textContent =
+            migrationError instanceof Error ? migrationError.message : "Account migration failed.";
+          return;
+        }
+      }
+
+      if (studentName || confirmPassword) {
+        setAuthMode("create", { clearStatus: false });
+      } else {
+        elements.signInStatus.textContent = error instanceof Error ? error.message : "Sign-in failed.";
+      }
       return;
     }
   }
@@ -8507,16 +8729,33 @@ function handleDashboardOpen() {
     return;
   }
 
-  const accounts = loadAccounts();
-  const newAccount = {
-    name: studentName,
-    email: studentEmail,
-    password,
-    grade: studentGrade
-  };
-  accounts.push(newAccount);
-  saveAccounts(accounts);
-  signInToAccount(newAccount);
+  try {
+    const payload = await requestApi("/api/auth/register", {
+      name: studentName,
+      email: studentEmail,
+      password,
+      grade: studentGrade,
+      subjects: createPersistableSubjects(
+        existingLegacyAccount ? getStoredSubjectsForAccount(existingLegacyAccount) : createInitialSubjectsForAccount({
+          email: studentEmail,
+          grade: studentGrade,
+          name: studentName
+        })
+      )
+    });
+    state.authToken = payload.token || "";
+    applyAuthenticatedAccount(payload.account, {
+      token: payload.token || "",
+      subjects: payload.subjects,
+      skipRemoteSync: true
+    });
+    openDashboard("home");
+  } catch (error) {
+    if (error instanceof Error && error.status === 409) {
+      setAuthMode("signin", { clearStatus: false });
+    }
+    elements.signInStatus.textContent = error instanceof Error ? error.message : "Account creation failed.";
+  }
 }
 
 elements.askButton.addEventListener("click", handleAsk);
@@ -8791,9 +9030,27 @@ elements.uploadPanel.addEventListener("drop", async (event) => {
 });
 elements.signoutButton.addEventListener("click", () => {
   stopAskMicrophone({ preserveStatus: true });
+  if (state.authToken) {
+    void requestApi(
+      "/api/auth/signout",
+      {},
+      false,
+      {
+        headers: {
+          ...buildAuthHeaders()
+        }
+      }
+    ).catch((error) => {
+      console.error("Sign-out request failed.", error);
+    });
+  }
   clearSession();
+  state.authToken = "";
+  state.currentUserId = "";
+  state.currentUserPoints = 0;
   state.studentName = "";
   state.currentUserEmail = "";
+  state.studentGrade = defaultGrade;
   state.subjects = createBaseSubjects();
   showLanding();
 });
@@ -8818,5 +9075,5 @@ restoreSettings();
 void migrateLegacyBackgroundAssets();
 void hydrateBackgroundAssets();
 restoreSubjects();
-restoreSessionUser();
+void restoreSessionUser();
 render();

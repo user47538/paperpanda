@@ -3,6 +3,17 @@ import express from "express";
 import multer from "multer";
 import { createCanvas } from "@napi-rs/canvas";
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
+import {
+  awardAccountPoints,
+  getDataFilePath,
+  getSessionAccount,
+  registerUser,
+  signInUser,
+  signOutSession,
+  updateAccount,
+  updateAccountPassword,
+  updateAccountSubjects
+} from "./authStore.js";
 import { availableRevisionGrades, getRevisionCatalogueForGrade, getRevisionEntry } from "./curriculumCatalog.js";
 
 const app = express();
@@ -44,6 +55,28 @@ function isSameHostOrigin(origin, requestHost) {
   } catch (error) {
     return false;
   }
+}
+
+function getBearerToken(request) {
+  const authorizationHeader = String(request.header("Authorization") || "");
+  const match = authorizationHeader.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : "";
+}
+
+async function requireSession(request, response) {
+  const token = getBearerToken(request);
+  if (!token) {
+    response.status(401).json({ error: "Sign in is required." });
+    return null;
+  }
+
+  const session = await getSessionAccount(token);
+  if (!session) {
+    response.status(401).json({ error: "Session expired. Sign in again." });
+    return null;
+  }
+
+  return session;
 }
 
 app.use(
@@ -489,8 +522,151 @@ async function parsePdfBufferWithOcrFallback(buffer) {
 app.get("/health", (_request, response) => {
   response.json({
     ok: true,
-    hasOpenAiKey: Boolean(openAiApiKey)
+    hasOpenAiKey: Boolean(openAiApiKey),
+    authStorePath: getDataFilePath()
   });
+});
+
+app.post("/api/auth/register", async (request, response) => {
+  try {
+    const { name, email, password, grade, subjects = [] } = request.body || {};
+    if (!name || !email || !password || !grade) {
+      response.status(400).json({ error: "name, email, password, and grade are required." });
+      return;
+    }
+
+    const accountSession = await registerUser({ name, email, password, grade, subjects });
+    response.status(201).json(accountSession);
+  } catch (error) {
+    response.status(error?.status || 500).json({
+      error: error instanceof Error ? error.message : "Account creation failed."
+    });
+  }
+});
+
+app.post("/api/auth/signin", async (request, response) => {
+  try {
+    const { email, password } = request.body || {};
+    if (!email || !password) {
+      response.status(400).json({ error: "email and password are required." });
+      return;
+    }
+
+    const accountSession = await signInUser({ email, password });
+    response.json(accountSession);
+  } catch (error) {
+    response.status(error?.status || 500).json({
+      error: error instanceof Error ? error.message : "Sign-in failed."
+    });
+  }
+});
+
+app.get("/api/auth/session", async (request, response) => {
+  try {
+    const session = await requireSession(request, response);
+    if (!session) {
+      return;
+    }
+
+    response.json(session);
+  } catch (error) {
+    response.status(500).json({
+      error: error instanceof Error ? error.message : "Session lookup failed."
+    });
+  }
+});
+
+app.post("/api/auth/signout", async (request, response) => {
+  try {
+    const token = getBearerToken(request);
+    if (token) {
+      await signOutSession(token);
+    }
+
+    response.json({ ok: true });
+  } catch (error) {
+    response.status(500).json({
+      error: error instanceof Error ? error.message : "Sign-out failed."
+    });
+  }
+});
+
+app.patch("/api/account", async (request, response) => {
+  try {
+    const session = await requireSession(request, response);
+    if (!session) {
+      return;
+    }
+
+    const { name, email, grade } = request.body || {};
+    if (!name || !email || !grade) {
+      response.status(400).json({ error: "name, email, and grade are required." });
+      return;
+    }
+
+    const account = await updateAccount(session.token, { name, email, grade });
+    response.json({ account });
+  } catch (error) {
+    response.status(error?.status || 500).json({
+      error: error instanceof Error ? error.message : "Account update failed."
+    });
+  }
+});
+
+app.post("/api/account/password", async (request, response) => {
+  try {
+    const session = await requireSession(request, response);
+    if (!session) {
+      return;
+    }
+
+    const { currentPassword, newPassword } = request.body || {};
+    if (!currentPassword || !newPassword) {
+      response.status(400).json({ error: "currentPassword and newPassword are required." });
+      return;
+    }
+
+    await updateAccountPassword(session.token, currentPassword, newPassword);
+    response.json({ ok: true });
+  } catch (error) {
+    response.status(error?.status || 500).json({
+      error: error instanceof Error ? error.message : "Password update failed."
+    });
+  }
+});
+
+app.put("/api/account/subjects", async (request, response) => {
+  try {
+    const session = await requireSession(request, response);
+    if (!session) {
+      return;
+    }
+
+    const { subjects = [] } = request.body || {};
+    const savedSubjects = await updateAccountSubjects(session.token, subjects);
+    response.json({ subjects: savedSubjects });
+  } catch (error) {
+    response.status(error?.status || 500).json({
+      error: error instanceof Error ? error.message : "Subject sync failed."
+    });
+  }
+});
+
+app.post("/api/account/points/award", async (request, response) => {
+  try {
+    const session = await requireSession(request, response);
+    if (!session) {
+      return;
+    }
+
+    const { points = 0 } = request.body || {};
+    const account = await awardAccountPoints(session.token, points);
+    response.json({ account });
+  } catch (error) {
+    response.status(error?.status || 500).json({
+      error: error instanceof Error ? error.message : "Point award failed."
+    });
+  }
 });
 
 app.get("/api/revision/catalogue", (request, response) => {

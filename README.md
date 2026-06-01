@@ -53,6 +53,7 @@ Set these values locally before starting:
 - `backend/.env`
   - `OPENAI_API_KEY=...`
   - `FRONTEND_ORIGIN=http://localhost:5173`
+  - `PAPERPANDA_DATA_FILE=./data/paperpanda-store.json`
 
 ## Render deployment
 
@@ -77,3 +78,5 @@ You can either:
 
 - The old `file://` prototype hit browser restrictions for PDF.js workers and direct OpenAI browser requests.
 - This structure moves those sensitive and restricted operations to the backend where they belong.
+- Shared sign-in and cross-device subject sync now use the backend account store instead of browser-only local storage.
+- On Render, the backend account store needs persistent storage. If the API service runs without a persistent disk or external database, shared account data will be lost when the service is restarted or redeployed.
