@@ -4951,6 +4951,21 @@ function deleteDocument(documentId) {
   deleteDocuments([documentId]);
 }
 
+function deleteHomeworkBundle(bundleId) {
+  const subject = getSelectedSubject();
+  const bundle = getSubjectHomeworkBundles(subject).find((entry) => entry.id === bundleId);
+  if (!bundle) {
+    return;
+  }
+
+  const confirmed = window.confirm(`Delete homework "${bundle.title}"?`);
+  if (!confirmed) {
+    return;
+  }
+
+  deleteDocuments(bundle.documents.map((documentRecord) => documentRecord.id));
+}
+
 function deleteDocuments(documentIds) {
   const subject = getSelectedSubject();
   const uniqueDocumentIds = [...new Set(documentIds)];
@@ -6738,6 +6753,7 @@ function renderPractice() {
         <button type="button" class="primary-button primary-button--dark" data-homework-readaloud="${focusBundle.id}">${isReadingHomework ? "■ Stop reading" : "▶ Read task aloud"}</button>
         <button type="button" class="ghost-button ghost-button--peach" data-homework-simplify="${focusBundle.id}">↯ Simplify this task</button>
         <button type="button" class="ghost-button ghost-button--mint" data-open-homework-reader="${focusBundle.id}">📖 Open in Reader</button>
+        <button type="button" class="ghost-button ghost-button--danger" data-delete-homework="${focusBundle.id}">Delete homework</button>
       </div>
     </article>
   `;
@@ -6750,11 +6766,17 @@ function renderPractice() {
       ? nextBundles
           .map(
             (bundle, index) => `
-              <button type="button" class="task-stack-item task-stack-item--${["yellow", "lilac"][index % 2]}" data-open-homework="${bundle.id}">
-                <span class="task-stack-item__eyebrow">${escapeHtml(`${getSubjectShortCode(subject.name)} · HW`)}</span>
-                <strong>${escapeHtml(bundle.title)}</strong>
-                <span>${escapeHtml(getBundleWorkNotes(bundle) ? "Writing started" : "Needs a draft")}</span>
-              </button>
+              <article class="task-stack-item task-stack-item--${["yellow", "lilac"][index % 2]}">
+                <button type="button" class="task-stack-item__open" data-open-homework="${bundle.id}">
+                  <span class="task-stack-item__eyebrow">${escapeHtml(`${getSubjectShortCode(subject.name)} · HW`)}</span>
+                  <strong>${escapeHtml(bundle.title)}</strong>
+                  <span>${escapeHtml(getBundleWorkNotes(bundle) ? "Writing started" : "Needs a draft")}</span>
+                </button>
+                <div class="task-stack-item__actions">
+                  <button type="button" class="assessment-action" data-open-homework="${bundle.id}">Open</button>
+                  <button type="button" class="assessment-action assessment-action--danger" data-delete-homework="${bundle.id}">Delete</button>
+                </div>
+              </article>
             `
           )
           .join("")
@@ -6822,9 +6844,19 @@ function renderPractice() {
       render();
     });
   });
+  elements.practiceList.querySelectorAll("[data-delete-homework]").forEach((button) => {
+    button.addEventListener("click", () => {
+      deleteHomeworkBundle(button.dataset.deleteHomework);
+    });
+  });
   elements.subjectHomeworkUpcomingList?.querySelectorAll("[data-open-homework]").forEach((button) => {
     button.addEventListener("click", () => {
       openTaskView({ kind: "homework", id: button.dataset.openHomework });
+    });
+  });
+  elements.subjectHomeworkUpcomingList?.querySelectorAll("[data-delete-homework]").forEach((button) => {
+    button.addEventListener("click", () => {
+      deleteHomeworkBundle(button.dataset.deleteHomework);
     });
   });
 

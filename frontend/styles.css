@@ -4130,6 +4130,16 @@ input[type="date"] {
   margin-top: 10px;
 }
 
+.task-stack-item__open {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+
 .task-stack-item strong {
   font-family: var(--font-display);
   font-size: 16px;
@@ -4155,6 +4165,13 @@ input[type="date"] {
 
 .task-stack-item--lilac {
   background: #E7E2FB;
+}
+
+.task-stack-item__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
 }
 
 .revision-builder-card {
