@@ -1,13 +1,3 @@
-import JSZip from "jszip";
-import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
-import pdfWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.mjs?url";
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
-window.__pdfjsLib = pdfjsLib;
-window.__pdfjsLibPromise = Promise.resolve(pdfjsLib);
-window.__pdfjsLibError = "";
-window.dispatchEvent(new Event("studylift:pdf-ready"));
-
 const accountsStorageKey = "studylift-accounts";
 const sessionStorageKey = "studylift-session";
 const subjectsStorageKey = "paperpanda-subjects-by-account";
@@ -17,8 +7,32 @@ const currentUiVersion = "2026-05-28-design-handoff-structure";
 const previewDatabaseName = "paperpanda-assets";
 const previewStoreName = "document-previews";
 const settingsAssetStoreName = "settings-assets";
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://localhost:3001").replace(/\/$/, "");
+
+function resolveDefaultApiBaseUrl() {
+  const configuredBaseUrl = String(import.meta.env.VITE_API_BASE_URL || "").trim().replace(/\/$/, "");
+  if (configuredBaseUrl) {
+    return configuredBaseUrl;
+  }
+
+  if (typeof window === "undefined") {
+    return "http://localhost:3001";
+  }
+
+  const { protocol, hostname } = window.location;
+  if (protocol === "file:") {
+    return "http://localhost:3001";
+  }
+
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
+    return `${protocol}//${hostname}:3001`;
+  }
+
+  return "";
+}
+
+const API_BASE_URL = resolveDefaultApiBaseUrl();
 let pdfjsLibPromise = null;
+let jsZipPromise = null;
 let currentAudioPlayback = null;
 let currentAudioObjectUrl = "";
 let previewDatabasePromise = null;
@@ -1670,7 +1684,11 @@ async function loadRevisionCatalogue(force = false) {
 
   try {
     const payload = await requestApiGet(`/api/revision/catalogue?grade=${encodeURIComponent(state.studentGrade)}`);
-    state.revisionCatalogue = Array.isArray(payload?.catalogue) ? payload.catalogue : [];
+    state.revisionCatalogue = Array.isArray(payload?.catalogue)
+      ? payload.catalogue
+      : Array.isArray(payload?.entries)
+        ? payload.entries
+        : [];
   } catch (error) {
     state.revisionCatalogue = state.subjects.map((subject) => ({
       grade: state.studentGrade,
@@ -2705,12 +2723,20 @@ function persistSubjects() {
   try {
     storedSubjectsMap[accountKey] = persistableSubjects;
     saveStoredSubjectsMap(storedSubjectsMap);
-  } catch (error) {
-    storedSubjectsMap[accountKey] = createQuotaFallbackSubjects(state.subjects);
-    saveStoredSubjectsMap(storedSubjectsMap);
-    if (elements?.uploadStatus) {
-      elements.uploadStatus.textContent =
-        "Large document previews will stay available in this session, but only a lighter saved version will persist after refresh.";
+  } catch (primaryError) {
+    try {
+      storedSubjectsMap[accountKey] = createQuotaFallbackSubjects(state.subjects);
+      saveStoredSubjectsMap(storedSubjectsMap);
+      if (elements?.uploadStatus) {
+        elements.uploadStatus.textContent =
+          "Large document previews will stay available in this session, but only a lighter saved version will persist after refresh.";
+      }
+    } catch (fallbackError) {
+      console.error("Subject store quota fallback failed.", fallbackError);
+      if (elements?.uploadStatus) {
+        elements.uploadStatus.textContent =
+          "Browser storage is full. Your latest changes will stay available until refresh, but they could not be saved persistently.";
+      }
     }
   }
 
@@ -3187,7 +3213,7 @@ function getHomeHomeworkEntries(limit = 3) {
 
 function buildHomeHomeworkCardMarkup({ subject, bundle }, index) {
   const progressRatio = getTextCompletionRatio(bundle.workNotes, 350);
-  const dueTag = progressRatio >= 1 ? "Done" : index === 0 ? "2 days" : index === 1 ? "Fri" : "Tue";
+  const dueTag = progressRatio >= 1 ? "Done" : index === 0 ? "Current" : "Queued";
   const chips = [
     bundle.documents[0]?.type || "Class notes",
     getBundlePageCount(bundle) > 1 ? `${getBundlePageCount(bundle)} pages` : bundle.documents[0]?.pageNumber ? "1 page" : bundle.documents[0]?.type || "Note",
@@ -6672,6 +6698,7 @@ function renderPractice() {
   const simplifyPrompt = `Simplify the homework task and explain it in smaller steps: ${focusBundle.title}\n\n${focusBundle.content || ""}`;
   const focusDocument = focusBundle.documents[0] || null;
   const isReadingHomework = currentAudioContext === `task:homework:${focusBundle.id}`;
+  const focusStatusLabel = getBundleWorkNotes(focusBundle) ? "In progress" : "Start here";
 
   elements.practiceList.innerHTML = `
     <article class="homework-focus-card">
@@ -6680,7 +6707,7 @@ function renderPractice() {
           <p class="eyebrow">Homework · in progress</p>
           <h3>${escapeHtml(focusBundle.title)}</h3>
         </div>
-        <span class="homework-focus-card__due">${escapeHtml(getDaysUntilText(new Date(Date.now() + 2 * 86400000)))}</span>
+        <span class="homework-focus-card__due">${escapeHtml(focusStatusLabel)}</span>
       </div>
       <div class="homework-focus-card__chips">
         <span class="homework-focus-card__chip">${escapeHtml(`${focusBundle.documents[0]?.type || "Class notes"} · ${focusBundle.documents.length > 1 ? `${focusBundle.documents.length} pp` : "linked note"}`)}</span>
@@ -7263,35 +7290,17 @@ async function extractPdfData(file) {
 
 async function loadPdfJs() {
   if (!pdfjsLibPromise) {
-    if (window.__pdfjsLib) {
-      pdfjsLibPromise = Promise.resolve(window.__pdfjsLib);
-    } else if (window.__pdfjsLibPromise) {
-      pdfjsLibPromise = window.__pdfjsLibPromise;
-    } else if (window.__pdfjsLibError) {
-      throw new Error(window.__pdfjsLibError);
-    } else {
-      pdfjsLibPromise = new Promise((resolve, reject) => {
-        const timeout = window.setTimeout(() => {
-          reject(new Error("PDF tools did not load in this browser."));
-        }, 6000);
-
-        window.addEventListener(
-          "studylift:pdf-ready",
-          () => {
-            window.clearTimeout(timeout);
-            if (window.__pdfjsLib) {
-              resolve(window.__pdfjsLib);
-              return;
-            }
-            reject(new Error(window.__pdfjsLibError || "PDF tools did not load in this browser."));
-          },
-          { once: true }
-        );
-      }).catch((error) => {
-        pdfjsLibPromise = null;
-        throw error;
-      });
-    }
+    pdfjsLibPromise = (async () => {
+      const [{ default: pdfWorkerUrl }, pdfjsLibModule] = await Promise.all([
+        import("pdfjs-dist/legacy/build/pdf.worker.mjs?url"),
+        import("pdfjs-dist/legacy/build/pdf.mjs")
+      ]);
+      pdfjsLibModule.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+      return pdfjsLibModule;
+    })().catch((error) => {
+      pdfjsLibPromise = null;
+      throw error;
+    });
   }
 
   try {
@@ -7306,7 +7315,21 @@ async function loadPdfJs() {
   }
 }
 
+async function loadJsZip() {
+  if (!jsZipPromise) {
+    jsZipPromise = import("jszip")
+      .then((module) => module.default || module)
+      .catch((error) => {
+        jsZipPromise = null;
+        throw error;
+      });
+  }
+
+  return jsZipPromise;
+}
+
 async function extractDocxText(file) {
+  const JSZip = await loadJsZip();
   const zip = await JSZip.loadAsync(await file.arrayBuffer());
   const xmlFiles = Object.keys(zip.files).filter((name) =>
     /^word\/(document|header\d+|footer\d+)\.xml$/i.test(name)
@@ -7325,6 +7348,7 @@ async function extractDocxText(file) {
 }
 
 async function extractPptxText(file) {
+  const JSZip = await loadJsZip();
   const zip = await JSZip.loadAsync(await file.arrayBuffer());
   const slideNames = Object.keys(zip.files)
     .filter((name) => /^ppt\/slides\/slide\d+\.xml$/i.test(name))

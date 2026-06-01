@@ -15,24 +15,48 @@ const upload = multer({
   }
 });
 
-const allowedOrigins = new Set(
-  [
-    process.env.FRONTEND_ORIGIN,
-    "http://localhost:5173",
-    "http://127.0.0.1:5173"
-  ].filter(Boolean)
-);
+const configuredOrigins = String(process.env.FRONTEND_ORIGIN || "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const allowedOrigins = new Set(configuredOrigins);
+
+function isAllowedOrigin(origin) {
+  if (!origin) {
+    return true;
+  }
+
+  if (allowedOrigins.has(origin)) {
+    return true;
+  }
+
+  return /^https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?$/i.test(origin);
+}
+
+function isSameHostOrigin(origin, requestHost) {
+  if (!origin || !requestHost) {
+    return false;
+  }
+
+  try {
+    const originUrl = new URL(origin);
+    return originUrl.host.toLowerCase() === String(requestHost).toLowerCase();
+  } catch (error) {
+    return false;
+  }
+}
 
 app.use(
-  cors({
-    origin(origin, callback) {
-      if (!origin || allowedOrigins.has(origin)) {
-        callback(null, true);
-        return;
-      }
+  cors((request, callback) => {
+    const requestOrigin = request.header("Origin");
+    const requestHost = request.header("Host");
 
-      callback(new Error(`Origin not allowed by CORS: ${origin}`));
+    if (isAllowedOrigin(requestOrigin) || isSameHostOrigin(requestOrigin, requestHost)) {
+      callback(null, { origin: true });
+      return;
     }
+
+    callback(new Error(`Origin not allowed by CORS: ${requestOrigin}`));
   })
 );
 app.use(express.json({ limit: "10mb" }));
@@ -471,10 +495,12 @@ app.get("/health", (_request, response) => {
 
 app.get("/api/revision/catalogue", (request, response) => {
   const grade = String(request.query?.grade || "7");
+  const entries = getRevisionCatalogueForGrade(grade);
   response.json({
     grade,
     grades: availableRevisionGrades,
-    entries: getRevisionCatalogueForGrade(grade)
+    entries,
+    catalogue: entries
   });
 });
 
