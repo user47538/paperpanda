@@ -2769,6 +2769,42 @@ function getStoredSubjectsForAccount(account) {
   return buildResolvedSubjectsFromStore(account, storedSubjectsMap[accountKey]);
 }
 
+function createCloudSyncFallbackSubjects(subjects) {
+  return createQuotaFallbackSubjects(subjects);
+}
+
+async function registerCloudAccountWithFallback({ name, email, password, grade, subjects }) {
+  const subjectCandidates = [
+    createPersistableSubjects(subjects),
+    createCloudSyncFallbackSubjects(subjects),
+    createInitialSubjectsForAccount({ name, email, grade })
+  ];
+
+  let lastError = null;
+  for (const candidateSubjects of subjectCandidates) {
+    try {
+      return await requestApi("/api/auth/register", {
+        name,
+        email,
+        password,
+        grade,
+        subjects: candidateSubjects
+      });
+    } catch (error) {
+      lastError = error;
+      const shouldRetryWithSmallerPayload =
+        error instanceof Error &&
+        (error.status === 413 ||
+          /too large|payload|entity too large|request entity/i.test(error.message || ""));
+      if (!shouldRetryWithSmallerPayload) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError || new Error("Account creation failed.");
+}
+
 function queueRemoteSubjectsPersist(subjectsSnapshot) {
   if (!state.authToken) {
     return;
@@ -2785,17 +2821,43 @@ function queueRemoteSubjectsPersist(subjectsSnapshot) {
       const snapshot = remoteSubjectsSaveQueuedSnapshot;
       remoteSubjectsSaveQueuedSnapshot = null;
       try {
-        await requestApi(
-          "/api/account/subjects",
-          { subjects: snapshot },
-          false,
-          {
-            headers: {
-              ...buildAuthHeaders()
-            },
-            method: "PUT"
+        try {
+          await requestApi(
+            "/api/account/subjects",
+            { subjects: snapshot },
+            false,
+            {
+              headers: {
+                ...buildAuthHeaders()
+              },
+              method: "PUT"
+            }
+          );
+        } catch (primaryError) {
+          const shouldRetryWithFallback =
+            primaryError instanceof Error &&
+            (primaryError.status === 413 ||
+              /too large|payload|entity too large|request entity/i.test(primaryError.message || ""));
+          if (!shouldRetryWithFallback) {
+            throw primaryError;
           }
-        );
+
+          await requestApi(
+            "/api/account/subjects",
+            { subjects: createCloudSyncFallbackSubjects(state.subjects) },
+            false,
+            {
+              headers: {
+                ...buildAuthHeaders()
+              },
+              method: "PUT"
+            }
+          );
+          if (elements?.uploadStatus) {
+            elements.uploadStatus.textContent =
+              "Your account was synced with a lighter cloud copy so it can still open across devices.";
+          }
+        }
       } catch (error) {
         console.error("Remote subject sync failed.", error);
         if (elements?.uploadStatus) {
@@ -3014,12 +3076,12 @@ async function restoreSessionUser() {
   try {
     let payload;
     try {
-      payload = await requestApi("/api/auth/register", {
+      payload = await registerCloudAccountWithFallback({
         name: account.name,
         email: account.email,
         password: account.password,
         grade: normaliseGrade(account.grade),
-        subjects: createPersistableSubjects(getStoredSubjectsForAccount(account))
+        subjects: getStoredSubjectsForAccount(account)
       });
     } catch (registerError) {
       if (!(registerError instanceof Error) || registerError.status !== 409) {
@@ -3034,8 +3096,8 @@ async function restoreSessionUser() {
     state.authToken = payload.token || "";
     applyAuthenticatedAccount(payload.account, {
       token: payload.token || "",
-      subjects: payload.subjects,
-      skipRemoteSync: true
+      subjects: getStoredSubjectsForAccount(account),
+      skipRemoteSync: false
     });
     openDashboard("home");
     return;
@@ -8685,18 +8747,19 @@ async function handleDashboardOpen() {
         existingLegacyAccount.password === password
       ) {
         try {
-          const payload = await requestApi("/api/auth/register", {
+          const legacySubjects = getStoredSubjectsForAccount(existingLegacyAccount);
+          const payload = await registerCloudAccountWithFallback({
             name: existingLegacyAccount.name,
             email: existingLegacyAccount.email,
             password,
             grade: normaliseGrade(existingLegacyAccount.grade),
-            subjects: createPersistableSubjects(getStoredSubjectsForAccount(existingLegacyAccount))
+            subjects: legacySubjects
           });
           state.authToken = payload.token || "";
           applyAuthenticatedAccount(payload.account, {
             token: payload.token || "",
-            subjects: payload.subjects,
-            skipRemoteSync: true
+            subjects: legacySubjects,
+            skipRemoteSync: false
           });
           openDashboard("home");
           return;
@@ -8730,24 +8793,25 @@ async function handleDashboardOpen() {
   }
 
   try {
-    const payload = await requestApi("/api/auth/register", {
+    const desiredSubjects = existingLegacyAccount
+      ? getStoredSubjectsForAccount(existingLegacyAccount)
+      : createInitialSubjectsForAccount({
+          email: studentEmail,
+          grade: studentGrade,
+          name: studentName
+        });
+    const payload = await registerCloudAccountWithFallback({
       name: studentName,
       email: studentEmail,
       password,
       grade: studentGrade,
-      subjects: createPersistableSubjects(
-        existingLegacyAccount ? getStoredSubjectsForAccount(existingLegacyAccount) : createInitialSubjectsForAccount({
-          email: studentEmail,
-          grade: studentGrade,
-          name: studentName
-        })
-      )
+      subjects: desiredSubjects
     });
     state.authToken = payload.token || "";
     applyAuthenticatedAccount(payload.account, {
       token: payload.token || "",
-      subjects: payload.subjects,
-      skipRemoteSync: true
+      subjects: desiredSubjects,
+      skipRemoteSync: false
     });
     openDashboard("home");
   } catch (error) {
