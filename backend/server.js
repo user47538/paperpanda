@@ -12,6 +12,7 @@ import {
   signOutSession,
   updateAccount,
   updateAccountPassword,
+  updateAccountSettings,
   updateAccountSubjects
 } from "./authStore.js";
 import { availableRevisionGrades, getRevisionCatalogueForGrade, getRevisionEntry } from "./curriculumCatalog.js";
@@ -529,13 +530,13 @@ app.get("/health", (_request, response) => {
 
 app.post("/api/auth/register", async (request, response) => {
   try {
-    const { name, email, password, grade, subjects = [] } = request.body || {};
+    const { name, email, password, grade, subjects = [], settings = {} } = request.body || {};
     if (!name || !email || !password || !grade) {
       response.status(400).json({ error: "name, email, password, and grade are required." });
       return;
     }
 
-    const accountSession = await registerUser({ name, email, password, grade, subjects });
+    const accountSession = await registerUser({ name, email, password, grade, subjects, settings });
     response.status(201).json(accountSession);
   } catch (error) {
     response.status(error?.status || 500).json({
@@ -648,6 +649,23 @@ app.put("/api/account/subjects", async (request, response) => {
   } catch (error) {
     response.status(error?.status || 500).json({
       error: error instanceof Error ? error.message : "Subject sync failed."
+    });
+  }
+});
+
+app.put("/api/account/settings", async (request, response) => {
+  try {
+    const session = await requireSession(request, response);
+    if (!session) {
+      return;
+    }
+
+    const { settings = {} } = request.body || {};
+    const savedSettings = await updateAccountSettings(session.token, settings);
+    response.json({ settings: savedSettings });
+  } catch (error) {
+    response.status(error?.status || 500).json({
+      error: error instanceof Error ? error.message : "Settings sync failed."
     });
   }
 });

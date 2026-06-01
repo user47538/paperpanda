@@ -42,6 +42,8 @@ let currentAudioContext = "";
 let currentSpeechRecognition = null;
 let remoteSubjectsSaveQueuedSnapshot = null;
 let remoteSubjectsSaveInFlight = false;
+let remoteSettingsSaveQueuedSnapshot = null;
+let remoteSettingsSaveInFlight = false;
 const defaultGrade = "7";
 const defaultPageBackgroundColor = "#FBF7F0";
 const documentQuizPassPoints = 10;
@@ -2772,7 +2774,46 @@ function createCloudSyncFallbackSubjects(subjects) {
   return createQuotaFallbackSubjects(subjects);
 }
 
-async function registerCloudAccountWithFallback({ name, email, password, grade, subjects }) {
+function buildCloudAccountSettingsPayload() {
+  return {
+    termStarts: { ...state.termStarts },
+    termEnds: { ...state.termEnds },
+    homeBackgroundColor: normalizePageBackgroundColor(state.settings.homeBackgroundColor),
+    subjectsBackgroundColor: normalizePageBackgroundColor(state.settings.subjectsBackgroundColor),
+    headingColor: state.settings.headingColor || "#111111",
+    subjectIcons: { ...(state.settings.subjectIcons || {}) }
+  };
+}
+
+function applyCloudAccountSettings(settings) {
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
+    return;
+  }
+
+  state.termStarts = {
+    ...state.termStarts,
+    ...(settings.termStarts && typeof settings.termStarts === "object" ? settings.termStarts : {})
+  };
+  state.termEnds = {
+    ...state.termEnds,
+    ...(settings.termEnds && typeof settings.termEnds === "object" ? settings.termEnds : {})
+  };
+  state.settings = {
+    ...state.settings,
+    homeBackgroundColor: normalizePageBackgroundColor(settings.homeBackgroundColor ?? state.settings.homeBackgroundColor),
+    subjectsBackgroundColor: normalizePageBackgroundColor(
+      settings.subjectsBackgroundColor ?? state.settings.subjectsBackgroundColor
+    ),
+    headingColor: String(settings.headingColor || state.settings.headingColor || "#111111"),
+    subjectIcons: {
+      ...defaultSubjectIconMap,
+      ...state.settings.subjectIcons,
+      ...(settings.subjectIcons && typeof settings.subjectIcons === "object" ? settings.subjectIcons : {})
+    }
+  };
+}
+
+async function registerCloudAccountWithFallback({ name, email, password, grade, subjects, settings }) {
   const subjectCandidates = [
     createPersistableSubjects(subjects),
     createCloudSyncFallbackSubjects(subjects),
@@ -2787,7 +2828,8 @@ async function registerCloudAccountWithFallback({ name, email, password, grade, 
         email,
         password,
         grade,
-        subjects: candidateSubjects
+        subjects: candidateSubjects,
+        settings
       });
     } catch (error) {
       lastError = error;
@@ -2802,6 +2844,42 @@ async function registerCloudAccountWithFallback({ name, email, password, grade, 
   }
 
   throw lastError || new Error("Account creation failed.");
+}
+
+function queueRemoteSettingsPersist(settingsSnapshot) {
+  if (!state.authToken) {
+    return;
+  }
+
+  remoteSettingsSaveQueuedSnapshot = settingsSnapshot;
+  if (remoteSettingsSaveInFlight) {
+    return;
+  }
+
+  remoteSettingsSaveInFlight = true;
+  void (async () => {
+    while (remoteSettingsSaveQueuedSnapshot) {
+      const snapshot = remoteSettingsSaveQueuedSnapshot;
+      remoteSettingsSaveQueuedSnapshot = null;
+      try {
+        await requestApi(
+          "/api/account/settings",
+          { settings: snapshot },
+          false,
+          {
+            headers: {
+              ...buildAuthHeaders()
+            },
+            method: "PUT"
+          }
+        );
+      } catch (error) {
+        console.error("Remote settings sync failed.", error);
+      }
+    }
+
+    remoteSettingsSaveInFlight = false;
+  })();
 }
 
 function queueRemoteSubjectsPersist(subjectsSnapshot) {
@@ -2906,22 +2984,27 @@ function persistSubjects({ skipRemoteSync = false } = {}) {
   syncPreviewPersistence();
 }
 
-function persistSettings() {
+function persistSettings({ skipRemoteSync = false } = {}) {
   state.settings.homeBackgroundColor = normalizePageBackgroundColor(state.settings.homeBackgroundColor);
   state.settings.subjectsBackgroundColor = normalizePageBackgroundColor(state.settings.subjectsBackgroundColor);
+  const settingsPayload = buildCloudAccountSettingsPayload();
   window.localStorage.setItem(
     settingsStorageKey,
     JSON.stringify({
-      termStarts: state.termStarts,
-      termEnds: state.termEnds,
+      termStarts: settingsPayload.termStarts,
+      termEnds: settingsPayload.termEnds,
       homeBackgroundAssetId: state.settings.homeBackgroundAssetId,
       subjectsBackgroundAssetId: state.settings.subjectsBackgroundAssetId,
-      homeBackgroundColor: state.settings.homeBackgroundColor,
-      subjectsBackgroundColor: state.settings.subjectsBackgroundColor,
-      headingColor: state.settings.headingColor,
-      subjectIcons: state.settings.subjectIcons
+      homeBackgroundColor: settingsPayload.homeBackgroundColor,
+      subjectsBackgroundColor: settingsPayload.subjectsBackgroundColor,
+      headingColor: settingsPayload.headingColor,
+      subjectIcons: settingsPayload.subjectIcons
     })
   );
+
+  if (!skipRemoteSync) {
+    queueRemoteSettingsPersist(settingsPayload);
+  }
 }
 
 function normaliseAssessment(assessment) {
@@ -3026,15 +3109,17 @@ function restoreSubjectsForAccount(account, subjectsOverride = null, { skipRemot
   hydratePreviewImages();
 }
 
-function applyAuthenticatedAccount(account, { token = "", subjects = null, skipRemoteSync = false } = {}) {
+function applyAuthenticatedAccount(account, { token = "", subjects = null, settings = null, skipRemoteSync = false } = {}) {
   state.studentName = String(account?.name || "").trim();
   state.currentUserEmail = normaliseAccountKey(account?.email);
   state.studentGrade = normaliseGrade(account?.grade);
   state.currentUserId = String(account?.id || "");
   state.currentUserPoints = Math.max(0, Number(account?.points || 0) || 0);
   state.authToken = token || state.authToken;
+  applyCloudAccountSettings(settings);
   persistSession(state.currentUserEmail, state.authToken);
   restoreSubjectsForAccount(account, subjects, { skipRemoteSync });
+  persistSettings({ skipRemoteSync });
 }
 
 async function restoreSessionUser() {
@@ -3050,6 +3135,7 @@ async function restoreSessionUser() {
       applyAuthenticatedAccount(session.account, {
         token: savedToken,
         subjects: session.subjects,
+        settings: session.settings,
         skipRemoteSync: true
       });
       openDashboard("home");
@@ -3080,7 +3166,8 @@ async function restoreSessionUser() {
         email: account.email,
         password: account.password,
         grade: normaliseGrade(account.grade),
-        subjects: getStoredSubjectsForAccount(account)
+        subjects: getStoredSubjectsForAccount(account),
+        settings: buildCloudAccountSettingsPayload()
       });
     } catch (registerError) {
       if (!(registerError instanceof Error) || registerError.status !== 409) {
@@ -3096,6 +3183,7 @@ async function restoreSessionUser() {
     applyAuthenticatedAccount(payload.account, {
       token: payload.token || "",
       subjects: getStoredSubjectsForAccount(account),
+      settings: payload.settings,
       skipRemoteSync: false
     });
     openDashboard("home");
@@ -8734,6 +8822,7 @@ async function handleDashboardOpen() {
       applyAuthenticatedAccount(payload.account, {
         token: payload.token || "",
         subjects: payload.subjects,
+        settings: payload.settings,
         skipRemoteSync: true
       });
       openDashboard("home");
@@ -8752,12 +8841,14 @@ async function handleDashboardOpen() {
             email: existingLegacyAccount.email,
             password,
             grade: normaliseGrade(existingLegacyAccount.grade),
-            subjects: legacySubjects
+            subjects: legacySubjects,
+            settings: buildCloudAccountSettingsPayload()
           });
           state.authToken = payload.token || "";
           applyAuthenticatedAccount(payload.account, {
             token: payload.token || "",
             subjects: legacySubjects,
+            settings: payload.settings,
             skipRemoteSync: false
           });
           openDashboard("home");
@@ -8804,12 +8895,14 @@ async function handleDashboardOpen() {
       email: studentEmail,
       password,
       grade: studentGrade,
-      subjects: desiredSubjects
+      subjects: desiredSubjects,
+      settings: buildCloudAccountSettingsPayload()
     });
     state.authToken = payload.token || "";
     applyAuthenticatedAccount(payload.account, {
       token: payload.token || "",
       subjects: desiredSubjects,
+      settings: payload.settings,
       skipRemoteSync: false
     });
     openDashboard("home");
