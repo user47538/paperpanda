@@ -53,7 +53,7 @@ Set these values locally before starting:
 - `backend/.env`
   - `OPENAI_API_KEY=...`
   - `FRONTEND_ORIGIN=http://localhost:5173`
-  - `PAPERPANDA_DATA_FILE=./data/paperpanda-store.json`
+  - `DATABASE_URL=postgresql://...`
 
 ## Render deployment
 
@@ -78,5 +78,8 @@ You can either:
 
 - The old `file://` prototype hit browser restrictions for PDF.js workers and direct OpenAI browser requests.
 - This structure moves those sensitive and restricted operations to the backend where they belong.
-- Shared sign-in and cross-device subject sync now use the backend account store instead of browser-only local storage.
-- On Render, the backend account store needs persistent storage. If the API service runs without a persistent disk or external database, shared account data will be lost when the service is restarted or redeployed.
+- Shared sign-in and cross-device subject sync now use Postgres on the backend instead of browser-only local storage.
+- The auth store uses dedicated `paperpanda_users` and `paperpanda_sessions` tables inside PaperPanda's own Postgres database.
+- The backend automatically imports the legacy JSON auth store on first boot if `paperpanda-store.json` exists and the Postgres auth tables are empty.
+- The included `render.yaml` now defines a dedicated `paperpanda-db` Render Postgres instance and wires `paperpanda-api` to it automatically.
+- PaperPanda should not share a database with Wallspace or any other app. Keep the PaperPanda data isolated in its own Render Postgres instance.

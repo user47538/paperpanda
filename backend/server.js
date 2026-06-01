@@ -523,7 +523,7 @@ app.get("/health", (_request, response) => {
   response.json({
     ok: true,
     hasOpenAiKey: Boolean(openAiApiKey),
-    authStorePath: getDataFilePath()
+    authStoreBackend: getDataFilePath()
   });
 });
 
