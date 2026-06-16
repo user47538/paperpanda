@@ -107,9 +107,15 @@
             </div>
           </section>
 
+          <section class="focus-home-next-card hidden" id="focus-home-next-card" aria-label="Next thing due"></section>
+
           <div class="home-stage">
             <section class="home-stage__main">
               <section class="home-section">
+                <div class="focus-home-subject-heading hidden" id="focus-home-subject-heading">
+                  <h3>Pick a subject</h3>
+                  <span id="focus-home-subject-summary">Choose one subject to keep moving.</span>
+                </div>
                 <div class="home-subject-grid" id="home-subject-grid"></div>
               </section>
 
@@ -224,6 +230,16 @@
             </aside>
           </div>
         </section>
+
+        <div class="focus-fab hidden" id="focus-ask-fab">
+          <button type="button" class="focus-fab__pill" id="focus-ask-button">
+            <span class="focus-fab__dot"></span>
+            <span id="focus-ask-label">Ask Panda</span>
+          </button>
+          <button type="button" class="focus-fab__avatar" id="focus-ask-avatar-button" aria-label="Ask Panda">
+            <img src="/paperpanda-logo.svg" alt="PaperPanda" />
+          </button>
+        </div>
 
         <section class="settings-view hidden" id="settings-view">
             <section class="home-grid">

@@ -539,6 +539,9 @@ const elements = {
   navSettingsButton: document.getElementById("nav-settings-button"),
   focusModeToggle: document.getElementById("focus-mode-toggle"),
   homeView: document.getElementById("home-view"),
+  focusHomeNextCard: document.getElementById("focus-home-next-card"),
+  focusHomeSubjectHeading: document.getElementById("focus-home-subject-heading"),
+  focusHomeSubjectSummary: document.getElementById("focus-home-subject-summary"),
   homeHeroDate: document.getElementById("home-hero-date"),
   homeHeroTitle: document.getElementById("home-hero-title"),
   homeHeroSubtitle: document.getElementById("home-hero-subtitle"),
@@ -570,6 +573,10 @@ const elements = {
   subjectHeroUploadButton: document.getElementById("subject-hero-upload-button"),
   taskView: document.getElementById("task-view"),
   revisionView: document.getElementById("revision-view"),
+  focusAskFab: document.getElementById("focus-ask-fab"),
+  focusAskButton: document.getElementById("focus-ask-button"),
+  focusAskAvatarButton: document.getElementById("focus-ask-avatar-button"),
+  focusAskLabel: document.getElementById("focus-ask-label"),
   documentsToReadCount: document.getElementById("documents-to-read-count"),
   documentsToReadSummary: document.getElementById("documents-to-read-summary"),
   documentsToReadProgress: document.getElementById("documents-to-read-progress"),
@@ -1651,70 +1658,261 @@ function renderSubjectFocusLaunchpad() {
     return;
   }
 
-  const counts = getSubjectTabCounts(subject);
-  const subjectPanda = getSubjectTileCodeMarkup(subject);
-  const nextEntry = getUpcomingAssessmentEntries()[0] || getAssessmentEntries().find((entry) => entry.dueDateObject);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const daysUntil = nextEntry?.dueDateObject
-    ? Math.max(0, Math.ceil((nextEntry.dueDateObject.getTime() - today.getTime()) / 86400000))
-    : null;
+  const readerBundle = getAllDocumentBundles(subject).find((bundle) => !bundle.reviewed) || getAllDocumentBundles(subject)[0] || null;
+  const homeworkBundle = getSubjectHomeworkBundles(subject)[0] || null;
+  const watchItem = getSubjectWatchItems(subject)[0] || null;
+  const nextEntry = getNextSubjectAssessmentEntry(subject);
+  const counts = {
+    reader: getAllDocumentBundles(subject).length,
+    homework: getSubjectHomeworkBundles(subject).length,
+    watch: getSubjectWatchItems(subject).length,
+    assessments: getActiveSubjectAssessments(subject).length
+  };
+  const readerPageCount = readerBundle ? getBundlePageCount(readerBundle) : 0;
+  const readerProgress = readerBundle ? Math.round(getHomeDocumentProgress(readerBundle) * 100) : 0;
+  const focusPreview = {
+    reader: readerBundle
+      ? {
+          title: readerBundle.title,
+          meta: `${readerBundle.type || "Class notes"} · ${readerPageCount} ${readerPageCount === 1 ? "page" : "pages"} · ${readerProgress}% read`,
+          action: currentAudioContext === `document:${readerBundle.documents[0]?.id}` ? "■ Stop reading" : "▶ Listen from here"
+        }
+      : {
+          title: "No reading is loaded yet",
+          meta: "Upload class notes to start reading here.",
+          action: "📖 Open reader"
+        },
+    homework: homeworkBundle
+      ? {
+          title: homeworkBundle.title,
+          meta: `${getBundlePageCount(homeworkBundle)} ${getBundlePageCount(homeworkBundle) === 1 ? "page" : "pages"} · ${getBundleWorkNotes(homeworkBundle) ? "writing started" : "needs a draft"}`,
+          action: "↯ Break into steps"
+        }
+      : {
+          title: "No homework in this subject yet",
+          meta: "Homework tasks will appear here when they are uploaded.",
+          action: "✎ Open homework"
+        },
+    watch: watchItem
+      ? {
+          title: watchItem.title,
+          meta: watchItem.source === "manual"
+            ? "Saved watch link"
+            : watchItem.sourceDocumentTitle
+              ? `${watchItem.sourceDocumentTitle} · linked from your notes`
+              : "Linked from your notes",
+          action: "▶ Play video"
+        }
+      : {
+          title: "No class videos linked yet",
+          meta: "Watch links from notes or manual uploads appear here.",
+          action: "▶ Open watch"
+        },
+    assessments: nextEntry
+      ? {
+          title: nextEntry.assessment.componentTask || nextEntry.assessment.title,
+          meta: `Due ${formatAssessmentDueLabel(nextEntry.assessment.dueDate)} · worth ${nextEntry.assessment.weighting || "Assessment"}`,
+          action: "🎯 See the steps"
+        }
+      : {
+          title: "No active assessment yet",
+          meta: "Assessment tasks and due dates will appear here.",
+          action: "🎯 Open assessments"
+        }
+  };
+
+  const subjectOptions = state.subjects
+    .map((item) => `<option value="${item.id}"${item.id === subject.id ? " selected" : ""}>${escapeHtml(item.name)}</option>`)
+    .join("");
 
   const cards = FOCUS_AREAS.map((area) => {
-    const count = Number(counts[area.id] || 0);
+    const preview = focusPreview[area.id];
     return `
-      <button type="button" class="focus-card focus-card--${area.id}" data-focus-area="${area.id}">
-        <span class="focus-card__icon">${area.icon}</span>
-        <span class="focus-card__text">
-          <span class="focus-card__label">${escapeHtml(area.label)}</span>
-          <span class="focus-card__blurb">${escapeHtml(area.blurb)}</span>
-        </span>
-        <span class="focus-card__count">${count}</span>
-      </button>
+      <article class="focus-card focus-card--${area.id}" data-focus-area="${area.id}" tabindex="0" role="button">
+        <div class="focus-card__header">
+          <div class="focus-card__icon">${area.icon}</div>
+          <div class="focus-card__text">
+            <span class="focus-card__label">${escapeHtml(area.label)}</span>
+            <span class="focus-card__blurb">${escapeHtml(area.blurb)}</span>
+          </div>
+          <span class="focus-card__count">${counts[area.id] || 0}</span>
+        </div>
+        <div class="focus-card__preview">
+          <div class="focus-card__preview-copy">
+            <strong>${escapeHtml(preview.title)}</strong>
+            <span>${escapeHtml(preview.meta)}</span>
+          </div>
+          <button type="button" class="focus-card__action" data-focus-preview-action="${area.id}">
+            ${escapeHtml(preview.action)}
+          </button>
+        </div>
+      </article>
     `;
   }).join("");
 
   const countdownMarkup = nextEntry
     ? `
-      <button type="button" class="focus-countdown" id="focus-countdown-button">
-        <span class="focus-countdown__num">${daysUntil}</span>
-        <span class="focus-countdown__unit">${daysUntil === 1 ? "day" : "days"}</span>
+      <button type="button" class="focus-countdown" id="focus-subject-next-button">
+        <span class="focus-countdown__num">${getDaysUntilDate(nextEntry.dueDateObject)}</span>
+        <span class="focus-countdown__unit">${getDaysUntilDate(nextEntry.dueDateObject) === 1 ? "day" : "days"}</span>
         <span class="focus-countdown__copy">
           <span class="eyebrow">Next thing due</span>
           <strong>${escapeHtml(nextEntry.assessment.componentTask || nextEntry.assessment.title)}</strong>
         </span>
+        <span class="focus-countdown__arrow">→</span>
       </button>
     `
     : "";
 
   host.innerHTML = `
     <div class="focus-launchpad__top">
-      <div class="focus-subject-chip">
-        <span class="subject-tile__code">${subjectPanda}</span>
-        <span>${escapeHtml(subject.name)}</span>
+      <div class="focus-launchpad__controls">
+        <label class="focus-subject-picker">
+          <span class="focus-subject-picker__icon">${getSubjectTileCodeMarkup(subject)}</span>
+          <select id="focus-subject-select" aria-label="Choose subject">${subjectOptions}</select>
+          <span class="focus-subject-picker__caret">⌄</span>
+        </label>
+        <span class="focus-launchpad__hint">Tap to switch subject</span>
       </div>
       ${countdownMarkup}
     </div>
     <div class="focus-launchpad__grid">${cards}</div>
   `;
 
-  host.querySelectorAll("[data-focus-area]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const nextArea = button.dataset.focusArea;
+  host.querySelector("#focus-subject-select")?.addEventListener("change", (event) => {
+    state.selectedSubjectId = event.target.value;
+    state.focusArea = null;
+    render();
+  });
+
+  host.querySelectorAll("[data-focus-area]").forEach((card) => {
+    const drillIn = () => {
+      const nextArea = card.dataset.focusArea;
       if (!nextArea) {
         return;
       }
       state.activeSubjectTab = nextArea;
       state.focusArea = nextArea;
       render();
+    };
+    card.addEventListener("click", drillIn);
+    card.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        drillIn();
+      }
     });
   });
 
-  host.querySelector("#focus-countdown-button")?.addEventListener("click", () => {
-    state.activeSubjectTab = "assessments";
-    state.focusArea = "assessments";
-    render();
+  host.querySelectorAll("[data-focus-preview-action]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const area = button.dataset.focusPreviewAction;
+      if (area === "reader") {
+        const firstDocument = readerBundle?.documents?.[0];
+        if (firstDocument) {
+          state.selectedDocumentId = firstDocument.id;
+          state.askDocumentId = firstDocument.id;
+          speakDocument(firstDocument);
+          return;
+        }
+        openSubjectsWorkspace("reader");
+        return;
+      }
+      if (area === "homework") {
+        if (homeworkBundle) {
+          openHomeworkTaskForSubject(subject, homeworkBundle);
+          return;
+        }
+        openSubjectsWorkspace("homework");
+        return;
+      }
+      if (area === "watch") {
+        if (watchItem?.url) {
+          window.open(watchItem.url, "_blank", "noopener");
+          return;
+        }
+        openSubjectsWorkspace("watch");
+        return;
+      }
+      if (area === "assessments") {
+        if (nextEntry) {
+          openAssessmentTaskFromEntry(nextEntry);
+          return;
+        }
+        openSubjectsWorkspace("assessments");
+      }
+    });
   });
+
+  host.querySelector("#focus-subject-next-button")?.addEventListener("click", () => {
+    openAssessmentTaskFromEntry(nextEntry);
+  });
+}
+
+function renderFocusHomeCard() {
+  const host = elements.focusHomeNextCard;
+  if (!host) {
+    return;
+  }
+
+  const show = state.focusMode && state.currentView === "home";
+  host.classList.toggle("hidden", !show);
+  elements.focusHomeSubjectHeading?.classList.toggle("hidden", !show);
+  if (!show) {
+    host.innerHTML = "";
+    return;
+  }
+
+  if (elements.focusHomeSubjectSummary) {
+    elements.focusHomeSubjectSummary.textContent = "Then pick a subject to jump in.";
+  }
+
+  const nextEntry = getNextAssessmentEntry();
+  if (!nextEntry) {
+    host.innerHTML = `
+      <article class="focus-home-next-card__surface">
+        <div class="focus-home-next-card__empty">
+          <strong>No upcoming assessment yet</strong>
+          <span>Upload an assessment task or open the calendar to review due dates.</span>
+        </div>
+      </article>
+    `;
+    return;
+  }
+
+  host.innerHTML = `
+    <article class="focus-home-next-card__surface">
+      <div class="focus-home-next-card__count">
+        <strong>${getDaysUntilDate(nextEntry.dueDateObject)}</strong>
+        <span>${getDaysUntilDate(nextEntry.dueDateObject) === 1 ? "day to go" : "days to go"}</span>
+      </div>
+      <div class="focus-home-next-card__copy">
+        <p class="eyebrow">Next thing due</p>
+        <h3>${escapeHtml(nextEntry.assessment.componentTask || nextEntry.assessment.title)}</h3>
+        <p>${escapeHtml(`${nextEntry.subject.name} · due ${formatAssessmentDueLabel(nextEntry.assessment.dueDate)} · worth ${nextEntry.assessment.weighting || "Assessment"}`)}</p>
+      </div>
+      <div class="focus-home-next-card__actions">
+        <button type="button" class="primary-button primary-button--dark" id="focus-home-next-open-button">🎯 See the steps</button>
+        <button type="button" class="ghost-button" id="focus-home-next-read-button">▶ Read it to me</button>
+      </div>
+    </article>
+  `;
+
+  host.querySelector("#focus-home-next-open-button")?.addEventListener("click", () => {
+    openAssessmentTaskFromEntry(nextEntry);
+  });
+  host.querySelector("#focus-home-next-read-button")?.addEventListener("click", () => {
+    speakAssessmentEntry(nextEntry, { context: `focus:home-assessment:${nextEntry.assessment.id}` });
+  });
+}
+
+function renderFocusAskFab() {
+  const shouldShow = state.focusMode && (state.currentView === "home" || state.currentView === "subjects");
+  elements.focusAskFab?.classList.toggle("hidden", !shouldShow);
+  if (elements.focusAskLabel) {
+    elements.focusAskLabel.textContent = state.currentView === "subjects" ? "Hold to talk" : "Ask Panda";
+  }
 }
 
 function renderFocusMode() {
@@ -1725,6 +1923,9 @@ function renderFocusMode() {
   elements.subjectsView?.classList.toggle("focus-drilled", drilledIn);
   elements.subjectFocusLaunchpad?.classList.toggle("hidden", !showLaunchpad);
   elements.focusBackButton?.classList.toggle("hidden", !drilledIn);
+
+  renderFocusHomeCard();
+  renderFocusAskFab();
 
   if (showLaunchpad) {
     renderSubjectFocusLaunchpad();
@@ -2287,6 +2488,34 @@ function getNextSubjectAssessment(subject) {
   return [...subject.assessments]
     .filter((assessment) => !assessment.completed)
     .sort((left, right) => getAssessmentSortTimestamp(left) - getAssessmentSortTimestamp(right))[0] || null;
+}
+
+function getDaysUntilDate(dateObject) {
+  if (!dateObject) {
+    return 0;
+  }
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.max(0, Math.ceil((dateObject.getTime() - today.getTime()) / 86400000));
+}
+
+function getNextAssessmentEntry() {
+  const entries = getAssessmentEntries().filter(({ assessment }) => !assessment.completed);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return entries.find((entry) => entry.dueDateObject && entry.dueDateObject >= today) || entries.find((entry) => entry.dueDateObject) || null;
+}
+
+function getNextSubjectAssessmentEntry(subject) {
+  const assessment = subject ? getNextSubjectAssessment(subject) : null;
+  if (!subject || !assessment) {
+    return null;
+  }
+  return {
+    subject,
+    assessment,
+    dueDateObject: parseAssessmentDate(assessment.dueDate)
+  };
 }
 
 function formatAssessmentDate(value) {
@@ -3664,16 +3893,89 @@ function buildHomeHomeworkCardMarkup({ subject, bundle }, index) {
   `;
 }
 
+function buildAssessmentReadAloudText(subject, assessment) {
+  return [
+    `${assessment.componentTask || assessment.title}.`,
+    subject ? `${subject.name}.` : "",
+    assessment.weighting ? `Worth ${assessment.weighting}.` : "",
+    assessment.dueDate ? `Due ${formatAssessmentDueLabel(assessment.dueDate)}.` : "",
+    assessment.description || ""
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function openAssessmentTaskFromEntry(entry) {
+  if (!entry?.assessment || !entry?.subject) {
+    return;
+  }
+  state.selectedSubjectId = entry.subject.id;
+  state.activeSubjectTab = "assessments";
+  state.focusArea = state.focusMode ? "assessments" : null;
+  openTaskView({ kind: "assessment", id: entry.assessment.id });
+}
+
+function openHomeworkTaskForSubject(subject, bundle) {
+  if (!subject || !bundle) {
+    return;
+  }
+  state.selectedSubjectId = subject.id;
+  state.activeSubjectTab = "homework";
+  state.focusArea = state.focusMode ? "homework" : null;
+  openTaskView({ kind: "homework", id: bundle.id });
+}
+
+function speakAssessmentEntry(entry, { context = null } = {}) {
+  if (!entry?.assessment || !entry?.subject) {
+    return;
+  }
+  const audioContext = context || `task:assessment:${entry.assessment.id}`;
+  if (currentAudioContext === audioContext) {
+    stopListening();
+    render();
+    return;
+  }
+  void speakTextWithOpenAi(buildAssessmentReadAloudText(entry.subject, entry.assessment), {
+    context: audioContext,
+    statusMessages: {
+      preparing: "Preparing assessment audio...",
+      playing: "Reading assessment...",
+      error: "Assessment audio failed."
+    }
+  })
+    .then(() => {
+      render();
+    })
+    .catch((error) => {
+      console.error("Assessment audio failed.", error);
+      render();
+    });
+}
+
+function handleFocusAskLaunch() {
+  if (state.currentView !== "subjects") {
+    openSubjectsWorkspace(state.activeSubjectTab || "reader");
+    requestAnimationFrame(() => startAskMicrophone());
+    return;
+  }
+
+  if (state.focusMode && !state.focusArea) {
+    state.activeSubjectTab = "reader";
+    state.focusArea = "reader";
+    render();
+    requestAnimationFrame(() => startAskMicrophone());
+    return;
+  }
+
+  startAskMicrophone();
+}
+
 function renderOverview() {
   const unreadDocumentMetrics = getUnreadDocumentMetrics();
   const homeworkMetrics = getHomeworkMetrics();
   const assessmentMetrics = getAssessmentProgressMetrics();
   const upcomingEntries = getUpcomingAssessmentEntries();
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const nextEntry =
-    getAssessmentEntries().find((entry) => entry.dueDateObject && entry.dueDateObject >= today) ||
-    getAssessmentEntries().find((entry) => entry.dueDateObject);
+  const nextEntry = getNextAssessmentEntry();
 
   if (elements.documentsToReadCount) {
     elements.documentsToReadCount.textContent = String(unreadDocumentMetrics.unread);
@@ -3771,7 +4073,7 @@ function renderOverview() {
   }
 
   if (elements.homeNextUpCount) {
-    const daysUntil = nextEntry?.dueDateObject ? Math.max(0, Math.ceil((nextEntry.dueDateObject.getTime() - today.getTime()) / 86400000)) : 0;
+    const daysUntil = nextEntry?.dueDateObject ? getDaysUntilDate(nextEntry.dueDateObject) : 0;
     elements.homeNextUpCount.textContent = String(daysUntil);
   }
   if (elements.homeNextUpTitle) {
@@ -4365,12 +4667,16 @@ function renderHomeHero() {
   const homeworkMetrics = getHomeworkMetrics();
   const assessmentMetrics = getAssessmentProgressMetrics();
   const totalThings = unreadDocumentMetrics.unread + homeworkMetrics.remaining + assessmentMetrics.upcoming;
-  const nextEntry = getUpcomingAssessmentEntries()[0] || getAssessmentEntries().find((entry) => entry.dueDateObject);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const daysUntil = nextEntry?.dueDateObject ? Math.max(0, Math.ceil((nextEntry.dueDateObject.getTime() - today.getTime()) / 86400000)) : 0;
+  const nextEntry = getNextAssessmentEntry();
+  const daysUntil = nextEntry?.dueDateObject ? getDaysUntilDate(nextEntry.dueDateObject) : 0;
 
   elements.homeHeroDate.textContent = formatHeroDate();
+  if (state.focusMode && state.currentView === "home") {
+    elements.homeHeroTitle.innerHTML = `Hey ${escapeHtml(state.studentName || "there")}. <span>👋</span>`;
+    elements.homeHeroSubtitle.textContent = "Here's what's due next. Then pick a subject to jump in.";
+    return;
+  }
+
   elements.homeHeroTitle.innerHTML = `Hey ${escapeHtml(state.studentName || "there")}. <span>${totalThings} things</span>`;
   elements.homeHeroSubtitle.textContent = nextEntry
     ? `today — and ${daysUntil} ${daysUntil === 1 ? "day" : "days"} until ${nextEntry.assessment.componentTask || nextEntry.assessment.title}.`
@@ -4380,6 +4686,13 @@ function renderHomeHero() {
 function renderSubjectsHero() {
   const subject = getSelectedSubject();
   if (!subject) {
+    return;
+  }
+
+  if (state.focusMode && state.currentView === "subjects" && !state.focusArea) {
+    elements.subjectsHeroDate.textContent = formatHeroDate();
+    elements.subjectsHeroTitle.innerHTML = `Hey ${escapeHtml(state.studentName || "there")}. <span>👋</span>`;
+    elements.subjectsHeroSubtitle.textContent = "Pick one card to start. Everything else can wait.";
     return;
   }
 
@@ -9104,6 +9417,8 @@ elements.saveRevisionTestButton.addEventListener("click", saveCurrentRevisionTes
 elements.focusModeToggle?.addEventListener("click", () => {
   setFocusMode(!state.focusMode);
 });
+elements.focusAskButton?.addEventListener("click", handleFocusAskLaunch);
+elements.focusAskAvatarButton?.addEventListener("click", handleFocusAskLaunch);
 elements.navHomeButton.addEventListener("click", () => {
   state.currentView = "home";
   render();
