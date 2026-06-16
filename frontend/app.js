@@ -8,6 +8,7 @@ const currentUiVersion = "2026-05-28-design-handoff-structure";
 const previewDatabaseName = "paperpanda-assets";
 const previewStoreName = "document-previews";
 const settingsAssetStoreName = "settings-assets";
+const FOCUS_MODE_STORAGE_KEY = "paperpanda.focusMode";
 
 function resolveDefaultApiBaseUrl() {
   const configuredBaseUrl = String(import.meta.env.VITE_API_BASE_URL || "").trim().replace(/\/$/, "");
@@ -431,6 +432,13 @@ const subjectAliasMap = {
   art: ["Art", "Visual Arts"]
 };
 
+const FOCUS_AREAS = [
+  { id: "reader", icon: "📖", label: "Read", blurb: "Read & listen" },
+  { id: "homework", icon: "✎", label: "Homework", blurb: "Tasks to do" },
+  { id: "watch", icon: "▶", label: "Watch", blurb: "Class videos" },
+  { id: "assessments", icon: "🎯", label: "Assessments", blurb: "Tests & due dates" }
+];
+
 const state = {
   studentName: "",
   currentUserEmail: "",
@@ -441,6 +449,8 @@ const state = {
   authMode: "signin",
   selectedSubjectId: subjectSeed[0].id,
   activeSubjectTab: "reader",
+  focusMode: window.localStorage.getItem(FOCUS_MODE_STORAGE_KEY) === "on",
+  focusArea: null,
   selectedDocumentId: null,
   currentDocumentPageIndexes: {},
   activeReaderSegmentIndex: -1,
@@ -527,6 +537,7 @@ const elements = {
   navHomeButton: document.getElementById("nav-home-button"),
   navSubjectsButton: document.getElementById("nav-subjects-button"),
   navSettingsButton: document.getElementById("nav-settings-button"),
+  focusModeToggle: document.getElementById("focus-mode-toggle"),
   homeView: document.getElementById("home-view"),
   homeHeroDate: document.getElementById("home-hero-date"),
   homeHeroTitle: document.getElementById("home-hero-title"),
@@ -598,7 +609,9 @@ const elements = {
   upcomingNextDue: document.getElementById("upcoming-next-due"),
   subjectList: document.getElementById("subject-list"),
   subjectHeader: document.getElementById("subject-header"),
+  subjectFocusLaunchpad: document.getElementById("subject-focus-launchpad"),
   subjectTabs: document.getElementById("subject-tabs"),
+  focusBackButton: document.getElementById("focus-back-button"),
   tabCountReader: document.getElementById("tab-count-reader"),
   tabCountHomework: document.getElementById("tab-count-homework"),
   tabCountWatch: document.getElementById("tab-count-watch"),
@@ -1284,6 +1297,7 @@ function focusAskComposer() {
 function openSubjectsWorkspace(tab = "reader") {
   state.currentView = "subjects";
   state.activeSubjectTab = tab;
+  state.focusArea = state.focusMode ? tab : null;
   render();
 }
 
@@ -1623,6 +1637,103 @@ function renderSubjectTabs() {
   elements.viewerPanelHomework.classList.toggle("hidden", state.activeSubjectTab !== "homework");
   elements.viewerPanelWatch.classList.toggle("hidden", state.activeSubjectTab !== "watch");
   elements.viewerPanelAssessments.classList.toggle("hidden", state.activeSubjectTab !== "assessments");
+}
+
+function renderSubjectFocusLaunchpad() {
+  const host = elements.subjectFocusLaunchpad;
+  if (!host) {
+    return;
+  }
+
+  const subject = getSelectedSubject();
+  if (!subject) {
+    host.innerHTML = "";
+    return;
+  }
+
+  const counts = getSubjectTabCounts(subject);
+  const subjectPanda = getSubjectTileCodeMarkup(subject);
+  const nextEntry = getUpcomingAssessmentEntries()[0] || getAssessmentEntries().find((entry) => entry.dueDateObject);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const daysUntil = nextEntry?.dueDateObject
+    ? Math.max(0, Math.ceil((nextEntry.dueDateObject.getTime() - today.getTime()) / 86400000))
+    : null;
+
+  const cards = FOCUS_AREAS.map((area) => {
+    const count = Number(counts[area.id] || 0);
+    return `
+      <button type="button" class="focus-card focus-card--${area.id}" data-focus-area="${area.id}">
+        <span class="focus-card__icon">${area.icon}</span>
+        <span class="focus-card__text">
+          <span class="focus-card__label">${escapeHtml(area.label)}</span>
+          <span class="focus-card__blurb">${escapeHtml(area.blurb)}</span>
+        </span>
+        <span class="focus-card__count">${count}</span>
+      </button>
+    `;
+  }).join("");
+
+  const countdownMarkup = nextEntry
+    ? `
+      <button type="button" class="focus-countdown" id="focus-countdown-button">
+        <span class="focus-countdown__num">${daysUntil}</span>
+        <span class="focus-countdown__unit">${daysUntil === 1 ? "day" : "days"}</span>
+        <span class="focus-countdown__copy">
+          <span class="eyebrow">Next thing due</span>
+          <strong>${escapeHtml(nextEntry.assessment.componentTask || nextEntry.assessment.title)}</strong>
+        </span>
+      </button>
+    `
+    : "";
+
+  host.innerHTML = `
+    <div class="focus-launchpad__top">
+      <div class="focus-subject-chip">
+        <span class="subject-tile__code">${subjectPanda}</span>
+        <span>${escapeHtml(subject.name)}</span>
+      </div>
+      ${countdownMarkup}
+    </div>
+    <div class="focus-launchpad__grid">${cards}</div>
+  `;
+
+  host.querySelectorAll("[data-focus-area]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const nextArea = button.dataset.focusArea;
+      if (!nextArea) {
+        return;
+      }
+      state.activeSubjectTab = nextArea;
+      state.focusArea = nextArea;
+      render();
+    });
+  });
+
+  host.querySelector("#focus-countdown-button")?.addEventListener("click", () => {
+    state.activeSubjectTab = "assessments";
+    state.focusArea = "assessments";
+    render();
+  });
+}
+
+function renderFocusMode() {
+  const showLaunchpad = state.focusMode && state.currentView === "subjects" && !state.focusArea;
+  const drilledIn = state.focusMode && state.currentView === "subjects" && Boolean(state.focusArea);
+
+  elements.subjectsView?.classList.toggle("focus-launchpad-open", showLaunchpad);
+  elements.subjectsView?.classList.toggle("focus-drilled", drilledIn);
+  elements.subjectFocusLaunchpad?.classList.toggle("hidden", !showLaunchpad);
+  elements.focusBackButton?.classList.toggle("hidden", !drilledIn);
+
+  if (showLaunchpad) {
+    renderSubjectFocusLaunchpad();
+    return;
+  }
+
+  if (elements.subjectFocusLaunchpad) {
+    elements.subjectFocusLaunchpad.innerHTML = "";
+  }
 }
 
 function renderPendingUpload() {
@@ -3346,6 +3457,13 @@ function renderAiConnectionState() {
   }
 }
 
+function setFocusMode(on) {
+  state.focusMode = Boolean(on);
+  state.focusArea = null;
+  window.localStorage.setItem(FOCUS_MODE_STORAGE_KEY, state.focusMode ? "on" : "off");
+  render();
+}
+
 function openDashboard(nextView = "home") {
   elements.landingPanel.classList.add("hidden");
   elements.appShell.classList.remove("hidden");
@@ -3702,6 +3820,7 @@ function renderCurrentView() {
   elements.appBrandTag.textContent = "";
   elements.welcomeHeading.textContent = "";
   elements.appShell.classList.toggle("hidden", state.currentView === "task" || state.currentView === "revision");
+  elements.appShell.classList.toggle("focus-mode", state.focusMode);
   elements.homeView.classList.toggle("hidden", state.currentView !== "home");
   elements.settingsView.classList.toggle("hidden", state.currentView !== "settings");
   elements.subjectsView.classList.toggle("hidden", state.currentView !== "subjects");
@@ -3710,6 +3829,10 @@ function renderCurrentView() {
   elements.navHomeButton.classList.toggle("is-active", state.currentView === "home");
   elements.navSubjectsButton.classList.toggle("is-active", state.currentView === "subjects");
   elements.navSettingsButton.classList.toggle("is-active", state.currentView === "settings");
+  if (elements.focusModeToggle) {
+    elements.focusModeToggle.classList.toggle("is-on", state.focusMode);
+    elements.focusModeToggle.setAttribute("aria-pressed", String(state.focusMode));
+  }
 }
 
 function clipText(value, maxLength = 9000) {
@@ -4325,6 +4448,7 @@ function renderSubjectList() {
 
       state.selectedSubjectId = subject.id;
       state.activeSubjectTab = "reader";
+      state.focusArea = null;
       state.selectedDocumentIds = [];
       state.expandedDocumentGroups = {};
       state.watchExpanded = false;
@@ -8256,6 +8380,7 @@ async function processFiles(fileList) {
       state.selectedSubjectId = subject.id;
       state.currentView = "subjects";
       state.activeSubjectTab = "watch";
+      state.focusArea = state.focusMode ? "watch" : null;
       persistSubjects();
       render();
       elements.uploadStatus.textContent = "That WATCH link is already in this subject.";
@@ -8280,6 +8405,7 @@ async function processFiles(fileList) {
     state.selectedSubjectId = subject.id;
     state.currentView = "subjects";
     state.activeSubjectTab = "watch";
+    state.focusArea = state.focusMode ? "watch" : null;
     persistSubjects();
     render();
     elements.uploadStatus.textContent = "WATCH item added.";
@@ -8342,14 +8468,17 @@ async function processFiles(fileList) {
       state.selectedSubjectId = subject.id;
       state.currentView = "subjects";
       state.activeSubjectTab = "homework";
+      state.focusArea = state.focusMode ? "homework" : null;
     } else if (flags.assessment) {
       state.selectedSubjectId = subject.id;
       state.currentView = "subjects";
       state.activeSubjectTab = "assessments";
+      state.focusArea = state.focusMode ? "assessments" : null;
     } else if (flags.classNotes) {
       state.selectedSubjectId = subject.id;
       state.currentView = "subjects";
       state.activeSubjectTab = "reader";
+      state.focusArea = state.focusMode ? "reader" : null;
     }
     state.selectedDocumentId = getVisibleSubjectDocuments(subject)[0]?.id || null;
     elements.documentUpload.value = "";
@@ -8756,6 +8885,7 @@ function render() {
   renderSubjectsHero();
   renderSubjectHeader();
   renderSubjectTabs();
+  renderFocusMode();
   renderPendingUpload();
   renderDocuments();
   renderAskContext();
@@ -8971,12 +9101,18 @@ elements.revisionNotesSelect.addEventListener("change", () => {
 elements.createRevisionTestButton.addEventListener("click", handleCreateRevisionTest);
 elements.submitRevisionTestButton.addEventListener("click", handleSubmitRevisionTest);
 elements.saveRevisionTestButton.addEventListener("click", saveCurrentRevisionTest);
+elements.focusModeToggle?.addEventListener("click", () => {
+  setFocusMode(!state.focusMode);
+});
 elements.navHomeButton.addEventListener("click", () => {
   state.currentView = "home";
   render();
 });
 elements.navSubjectsButton.addEventListener("click", () => {
   state.currentView = "subjects";
+  if (state.focusMode) {
+    state.focusArea = null;
+  }
   render();
 });
 elements.navSettingsButton.addEventListener("click", () => {
@@ -8990,6 +9126,9 @@ elements.changeBackgroundButton.addEventListener("click", () => {
 elements.backgroundUpload.addEventListener("change", handleBackgroundUpload);
 elements.enterSubjectsButton.addEventListener("click", () => {
   state.currentView = "subjects";
+  if (state.focusMode) {
+    state.focusArea = null;
+  }
   render();
 });
 elements.openUploadModalButton?.addEventListener("click", openUploadModal);
@@ -9067,8 +9206,15 @@ elements.subjectTabs?.querySelectorAll("[data-viewer-tab]").forEach((button) => 
       return;
     }
     state.activeSubjectTab = nextTab;
+    if (state.focusMode) {
+      state.focusArea = nextTab;
+    }
     render();
   });
+});
+elements.focusBackButton?.addEventListener("click", () => {
+  state.focusArea = null;
+  render();
 });
 elements.upcomingAssessmentsButton.addEventListener("click", openUpcomingModal);
 elements.closeUpcomingScrim.addEventListener("click", closeUpcomingModal);
@@ -9095,6 +9241,7 @@ elements.closeRevisionViewButton.addEventListener("click", () => {
     state.currentView = "subjects";
     state.selectedSubjectId = returnContext.subjectId || state.selectedSubjectId;
     state.activeSubjectTab = returnContext.activeSubjectTab || "reader";
+    state.focusArea = state.focusMode ? state.activeSubjectTab : null;
     state.selectedDocumentId = returnContext.documentId || state.selectedDocumentId;
     render();
     requestAnimationFrame(() => {
