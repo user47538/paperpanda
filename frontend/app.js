@@ -451,6 +451,7 @@ const state = {
   activeSubjectTab: "reader",
   focusMode: window.localStorage.getItem(FOCUS_MODE_STORAGE_KEY) === "on",
   focusArea: null,
+  focusAskOpen: false,
   selectedDocumentId: null,
   currentDocumentPageIndexes: {},
   activeReaderSegmentIndex: -1,
@@ -1304,6 +1305,7 @@ function focusAskComposer() {
 function openSubjectsWorkspace(tab = "reader") {
   state.currentView = "subjects";
   state.activeSubjectTab = tab;
+  state.focusAskOpen = false;
   state.focusArea = state.focusMode ? tab : null;
   render();
 }
@@ -1926,13 +1928,14 @@ function renderFocusAskFab() {
 }
 
 function renderFocusMode() {
-  const showLaunchpad = state.focusMode && state.currentView === "subjects" && !state.focusArea;
-  const drilledIn = state.focusMode && state.currentView === "subjects" && Boolean(state.focusArea);
+  const askOpen = state.focusMode && state.currentView === "subjects" && state.focusAskOpen;
+  const showLaunchpad = state.focusMode && state.currentView === "subjects" && !state.focusArea && !askOpen;
+  const drilledIn = state.focusMode && state.currentView === "subjects" && Boolean(state.focusArea) && !askOpen;
 
   elements.subjectsView?.classList.toggle("focus-launchpad-open", showLaunchpad);
   elements.subjectsView?.classList.toggle("focus-drilled", drilledIn);
   elements.subjectFocusLaunchpad?.classList.toggle("hidden", !showLaunchpad);
-  elements.focusBackButton?.classList.toggle("hidden", !drilledIn);
+  elements.focusBackButton?.classList.toggle("hidden", !(drilledIn || askOpen));
 
   renderFocusHomeCard();
   renderFocusAskFab();
@@ -3699,6 +3702,7 @@ function renderAiConnectionState() {
 function setFocusMode(on) {
   state.focusMode = Boolean(on);
   state.focusArea = null;
+  state.focusAskOpen = false;
   window.localStorage.setItem(FOCUS_MODE_STORAGE_KEY, state.focusMode ? "on" : "off");
   render();
 }
@@ -3963,20 +3967,20 @@ function speakAssessmentEntry(entry, { context = null } = {}) {
 }
 
 function handleFocusAskLaunch() {
-  if (state.currentView !== "subjects") {
-    openSubjectsWorkspace(state.activeSubjectTab || "reader");
-    requestAnimationFrame(() => startAskMicrophone());
-    return;
-  }
-
-  if (state.focusMode && !state.focusArea) {
-    state.activeSubjectTab = "reader";
-    state.focusArea = "reader";
+  if (state.currentView !== "subjects" || state.focusMode) {
+    state.currentView = "subjects";
+    state.activeSubjectTab = state.activeSubjectTab || "reader";
+    state.focusArea = null;
+    state.focusAskOpen = true;
     render();
-    requestAnimationFrame(() => startAskMicrophone());
+    requestAnimationFrame(() => {
+      focusAskComposer();
+      startAskMicrophone();
+    });
     return;
   }
 
+  focusAskComposer();
   startAskMicrophone();
 }
 
@@ -9466,10 +9470,12 @@ elements.focusAskButton?.addEventListener("click", handleFocusAskLaunch);
 elements.focusAskAvatarButton?.addEventListener("click", handleFocusAskLaunch);
 elements.navHomeButton.addEventListener("click", () => {
   state.currentView = "home";
+  state.focusAskOpen = false;
   render();
 });
 elements.navSubjectsButton.addEventListener("click", () => {
   state.currentView = "subjects";
+  state.focusAskOpen = false;
   if (state.focusMode) {
     state.focusArea = null;
   }
@@ -9486,6 +9492,7 @@ elements.changeBackgroundButton.addEventListener("click", () => {
 elements.backgroundUpload.addEventListener("change", handleBackgroundUpload);
 elements.enterSubjectsButton.addEventListener("click", () => {
   state.currentView = "subjects";
+  state.focusAskOpen = false;
   if (state.focusMode) {
     state.focusArea = null;
   }
@@ -9566,6 +9573,7 @@ elements.subjectTabs?.querySelectorAll("[data-viewer-tab]").forEach((button) => 
       return;
     }
     state.activeSubjectTab = nextTab;
+    state.focusAskOpen = false;
     if (state.focusMode) {
       state.focusArea = nextTab;
     }
@@ -9573,6 +9581,7 @@ elements.subjectTabs?.querySelectorAll("[data-viewer-tab]").forEach((button) => 
   });
 });
 elements.focusBackButton?.addEventListener("click", () => {
+  state.focusAskOpen = false;
   state.focusArea = null;
   render();
 });
@@ -9593,6 +9602,7 @@ elements.saveSubjectIconsButton?.addEventListener("click", saveSubjectIconSettin
 elements.savePasswordSettingsButton.addEventListener("click", savePasswordSettings);
 elements.closeTaskViewButton.addEventListener("click", () => {
   state.currentView = "subjects";
+  state.focusAskOpen = false;
   render();
 });
 elements.closeRevisionViewButton.addEventListener("click", () => {
@@ -9601,6 +9611,7 @@ elements.closeRevisionViewButton.addEventListener("click", () => {
     state.currentView = "subjects";
     state.selectedSubjectId = returnContext.subjectId || state.selectedSubjectId;
     state.activeSubjectTab = returnContext.activeSubjectTab || "reader";
+    state.focusAskOpen = false;
     state.focusArea = state.focusMode ? state.activeSubjectTab : null;
     state.selectedDocumentId = returnContext.documentId || state.selectedDocumentId;
     render();
