@@ -9,6 +9,9 @@ const previewDatabaseName = "paperpanda-assets";
 const previewStoreName = "document-previews";
 const settingsAssetStoreName = "settings-assets";
 const FOCUS_MODE_STORAGE_KEY = "paperpanda.focusMode";
+const GOOGLE_DOCS_SCOPE = "https://www.googleapis.com/auth/documents";
+const GOOGLE_IDENTITY_SCRIPT_ID = "google-identity-client";
+const GOOGLE_IDENTITY_SCRIPT_URL = "https://accounts.google.com/gsi/client";
 
 function resolveDefaultApiBaseUrl() {
   const configuredBaseUrl = String(import.meta.env.VITE_API_BASE_URL || "").trim().replace(/\/$/, "");
@@ -33,6 +36,7 @@ function resolveDefaultApiBaseUrl() {
 }
 
 const API_BASE_URL = resolveDefaultApiBaseUrl();
+const GOOGLE_CLIENT_ID = String(import.meta.env.VITE_GOOGLE_CLIENT_ID || "").trim();
 let pdfjsLibPromise = null;
 let jsZipPromise = null;
 let currentAudioPlayback = null;
@@ -45,6 +49,7 @@ let remoteSubjectsSaveQueuedSnapshot = null;
 let remoteSubjectsSaveInFlight = false;
 let remoteSettingsSaveQueuedSnapshot = null;
 let remoteSettingsSaveInFlight = false;
+let googleIdentityClientPromise = null;
 const defaultGrade = "7";
 const defaultPageBackgroundColor = "#FBF7F0";
 const documentQuizPassPoints = 10;
@@ -490,6 +495,8 @@ const state = {
   askDocumentId: null,
   listeningDocumentId: null,
   selectedDocumentIds: [],
+  googleDocsAccessToken: "",
+  googleDocsTokenExpiresAt: 0,
   askMicActive: false,
   askResponseSpeaking: false,
   expandedDocumentGroups: {},
@@ -1552,6 +1559,8 @@ function normaliseExternalWorkspace(workspace) {
   return {
     provider: provider.id,
     url: String(workspace.url || "").trim(),
+    documentId: String(workspace.documentId || "").trim(),
+    documentTitle: String(workspace.documentTitle || "").trim(),
     updatedAt: workspace.updatedAt || ""
   };
 }
@@ -1606,6 +1615,261 @@ function isWorkspaceUrlValidForProvider(url, providerId) {
   }
 
   return false;
+}
+
+function extractGoogleDocIdFromUrl(url) {
+  try {
+    const parsedUrl = new URL(url);
+    if (parsedUrl.hostname.toLowerCase() !== "docs.google.com") {
+      return "";
+    }
+    const match = parsedUrl.pathname.match(/\/document\/d\/([^/]+)/i);
+    return match ? String(match[1] || "").trim() : "";
+  } catch (error) {
+    return "";
+  }
+}
+
+function buildGoogleDocUrl(documentId) {
+  const cleanId = String(documentId || "").trim();
+  return cleanId ? `https://docs.google.com/document/d/${cleanId}/edit` : "";
+}
+
+function isGoogleDocsWorkspace(workspace) {
+  return workspace?.provider === "google-docs";
+}
+
+function isConnectedGoogleDocsWorkspace(workspace) {
+  return isGoogleDocsWorkspace(workspace) && Boolean(String(workspace?.documentId || "").trim());
+}
+
+function loadExternalScriptOnce(scriptId, sourceUrl) {
+  if (typeof document === "undefined") {
+    return Promise.reject(new Error("Browser environment required."));
+  }
+
+  const existingScript = document.getElementById(scriptId);
+  if (existingScript?.dataset.loaded === "true") {
+    return Promise.resolve();
+  }
+
+  if (existingScript) {
+    return new Promise((resolve, reject) => {
+      existingScript.addEventListener("load", () => resolve(), { once: true });
+      existingScript.addEventListener("error", () => reject(new Error("Failed to load external script.")), { once: true });
+    });
+  }
+
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.id = scriptId;
+    script.src = sourceUrl;
+    script.async = true;
+    script.defer = true;
+    script.addEventListener(
+      "load",
+      () => {
+        script.dataset.loaded = "true";
+        resolve();
+      },
+      { once: true }
+    );
+    script.addEventListener("error", () => reject(new Error("Failed to load external script.")), { once: true });
+    document.head.appendChild(script);
+  });
+}
+
+async function loadGoogleIdentityClient() {
+  if (!googleIdentityClientPromise) {
+    googleIdentityClientPromise = loadExternalScriptOnce(GOOGLE_IDENTITY_SCRIPT_ID, GOOGLE_IDENTITY_SCRIPT_URL).then(() => {
+      if (!window.google?.accounts?.oauth2) {
+        throw new Error("Google Identity Services did not load.");
+      }
+      return window.google.accounts.oauth2;
+    });
+  }
+  return googleIdentityClientPromise;
+}
+
+async function ensureGoogleDocsAccessToken() {
+  if (!GOOGLE_CLIENT_ID) {
+    throw new Error("Google Docs is not configured yet. Add VITE_GOOGLE_CLIENT_ID to the frontend environment.");
+  }
+
+  if (state.googleDocsAccessToken && state.googleDocsTokenExpiresAt > Date.now() + 30_000) {
+    return state.googleDocsAccessToken;
+  }
+
+  const oauthClient = await loadGoogleIdentityClient();
+  return new Promise((resolve, reject) => {
+    const tokenClient = oauthClient.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: GOOGLE_DOCS_SCOPE,
+      callback: (response) => {
+        if (!response || response.error) {
+          reject(new Error(response?.error_description || response?.error || "Google sign-in was cancelled."));
+          return;
+        }
+        state.googleDocsAccessToken = String(response.access_token || "").trim();
+        state.googleDocsTokenExpiresAt = Date.now() + Math.max(0, Number(response.expires_in || 3600) - 60) * 1000;
+        resolve(state.googleDocsAccessToken);
+      },
+      error_callback: () => {
+        reject(new Error("Google sign-in failed."));
+      }
+    });
+
+    tokenClient.requestAccessToken({
+      prompt: state.googleDocsAccessToken ? "" : "consent"
+    });
+  });
+}
+
+async function requestGoogleDocsApi(path, options = {}) {
+  const accessToken = await ensureGoogleDocsAccessToken();
+  const response = await fetch(`https://docs.googleapis.com/v1/${path}`, {
+    method: options.method || "GET",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      ...(options.body ? { "Content-Type": "application/json" } : {}),
+      ...(options.headers || {})
+    },
+    body: options.body ? JSON.stringify(options.body) : undefined
+  });
+
+  if (!response.ok) {
+    let message = "Google Docs request failed.";
+    try {
+      const errorPayload = await response.json();
+      message = errorPayload?.error?.message || message;
+    } catch (error) {
+      const fallback = await response.text();
+      if (fallback) {
+        message = fallback;
+      }
+    }
+    throw new Error(message);
+  }
+
+  return response.json();
+}
+
+function extractGoogleDocTextFromElements(elements = []) {
+  return elements
+    .map((element) => {
+      if (element?.paragraph?.elements) {
+        return element.paragraph.elements
+          .map((paragraphElement) => paragraphElement?.textRun?.content || "")
+          .join("");
+      }
+      if (element?.table?.tableRows) {
+        return element.table.tableRows
+          .map((row) =>
+            (row?.tableCells || [])
+              .map((cell) => extractGoogleDocTextFromElements(cell?.content || []))
+              .join("\t")
+          )
+          .join("\n");
+      }
+      if (element?.tableOfContents?.content) {
+        return extractGoogleDocTextFromElements(element.tableOfContents.content);
+      }
+      return "";
+    })
+    .join("");
+}
+
+function extractGoogleDocPlainText(documentPayload) {
+  return extractGoogleDocTextFromElements(documentPayload?.body?.content || [])
+    .replace(/\u000b/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trimEnd();
+}
+
+async function fetchGoogleDocSnapshot(documentId) {
+  const cleanId = String(documentId || "").trim();
+  if (!cleanId) {
+    throw new Error("Google Doc ID is missing.");
+  }
+  const payload = await requestGoogleDocsApi(`documents/${encodeURIComponent(cleanId)}`);
+  return {
+    documentId: cleanId,
+    title: String(payload?.title || "").trim(),
+    url: buildGoogleDocUrl(cleanId),
+    text: extractGoogleDocPlainText(payload),
+    payload
+  };
+}
+
+function getGoogleDocBodyEndIndex(documentPayload) {
+  const content = Array.isArray(documentPayload?.body?.content) ? documentPayload.body.content : [];
+  const lastBlock = content[content.length - 1];
+  return Number(lastBlock?.endIndex || 1);
+}
+
+async function saveGoogleDocSnapshot(documentId, nextText) {
+  const snapshot = await fetchGoogleDocSnapshot(documentId);
+  const endIndex = getGoogleDocBodyEndIndex(snapshot.payload);
+  const requests = [];
+
+  if (endIndex > 2) {
+    requests.push({
+      deleteContentRange: {
+        range: {
+          startIndex: 1,
+          endIndex: endIndex - 1
+        }
+      }
+    });
+  }
+
+  if (String(nextText || "")) {
+    requests.push({
+      insertText: {
+        location: { index: 1 },
+        text: String(nextText || "")
+      }
+    });
+  }
+
+  if (requests.length) {
+    await requestGoogleDocsApi(`documents/${encodeURIComponent(snapshot.documentId)}:batchUpdate`, {
+      method: "POST",
+      body: { requests }
+    });
+  }
+
+  return {
+    documentId: snapshot.documentId,
+    title: snapshot.title,
+    url: snapshot.url,
+    text: String(nextText || "")
+  };
+}
+
+async function createGoogleDocSnapshot(title, initialText = "") {
+  const payload = await requestGoogleDocsApi("documents", {
+    method: "POST",
+    body: {
+      title: String(title || "PaperPanda task").trim() || "PaperPanda task"
+    }
+  });
+
+  const documentId = String(payload?.documentId || "").trim();
+  if (!documentId) {
+    throw new Error("Google Docs did not return a document ID.");
+  }
+
+  if (String(initialText || "").trim()) {
+    await saveGoogleDocSnapshot(documentId, initialText);
+  }
+
+  return {
+    documentId,
+    title: String(payload?.title || title || "PaperPanda task").trim(),
+    url: buildGoogleDocUrl(documentId),
+    text: String(initialText || "")
+  };
 }
 
 function setDocumentReviewedState(subject, documentIds, reviewed) {
@@ -6304,9 +6568,72 @@ function getTaskWorkEditor() {
   return document.getElementById("task-work-editor");
 }
 
+function getTaskRecord(taskKind, taskId, subject = getSelectedSubject()) {
+  if (!subject || !taskKind || !taskId) {
+    return null;
+  }
+  if (taskKind === "assessment") {
+    return subject.assessments.find((item) => item.id === taskId) || null;
+  }
+  if (taskKind === "homework") {
+    return findHomeworkBundle(subject, taskId) || null;
+  }
+  return null;
+}
+
+function getTaskWorkspace(taskKind, taskRecord) {
+  if (!taskRecord) {
+    return null;
+  }
+  return taskKind === "assessment" ? getAssessmentExternalWorkspace(taskRecord) : getHomeworkExternalWorkspace(taskRecord);
+}
+
+function setTaskWorkspace(taskKind, taskRecord, workspace) {
+  if (!taskRecord) {
+    return;
+  }
+  if (taskKind === "assessment") {
+    setAssessmentExternalWorkspace(taskRecord, workspace);
+  } else {
+    setHomeworkExternalWorkspace(taskRecord, workspace);
+  }
+}
+
+function getTaskCachedEditorText(taskKind, taskRecord) {
+  if (!taskRecord) {
+    return "";
+  }
+  if (taskKind === "assessment") {
+    return String(taskRecord.workNotes || "");
+  }
+  return String(getBundleWorkNotes(taskRecord) || "");
+}
+
+function setTaskCachedEditorText(taskKind, taskRecord, value) {
+  if (!taskRecord) {
+    return;
+  }
+  if (taskKind === "assessment") {
+    taskRecord.workNotes = String(value || "");
+    return;
+  }
+  setBundleWorkNotes(taskRecord, String(value || ""));
+}
+
+function getTaskDisplayTitle(taskKind, taskRecord) {
+  if (!taskRecord) {
+    return "this task";
+  }
+  if (taskKind === "assessment") {
+    return taskRecord.componentTask || taskRecord.title || "this task";
+  }
+  return taskRecord.title || "this task";
+}
+
 function createTaskWorkspaceMarkup(workspace, taskTitle = "") {
   const selectedProvider = getTaskWorkspaceProvider(workspace?.provider) || null;
   const selectedProviderId = selectedProvider?.id || "";
+  const googleDocsConnected = isConnectedGoogleDocsWorkspace(workspace);
   const providerButtons = TASK_WORKSPACE_PROVIDERS
     .map(
       (provider) => `
@@ -6321,60 +6648,68 @@ function createTaskWorkspaceMarkup(workspace, taskTitle = "") {
     )
     .join("");
 
+  const docsStatusText = !GOOGLE_CLIENT_ID
+    ? "Google Docs needs a frontend OAuth client ID before this connected editor can sign in."
+    : googleDocsConnected
+      ? `Connected to ${workspace.documentTitle || "Google Doc"} for ${taskTitle || "this task"}. The editor below saves back to that document.`
+      : "Choose Google Docs to turn the editor below into a connected document.";
+  const docsActionsMarkup = `
+    <div class="task-workspace-actions">
+      <button
+        type="button"
+        class="primary-button"
+        data-google-docs-create
+      >
+        Create Google Doc
+      </button>
+      <button type="button" class="ghost-button" data-task-workspace-open ${googleDocsConnected ? "" : "disabled"}>
+        Open Google Doc
+      </button>
+      <button type="button" class="ghost-button" data-google-docs-pull ${googleDocsConnected ? "" : "disabled"}>
+        Pull latest
+      </button>
+    </div>
+    <label class="upload-field task-workspace-field">
+      <span class="upload-field__label">Google Doc link</span>
+      <input
+        type="url"
+        id="task-workspace-url-input"
+        placeholder="Paste a Google Doc share link"
+        value="${escapeHtml(workspace?.url || "")}"
+      />
+    </label>
+    <div class="task-workspace-actions">
+      <button
+        type="button"
+        class="primary-button primary-button--dark"
+        data-google-docs-connect
+      >
+        Connect Google Doc
+      </button>
+      <button type="button" class="ghost-button" data-task-workspace-clear ${workspace ? "" : "disabled"}>Disconnect</button>
+    </div>
+    <div class="task-workspace-card__status">${escapeHtml(docsStatusText)}</div>
+  `;
+
+  const unsupportedProviderMarkup = selectedProvider
+    ? `
+      <div class="task-workspace-card__status">
+        ${escapeHtml(`${selectedProvider.label} will need its own editor surface in this pane. Google Docs is connected first in the current build.`)}
+      </div>
+    `
+    : '<div class="task-workspace-card__status">Choose the app you want to use for this task.</div>';
+
   return `
     <section class="task-workspace-card">
       <div class="section-heading section-heading--stacked section-heading--compact">
         <div>
-          <p class="eyebrow">Write in another app</p>
-          <h3>Connected workspace</h3>
+          <p class="eyebrow">Connected workspace</p>
+          <h3>Choose the editor for this task</h3>
         </div>
       </div>
-      <p class="helper-text task-workspace-card__help">Keep the checklist above in PaperPanda and do the writing in Google Docs, Sheets, Slides, or Canva.</p>
+      <p class="helper-text task-workspace-card__help">Keep the checklist above in PaperPanda and switch the lower pane by provider.</p>
       <div class="task-workspace-provider-row">${providerButtons}</div>
-      <div class="task-workspace-actions">
-        <button
-          type="button"
-          class="primary-button"
-          data-task-workspace-create
-          ${selectedProvider ? `data-task-workspace-selected="${selectedProvider.id}"` : ""}
-        >
-          ${escapeHtml(selectedProvider?.createLabel || "Choose an app first")}
-        </button>
-        <button type="button" class="ghost-button" data-task-workspace-open ${workspace?.url ? "" : "disabled"}>
-          Open linked file
-        </button>
-      </div>
-      <label class="upload-field task-workspace-field">
-        <span class="upload-field__label">Share link</span>
-        <input
-          type="url"
-          id="task-workspace-url-input"
-          placeholder="${escapeHtml(selectedProvider ? `Paste the ${selectedProvider.label} share link` : "Choose an app, then paste the share link")}"
-          value="${escapeHtml(workspace?.url || "")}"
-        />
-      </label>
-      <div class="task-workspace-actions">
-        <button
-          type="button"
-          class="ghost-button ghost-button--dark"
-          data-task-workspace-save
-          ${selectedProvider ? `data-task-workspace-selected="${selectedProvider.id}"` : ""}
-        >
-          Save link
-        </button>
-        <button type="button" class="ghost-button" data-task-workspace-clear ${workspace ? "" : "disabled"}>Remove link</button>
-      </div>
-      <div class="task-workspace-card__status">
-        ${
-          selectedProvider
-            ? escapeHtml(
-                workspace?.url
-                  ? `Linked to ${selectedProvider.label} for ${taskTitle || "this task"}.`
-                  : `Create or paste a ${selectedProvider.label} link to connect it to this task.`
-              )
-            : "Choose the app you want to use for this task."
-        }
-      </div>
+      ${selectedProviderId === "google-docs" ? docsActionsMarkup : unsupportedProviderMarkup}
     </section>
   `;
 }
@@ -7008,27 +7343,11 @@ function bindTaskPopupActions(config) {
   });
 
   const getTaskWorkspaceRecord = () => {
-    const subject = getSelectedSubject();
-    if (!subject) {
-      return null;
-    }
-    if (config.taskKind === "assessment") {
-      return subject.assessments.find((item) => item.id === config.taskId) || null;
-    }
-    if (config.taskKind === "homework") {
-      return findHomeworkBundle(subject, config.taskId) || null;
-    }
-    return null;
+    return getTaskRecord(config.taskKind, config.taskId);
   };
 
   const readTaskWorkspace = () => {
-    const record = getTaskWorkspaceRecord();
-    if (!record) {
-      return null;
-    }
-    return config.taskKind === "assessment"
-      ? getAssessmentExternalWorkspace(record)
-      : getHomeworkExternalWorkspace(record);
+    return getTaskWorkspace(config.taskKind, getTaskWorkspaceRecord());
   };
 
   const writeTaskWorkspace = (workspace) => {
@@ -7036,13 +7355,22 @@ function bindTaskPopupActions(config) {
     if (!record) {
       return;
     }
-    if (config.taskKind === "assessment") {
-      setAssessmentExternalWorkspace(record, workspace);
-    } else {
-      setHomeworkExternalWorkspace(record, workspace);
-    }
+    setTaskWorkspace(config.taskKind, record, workspace);
     persistSubjects();
     renderTaskView();
+  };
+
+  const writeTaskEditorCache = (value) => {
+    const record = getTaskWorkspaceRecord();
+    if (!record) {
+      return;
+    }
+    setTaskCachedEditorText(config.taskKind, record, value);
+    persistSubjects();
+  };
+
+  const setTaskStatus = (message) => {
+    elements.taskWorkStatus.textContent = message;
   };
 
   document.querySelectorAll("[data-task-workspace-provider]").forEach((button) => {
@@ -7056,72 +7384,133 @@ function bindTaskPopupActions(config) {
       writeTaskWorkspace({
         provider: provider.id,
         url: currentWorkspace?.provider === provider.id ? currentWorkspace.url : "",
+        documentId: currentWorkspace?.provider === provider.id ? currentWorkspace.documentId : "",
+        documentTitle: currentWorkspace?.provider === provider.id ? currentWorkspace.documentTitle : "",
         updatedAt: currentWorkspace?.provider === provider.id ? currentWorkspace.updatedAt : ""
       });
-      elements.taskWorkStatus.textContent = `${provider.label} selected. Create a file there or paste an existing share link.`;
+      setTaskStatus(
+        provider.id === "google-docs"
+          ? "Google Docs selected. Create a doc or connect an existing one."
+          : `${provider.label} selected. This provider gets its own editor pane next.`
+      );
     });
   });
 
-  document.querySelectorAll("[data-task-workspace-create]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const provider = getTaskWorkspaceProvider(button.dataset.taskWorkspaceSelected || readTaskWorkspace()?.provider);
-      if (!provider) {
-        elements.taskWorkStatus.textContent = "Choose Google Docs, Sheets, Slides, or Canva first.";
-        return;
-      }
-      const currentWorkspace = readTaskWorkspace();
-      if (!currentWorkspace || currentWorkspace.provider !== provider.id) {
-        writeTaskWorkspace({
-          provider: provider.id,
-          url: "",
-          updatedAt: ""
+  document.querySelectorAll("[data-google-docs-create]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      try {
+        const record = getTaskWorkspaceRecord();
+        if (!record) {
+          return;
+        }
+        const currentEditorValue = String(getTaskWorkEditor()?.value || getTaskCachedEditorText(config.taskKind, record) || "");
+        setTaskStatus("Creating Google Doc...");
+        const snapshot = await createGoogleDocSnapshot(getTaskDisplayTitle(config.taskKind, record), currentEditorValue);
+        setTaskWorkspace(config.taskKind, record, {
+          provider: "google-docs",
+          url: snapshot.url,
+          documentId: snapshot.documentId,
+          documentTitle: snapshot.title,
+          updatedAt: new Date().toISOString()
         });
+        setTaskCachedEditorText(config.taskKind, record, snapshot.text);
+        persistSubjects();
+        renderTaskView();
+        setTaskStatus(`Created and connected ${snapshot.title || "Google Doc"}.`);
+      } catch (error) {
+        setTaskStatus(error instanceof Error ? error.message : "Google Doc creation failed.");
       }
-      window.open(provider.createUrl, "_blank", "noopener");
-      elements.taskWorkStatus.textContent = `Opened ${provider.label} in a new tab. Paste the share link back here when it is ready.`;
     });
   });
 
   document.querySelectorAll("[data-task-workspace-open]").forEach((button) => {
     button.addEventListener("click", () => {
       const workspace = readTaskWorkspace();
-      if (!workspace?.url) {
-        elements.taskWorkStatus.textContent = "Save a workspace link first.";
+      const targetUrl = workspace?.url || buildGoogleDocUrl(workspace?.documentId);
+      if (!targetUrl) {
+        setTaskStatus("Connect a Google Doc first.");
         return;
       }
-      window.open(workspace.url, "_blank", "noopener");
+      window.open(targetUrl, "_blank", "noopener");
     });
   });
 
-  document.querySelectorAll("[data-task-workspace-save]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const provider = getTaskWorkspaceProvider(button.dataset.taskWorkspaceSelected || readTaskWorkspace()?.provider);
+  document.querySelectorAll("[data-google-docs-connect]").forEach((button) => {
+    button.addEventListener("click", async () => {
       const url = String(document.getElementById("task-workspace-url-input")?.value || "").trim();
-      if (!provider) {
-        elements.taskWorkStatus.textContent = "Choose Google Docs, Sheets, Slides, or Canva first.";
-        return;
-      }
       if (!url) {
-        elements.taskWorkStatus.textContent = "Paste the share link before saving.";
+        setTaskStatus("Paste the Google Doc link first.");
         return;
       }
-      if (!isWorkspaceUrlValidForProvider(url, provider.id)) {
-        elements.taskWorkStatus.textContent = `That link does not look like a ${provider.label} share link.`;
+      if (!isWorkspaceUrlValidForProvider(url, "google-docs")) {
+        setTaskStatus("That link does not look like a Google Doc.");
         return;
       }
-      writeTaskWorkspace({
-        provider: provider.id,
-        url,
-        updatedAt: new Date().toISOString()
-      });
-      elements.taskWorkStatus.textContent = `${provider.label} link saved.`;
+      const documentId = extractGoogleDocIdFromUrl(url);
+      if (!documentId) {
+        setTaskStatus("Could not read the Google Doc ID from that link.");
+        return;
+      }
+      try {
+        setTaskStatus("Connecting Google Doc...");
+        const snapshot = await fetchGoogleDocSnapshot(documentId);
+        const record = getTaskWorkspaceRecord();
+        if (!record) {
+          return;
+        }
+        setTaskWorkspace(config.taskKind, record, {
+          provider: "google-docs",
+          url: buildGoogleDocUrl(documentId),
+          documentId,
+          documentTitle: snapshot.title,
+          updatedAt: new Date().toISOString()
+        });
+        setTaskCachedEditorText(config.taskKind, record, snapshot.text);
+        persistSubjects();
+        renderTaskView();
+        setTaskStatus(`Connected ${snapshot.title || "Google Doc"}.`);
+      } catch (error) {
+        setTaskStatus(error instanceof Error ? error.message : "Google Doc connection failed.");
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-google-docs-pull]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const workspace = readTaskWorkspace();
+      if (!isConnectedGoogleDocsWorkspace(workspace)) {
+        setTaskStatus("Connect a Google Doc first.");
+        return;
+      }
+      try {
+        setTaskStatus("Pulling latest from Google Docs...");
+        const snapshot = await fetchGoogleDocSnapshot(workspace.documentId);
+        writeTaskEditorCache(snapshot.text);
+        const editor = getTaskWorkEditor();
+        if (editor) {
+          editor.value = snapshot.text;
+        }
+        const record = getTaskWorkspaceRecord();
+        if (record) {
+          setTaskWorkspace(config.taskKind, record, {
+            ...workspace,
+            url: snapshot.url,
+            documentTitle: snapshot.title,
+            updatedAt: new Date().toISOString()
+          });
+          persistSubjects();
+        }
+        setTaskStatus(`Pulled latest from ${snapshot.title || "Google Doc"}.`);
+      } catch (error) {
+        setTaskStatus(error instanceof Error ? error.message : "Could not refresh Google Doc.");
+      }
     });
   });
 
   document.querySelectorAll("[data-task-workspace-clear]").forEach((button) => {
     button.addEventListener("click", () => {
       writeTaskWorkspace(null);
-      elements.taskWorkStatus.textContent = "Workspace link removed.";
+      setTaskStatus("Workspace disconnected.");
     });
   });
 
@@ -7195,6 +7584,9 @@ function renderTaskView() {
     const progressRatio = totalItems ? totalCompleted / totalItems : 0;
     const workEditorValue = existingDraft || assessment.workNotes || "";
     const externalWorkspace = getAssessmentExternalWorkspace(assessment);
+    const selectedProvider = getTaskWorkspaceProvider(externalWorkspace?.provider);
+    const googleDocsConnected = isConnectedGoogleDocsWorkspace(externalWorkspace);
+    const unsupportedProviderSelected = Boolean(selectedProvider && selectedProvider.id !== "google-docs");
     const questionPrompt = `Based on ${assessment.componentTask || assessment.title}, generate a short practice question set I can use to prepare.`;
     const studyPlanPrompt = `Suggest a short study plan for ${assessment.componentTask || assessment.title} before ${formatAssessmentDueLabel(assessment.dueDate)}.`;
     const simplifyPrompt = `Simplify this assessment task into plain student-friendly steps: ${assessment.componentTask || assessment.title}. ${assessment.description || ""}`;
@@ -7207,7 +7599,9 @@ function renderTaskView() {
         </div>
       </div>
     `;
-    elements.saveTaskWorkButton.textContent = "Save draft";
+    elements.saveTaskWorkButton.textContent = googleDocsConnected ? "Save to Google Docs" : "Save draft";
+    elements.saveTaskWorkButton.disabled = unsupportedProviderSelected;
+    elements.saveTaskFilesButton.disabled = unsupportedProviderSelected;
     elements.closeTaskViewButton.textContent = "Back to subjects";
     elements.taskSourceContent.innerHTML = `
       <article class="task-popup task-popup--assessment">
@@ -7264,12 +7658,12 @@ function renderTaskView() {
             <div class="task-draft-card">
               <div class="section-heading section-heading--stacked section-heading--compact">
                 <div>
-                  <p class="eyebrow">Working draft</p>
-                  <h3>Your response</h3>
+                  <p class="eyebrow">${googleDocsConnected ? "Connected editor" : "Working draft"}</p>
+                  <h3>${googleDocsConnected ? escapeHtml(externalWorkspace.documentTitle || "Google Doc") : unsupportedProviderSelected ? escapeHtml(`${selectedProvider.label} editor`) : "Your response"}</h3>
                 </div>
               </div>
               ${createTaskWorkspaceMarkup(externalWorkspace, assessment.componentTask || assessment.title)}
-              <textarea id="task-work-editor" class="reader-editor task-popup__editor" placeholder="Start drafting your assessment response here...">${escapeHtml(workEditorValue)}</textarea>
+              <textarea id="task-work-editor" class="reader-editor task-popup__editor" placeholder="${escapeHtml(googleDocsConnected ? "Google Doc content appears here." : unsupportedProviderSelected ? `${selectedProvider.label} gets its own editor in this pane.` : "Start drafting your assessment response here...")}" ${unsupportedProviderSelected ? "disabled" : ""}>${escapeHtml(workEditorValue)}</textarea>
             </div>
           </div>
           <aside class="task-popup__side">
@@ -7342,6 +7736,9 @@ function renderTaskView() {
     const steps = buildHomeworkTaskSteps(homeworkBundle);
     const minutes = estimateTaskMinutes(homeworkBundle.content || "");
     const externalWorkspace = getHomeworkExternalWorkspace(homeworkBundle);
+    const selectedProvider = getTaskWorkspaceProvider(externalWorkspace?.provider);
+    const googleDocsConnected = isConnectedGoogleDocsWorkspace(externalWorkspace);
+    const unsupportedProviderSelected = Boolean(selectedProvider && selectedProvider.id !== "google-docs");
     const simplifyPrompt = `Rewrite this homework in simpler words for a student: ${homeworkBundle.title}. ${clipText(homeworkBundle.content || "", 1600)}`;
     const starterPrompt = `Write one strong starter sentence for this homework response: ${homeworkBundle.title}. ${clipText(homeworkBundle.content || "", 1600)}`;
     const quizPrompt = `Quiz me on this homework topic with 3 quick questions: ${homeworkBundle.title}.`;
@@ -7355,7 +7752,9 @@ function renderTaskView() {
         </div>
       </div>
     `;
-    elements.saveTaskWorkButton.textContent = "Save draft";
+    elements.saveTaskWorkButton.textContent = googleDocsConnected ? "Save to Google Docs" : "Save draft";
+    elements.saveTaskWorkButton.disabled = unsupportedProviderSelected;
+    elements.saveTaskFilesButton.disabled = unsupportedProviderSelected;
     elements.closeTaskViewButton.textContent = "Back to subjects";
     elements.taskSourceContent.innerHTML = `
       <article class="task-popup task-popup--homework">
@@ -7403,12 +7802,12 @@ function renderTaskView() {
             <section class="task-summary-card">
               <div class="section-heading section-heading--stacked section-heading--compact">
                 <div>
-                  <p class="eyebrow">Your summary so far</p>
-                  <h3>Workbook response</h3>
+                  <p class="eyebrow">${googleDocsConnected ? "Connected editor" : "Your summary so far"}</p>
+                  <h3>${googleDocsConnected ? escapeHtml(externalWorkspace.documentTitle || "Google Doc") : unsupportedProviderSelected ? escapeHtml(`${selectedProvider.label} editor`) : "Workbook response"}</h3>
                 </div>
               </div>
                   ${createTaskWorkspaceMarkup(externalWorkspace, homeworkBundle.title)}
-                  <textarea id="task-work-editor" class="reader-editor task-popup__editor" placeholder="Write your homework answer here...">${escapeHtml(existingDraft || getBundleWorkNotes(homeworkBundle) || "")}</textarea>
+                  <textarea id="task-work-editor" class="reader-editor task-popup__editor" placeholder="${escapeHtml(googleDocsConnected ? "Google Doc content appears here." : unsupportedProviderSelected ? `${selectedProvider.label} gets its own editor in this pane.` : "Write your homework answer here...")}" ${unsupportedProviderSelected ? "disabled" : ""}>${escapeHtml(existingDraft || getBundleWorkNotes(homeworkBundle) || "")}</textarea>
                 </section>
           </div>
           <aside class="task-popup__side">
@@ -7469,7 +7868,7 @@ function renderTaskView() {
   }
 }
 
-function saveTaskWorkspace() {
+async function saveTaskWorkspace() {
   const subject = getSelectedSubject();
   const activeTask = state.activeTask;
   const taskWorkEditor = getTaskWorkEditor();
@@ -7480,20 +7879,41 @@ function saveTaskWorkspace() {
     return;
   }
 
-  if (activeTask.kind === "assessment") {
-    const assessment = subject.assessments.find((item) => item.id === activeTask.id);
-    if (!assessment) {
-      return;
+  const taskRecord = getTaskRecord(activeTask.kind, activeTask.id, subject);
+  if (!taskRecord) {
+    return;
+  }
+
+  const externalWorkspace = getTaskWorkspace(activeTask.kind, taskRecord);
+  const nextValue = taskWorkEditor.value;
+
+  if (isConnectedGoogleDocsWorkspace(externalWorkspace)) {
+    try {
+      elements.taskWorkStatus.textContent = "Saving to Google Docs...";
+      const snapshot = await saveGoogleDocSnapshot(externalWorkspace.documentId, nextValue);
+      setTaskWorkspace(activeTask.kind, taskRecord, {
+        ...externalWorkspace,
+        url: snapshot.url,
+        documentTitle: snapshot.title,
+        updatedAt: new Date().toISOString()
+      });
+      setTaskCachedEditorText(activeTask.kind, taskRecord, snapshot.text);
+      persistSubjects();
+      elements.taskWorkStatus.textContent = `Saved to ${snapshot.title || "Google Doc"}.`;
+      renderTaskView();
+      elements.taskWorkStatus.textContent = `Saved to ${snapshot.title || "Google Doc"}.`;
+    } catch (error) {
+      elements.taskWorkStatus.textContent = error instanceof Error ? error.message : "Google Docs save failed.";
     }
-    assessment.workNotes = taskWorkEditor.value;
+    return;
+  }
+
+  if (activeTask.kind === "assessment") {
+    taskRecord.workNotes = nextValue;
   }
 
   if (activeTask.kind === "homework") {
-    const homeworkBundle = findHomeworkBundle(subject, activeTask.id);
-    if (!homeworkBundle) {
-      return;
-    }
-    setBundleWorkNotes(homeworkBundle, taskWorkEditor.value);
+    setBundleWorkNotes(taskRecord, nextValue);
   }
 
   persistSubjects();

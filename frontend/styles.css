@@ -2074,6 +2074,12 @@ input[type="date"] {
   line-height: 1.45;
 }
 
+.task-workspace-card__status {
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(26, 23, 38, 0.05);
+}
+
 .task-workspace-provider-row,
 .task-workspace-actions {
   display: flex;
@@ -2106,6 +2112,12 @@ input[type="date"] {
   min-height: 240px;
   margin-top: 12px;
   background: var(--bg);
+}
+
+.task-popup__editor:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+  opacity: 0.8;
 }
 
 .task-note-row {
