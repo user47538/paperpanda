@@ -439,6 +439,37 @@ const FOCUS_AREAS = [
   { id: "assessments", icon: "🎯", label: "Assessments", blurb: "Tests & due dates" }
 ];
 
+const TASK_WORKSPACE_PROVIDERS = [
+  {
+    id: "google-docs",
+    label: "Google Docs",
+    shortLabel: "Docs",
+    createLabel: "Create in Google Docs",
+    createUrl: "https://docs.new"
+  },
+  {
+    id: "google-sheets",
+    label: "Google Sheets",
+    shortLabel: "Sheets",
+    createLabel: "Create in Google Sheets",
+    createUrl: "https://sheets.new"
+  },
+  {
+    id: "google-slides",
+    label: "Google Slides",
+    shortLabel: "Slides",
+    createLabel: "Create in Google Slides",
+    createUrl: "https://slides.new"
+  },
+  {
+    id: "canva",
+    label: "Canva",
+    shortLabel: "Canva",
+    createLabel: "Create in Canva",
+    createUrl: "https://www.canva.com/create/"
+  }
+];
+
 const state = {
   studentName: "",
   currentUserEmail: "",
@@ -1506,6 +1537,77 @@ function setAssessmentStoredStageState(assessment, nextState) {
     : [];
 }
 
+function getTaskWorkspaceProvider(providerId) {
+  return TASK_WORKSPACE_PROVIDERS.find((provider) => provider.id === providerId) || null;
+}
+
+function normaliseExternalWorkspace(workspace) {
+  if (!workspace || typeof workspace !== "object") {
+    return null;
+  }
+  const provider = getTaskWorkspaceProvider(workspace.provider);
+  if (!provider) {
+    return null;
+  }
+  return {
+    provider: provider.id,
+    url: String(workspace.url || "").trim(),
+    updatedAt: workspace.updatedAt || ""
+  };
+}
+
+function getAssessmentExternalWorkspace(assessment) {
+  return normaliseExternalWorkspace(assessment?.externalWorkspace);
+}
+
+function setAssessmentExternalWorkspace(assessment, workspace) {
+  if (!assessment) {
+    return;
+  }
+  assessment.externalWorkspace = normaliseExternalWorkspace(workspace);
+}
+
+function getHomeworkExternalWorkspace(bundle) {
+  return normaliseExternalWorkspace(getBundlePrimaryDocument(bundle)?.externalWorkspace);
+}
+
+function setHomeworkExternalWorkspace(bundle, workspace) {
+  const primaryDocument = getBundlePrimaryDocument(bundle);
+  if (!primaryDocument) {
+    return;
+  }
+  primaryDocument.externalWorkspace = normaliseExternalWorkspace(workspace);
+}
+
+function isWorkspaceUrlValidForProvider(url, providerId) {
+  const provider = getTaskWorkspaceProvider(providerId);
+  if (!provider || !url) {
+    return false;
+  }
+
+  try {
+    const parsedUrl = new URL(url);
+    const hostname = parsedUrl.hostname.toLowerCase();
+    const pathname = parsedUrl.pathname.toLowerCase();
+    if (provider.id === "google-docs") {
+      return hostname === "docs.google.com" && pathname.includes("/document/");
+    }
+    if (provider.id === "google-sheets") {
+      return hostname === "docs.google.com" && pathname.includes("/spreadsheets/");
+    }
+    if (provider.id === "google-slides") {
+      return hostname === "docs.google.com" && pathname.includes("/presentation/");
+    }
+    if (provider.id === "canva") {
+      return hostname.endsWith("canva.com");
+    }
+  } catch (error) {
+    return false;
+  }
+
+  return false;
+}
+
 function setDocumentReviewedState(subject, documentIds, reviewed) {
   const targetIds = new Set((documentIds || []).filter(Boolean));
   if (!subject || !targetIds.size) {
@@ -1942,9 +2044,11 @@ function renderFocusMode() {
   const askOpen = state.focusMode && state.currentView === "subjects" && state.focusAskOpen;
   const showLaunchpad = state.focusMode && state.currentView === "subjects" && !state.focusArea && !askOpen;
   const drilledIn = state.focusMode && state.currentView === "subjects" && Boolean(state.focusArea) && !askOpen;
+  const readerDrilled = drilledIn && state.focusArea === "reader";
 
   elements.subjectsView?.classList.toggle("focus-launchpad-open", showLaunchpad);
   elements.subjectsView?.classList.toggle("focus-drilled", drilledIn);
+  elements.subjectsView?.classList.toggle("focus-reader-drilled", readerDrilled);
   elements.subjectsView?.classList.toggle("focus-ask-open", askOpen);
   elements.subjectFocusLaunchpad?.classList.toggle("hidden", !showLaunchpad);
   elements.focusBackButton?.classList.toggle("hidden", !drilledIn);
@@ -3377,7 +3481,8 @@ function normaliseAssessment(assessment) {
     ...assessment,
     linkedDocumentIds: Array.isArray(assessment.linkedDocumentIds) ? assessment.linkedDocumentIds : [],
     completed: Boolean(assessment.completed),
-    workNotes: assessment.workNotes || ""
+    workNotes: assessment.workNotes || "",
+    externalWorkspace: normaliseExternalWorkspace(assessment.externalWorkspace)
   };
 }
 
@@ -3397,6 +3502,7 @@ function normaliseDocument(documentRecord) {
   return {
     ...documentRecord,
     workNotes: documentRecord.workNotes || "",
+    externalWorkspace: normaliseExternalWorkspace(documentRecord.externalWorkspace),
     reviewed: Boolean(documentRecord.reviewed),
     reviewMode: documentRecord.reviewMode || "",
     pages: Array.isArray(documentRecord.pages)
@@ -6198,6 +6304,81 @@ function getTaskWorkEditor() {
   return document.getElementById("task-work-editor");
 }
 
+function createTaskWorkspaceMarkup(workspace, taskTitle = "") {
+  const selectedProvider = getTaskWorkspaceProvider(workspace?.provider) || null;
+  const selectedProviderId = selectedProvider?.id || "";
+  const providerButtons = TASK_WORKSPACE_PROVIDERS
+    .map(
+      (provider) => `
+        <button
+          type="button"
+          class="task-workspace-provider${provider.id === selectedProviderId ? " task-workspace-provider--active" : ""}"
+          data-task-workspace-provider="${provider.id}"
+        >
+          ${escapeHtml(provider.shortLabel)}
+        </button>
+      `
+    )
+    .join("");
+
+  return `
+    <section class="task-workspace-card">
+      <div class="section-heading section-heading--stacked section-heading--compact">
+        <div>
+          <p class="eyebrow">Write in another app</p>
+          <h3>Connected workspace</h3>
+        </div>
+      </div>
+      <p class="helper-text task-workspace-card__help">Keep the checklist above in PaperPanda and do the writing in Google Docs, Sheets, Slides, or Canva.</p>
+      <div class="task-workspace-provider-row">${providerButtons}</div>
+      <div class="task-workspace-actions">
+        <button
+          type="button"
+          class="primary-button"
+          data-task-workspace-create
+          ${selectedProvider ? `data-task-workspace-selected="${selectedProvider.id}"` : ""}
+        >
+          ${escapeHtml(selectedProvider?.createLabel || "Choose an app first")}
+        </button>
+        <button type="button" class="ghost-button" data-task-workspace-open ${workspace?.url ? "" : "disabled"}>
+          Open linked file
+        </button>
+      </div>
+      <label class="upload-field task-workspace-field">
+        <span class="upload-field__label">Share link</span>
+        <input
+          type="url"
+          id="task-workspace-url-input"
+          placeholder="${escapeHtml(selectedProvider ? `Paste the ${selectedProvider.label} share link` : "Choose an app, then paste the share link")}"
+          value="${escapeHtml(workspace?.url || "")}"
+        />
+      </label>
+      <div class="task-workspace-actions">
+        <button
+          type="button"
+          class="ghost-button ghost-button--dark"
+          data-task-workspace-save
+          ${selectedProvider ? `data-task-workspace-selected="${selectedProvider.id}"` : ""}
+        >
+          Save link
+        </button>
+        <button type="button" class="ghost-button" data-task-workspace-clear ${workspace ? "" : "disabled"}>Remove link</button>
+      </div>
+      <div class="task-workspace-card__status">
+        ${
+          selectedProvider
+            ? escapeHtml(
+                workspace?.url
+                  ? `Linked to ${selectedProvider.label} for ${taskTitle || "this task"}.`
+                  : `Create or paste a ${selectedProvider.label} link to connect it to this task.`
+              )
+            : "Choose the app you want to use for this task."
+        }
+      </div>
+    </section>
+  `;
+}
+
 function getDaysUntilText(dateString) {
   const parsed = parseAssessmentDate(dateString);
   if (!parsed) {
@@ -6826,6 +7007,124 @@ function bindTaskPopupActions(config) {
     });
   });
 
+  const getTaskWorkspaceRecord = () => {
+    const subject = getSelectedSubject();
+    if (!subject) {
+      return null;
+    }
+    if (config.taskKind === "assessment") {
+      return subject.assessments.find((item) => item.id === config.taskId) || null;
+    }
+    if (config.taskKind === "homework") {
+      return findHomeworkBundle(subject, config.taskId) || null;
+    }
+    return null;
+  };
+
+  const readTaskWorkspace = () => {
+    const record = getTaskWorkspaceRecord();
+    if (!record) {
+      return null;
+    }
+    return config.taskKind === "assessment"
+      ? getAssessmentExternalWorkspace(record)
+      : getHomeworkExternalWorkspace(record);
+  };
+
+  const writeTaskWorkspace = (workspace) => {
+    const record = getTaskWorkspaceRecord();
+    if (!record) {
+      return;
+    }
+    if (config.taskKind === "assessment") {
+      setAssessmentExternalWorkspace(record, workspace);
+    } else {
+      setHomeworkExternalWorkspace(record, workspace);
+    }
+    persistSubjects();
+    renderTaskView();
+  };
+
+  document.querySelectorAll("[data-task-workspace-provider]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const providerId = button.dataset.taskWorkspaceProvider;
+      const provider = getTaskWorkspaceProvider(providerId);
+      if (!provider) {
+        return;
+      }
+      const currentWorkspace = readTaskWorkspace();
+      writeTaskWorkspace({
+        provider: provider.id,
+        url: currentWorkspace?.provider === provider.id ? currentWorkspace.url : "",
+        updatedAt: currentWorkspace?.provider === provider.id ? currentWorkspace.updatedAt : ""
+      });
+      elements.taskWorkStatus.textContent = `${provider.label} selected. Create a file there or paste an existing share link.`;
+    });
+  });
+
+  document.querySelectorAll("[data-task-workspace-create]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const provider = getTaskWorkspaceProvider(button.dataset.taskWorkspaceSelected || readTaskWorkspace()?.provider);
+      if (!provider) {
+        elements.taskWorkStatus.textContent = "Choose Google Docs, Sheets, Slides, or Canva first.";
+        return;
+      }
+      const currentWorkspace = readTaskWorkspace();
+      if (!currentWorkspace || currentWorkspace.provider !== provider.id) {
+        writeTaskWorkspace({
+          provider: provider.id,
+          url: "",
+          updatedAt: ""
+        });
+      }
+      window.open(provider.createUrl, "_blank", "noopener");
+      elements.taskWorkStatus.textContent = `Opened ${provider.label} in a new tab. Paste the share link back here when it is ready.`;
+    });
+  });
+
+  document.querySelectorAll("[data-task-workspace-open]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const workspace = readTaskWorkspace();
+      if (!workspace?.url) {
+        elements.taskWorkStatus.textContent = "Save a workspace link first.";
+        return;
+      }
+      window.open(workspace.url, "_blank", "noopener");
+    });
+  });
+
+  document.querySelectorAll("[data-task-workspace-save]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const provider = getTaskWorkspaceProvider(button.dataset.taskWorkspaceSelected || readTaskWorkspace()?.provider);
+      const url = String(document.getElementById("task-workspace-url-input")?.value || "").trim();
+      if (!provider) {
+        elements.taskWorkStatus.textContent = "Choose Google Docs, Sheets, Slides, or Canva first.";
+        return;
+      }
+      if (!url) {
+        elements.taskWorkStatus.textContent = "Paste the share link before saving.";
+        return;
+      }
+      if (!isWorkspaceUrlValidForProvider(url, provider.id)) {
+        elements.taskWorkStatus.textContent = `That link does not look like a ${provider.label} share link.`;
+        return;
+      }
+      writeTaskWorkspace({
+        provider: provider.id,
+        url,
+        updatedAt: new Date().toISOString()
+      });
+      elements.taskWorkStatus.textContent = `${provider.label} link saved.`;
+    });
+  });
+
+  document.querySelectorAll("[data-task-workspace-clear]").forEach((button) => {
+    button.addEventListener("click", () => {
+      writeTaskWorkspace(null);
+      elements.taskWorkStatus.textContent = "Workspace link removed.";
+    });
+  });
+
   document.querySelectorAll("[data-homework-step-toggle]").forEach((button) => {
     button.addEventListener("click", () => {
       const bundleId = button.dataset.homeworkStepToggle;
@@ -6895,6 +7194,7 @@ function renderTaskView() {
     const totalItems = stageCards.reduce((sum, stage) => sum + stage.items.length, 0);
     const progressRatio = totalItems ? totalCompleted / totalItems : 0;
     const workEditorValue = existingDraft || assessment.workNotes || "";
+    const externalWorkspace = getAssessmentExternalWorkspace(assessment);
     const questionPrompt = `Based on ${assessment.componentTask || assessment.title}, generate a short practice question set I can use to prepare.`;
     const studyPlanPrompt = `Suggest a short study plan for ${assessment.componentTask || assessment.title} before ${formatAssessmentDueLabel(assessment.dueDate)}.`;
     const simplifyPrompt = `Simplify this assessment task into plain student-friendly steps: ${assessment.componentTask || assessment.title}. ${assessment.description || ""}`;
@@ -6968,6 +7268,7 @@ function renderTaskView() {
                   <h3>Your response</h3>
                 </div>
               </div>
+              ${createTaskWorkspaceMarkup(externalWorkspace, assessment.componentTask || assessment.title)}
               <textarea id="task-work-editor" class="reader-editor task-popup__editor" placeholder="Start drafting your assessment response here...">${escapeHtml(workEditorValue)}</textarea>
             </div>
           </div>
@@ -7040,6 +7341,7 @@ function renderTaskView() {
     }
     const steps = buildHomeworkTaskSteps(homeworkBundle);
     const minutes = estimateTaskMinutes(homeworkBundle.content || "");
+    const externalWorkspace = getHomeworkExternalWorkspace(homeworkBundle);
     const simplifyPrompt = `Rewrite this homework in simpler words for a student: ${homeworkBundle.title}. ${clipText(homeworkBundle.content || "", 1600)}`;
     const starterPrompt = `Write one strong starter sentence for this homework response: ${homeworkBundle.title}. ${clipText(homeworkBundle.content || "", 1600)}`;
     const quizPrompt = `Quiz me on this homework topic with 3 quick questions: ${homeworkBundle.title}.`;
@@ -7105,6 +7407,7 @@ function renderTaskView() {
                   <h3>Workbook response</h3>
                 </div>
               </div>
+                  ${createTaskWorkspaceMarkup(externalWorkspace, homeworkBundle.title)}
                   <textarea id="task-work-editor" class="reader-editor task-popup__editor" placeholder="Write your homework answer here...">${escapeHtml(existingDraft || getBundleWorkNotes(homeworkBundle) || "")}</textarea>
                 </section>
           </div>

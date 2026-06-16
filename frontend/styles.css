@@ -2055,6 +2055,53 @@ input[type="date"] {
   padding: 20px;
 }
 
+.task-workspace-card {
+  display: grid;
+  gap: 14px;
+  margin-top: 12px;
+  margin-bottom: 14px;
+  padding: 18px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--hairline);
+}
+
+.task-workspace-card__help,
+.task-workspace-card__status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.task-workspace-provider-row,
+.task-workspace-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.task-workspace-provider {
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid var(--hairline);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.task-workspace-provider--active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--card);
+}
+
+.task-workspace-field {
+  margin: 0;
+}
+
 .task-popup__editor {
   min-height: 240px;
   margin-top: 12px;
@@ -4430,6 +4477,10 @@ input[type="date"] {
   display: flex;
 }
 
+.focus-mode #subjects-view #subject-hero-upload-button {
+  display: inline-flex;
+}
+
 .focus-mode #home-view #open-upcoming-from-hero-button {
   display: none;
 }
@@ -5000,6 +5051,10 @@ input[type="date"] {
 
 .focus-mode #subjects-view.focus-drilled #documents-section {
   display: none;
+}
+
+.focus-mode #subjects-view.focus-reader-drilled #documents-section {
+  display: block;
 }
 
 .focus-back {
