@@ -4633,14 +4633,14 @@ input[type="date"] {
 .focus-launchpad {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 18px;
 }
 
 .focus-launchpad__top {
   display: flex;
   align-items: start;
   justify-content: space-between;
-  gap: 24px;
+  gap: 16px;
   flex-wrap: wrap;
 }
 
@@ -4759,15 +4759,15 @@ input[type="date"] {
 .focus-launchpad__grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 20px;
+  gap: 18px;
 }
 
 .focus-card {
   display: grid;
   align-content: start;
-  gap: 28px;
-  min-height: 428px;
-  padding: 30px;
+  gap: 18px;
+  min-height: clamp(220px, 24vh, 300px);
+  padding: 24px;
   border-radius: 34px;
   box-shadow: 0 2px 4px rgba(26, 23, 38, 0.04), 0 8px 24px rgba(26, 23, 38, 0.06);
   cursor: pointer;
@@ -4781,19 +4781,19 @@ input[type="date"] {
 
 .focus-card__header {
   display: grid;
-  grid-template-columns: 80px minmax(0, 1fr) auto;
+  grid-template-columns: 68px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 18px;
+  gap: 16px;
 }
 
 .focus-card__icon {
   display: grid;
   place-items: center;
-  width: 80px;
-  height: 80px;
-  border-radius: 24px;
+  width: 68px;
+  height: 68px;
+  border-radius: 20px;
   background: rgba(255, 255, 255, 0.65);
-  font-size: 36px;
+  font-size: 30px;
 }
 
 .focus-card__text {
@@ -4803,7 +4803,7 @@ input[type="date"] {
 
 .focus-card__label {
   font-family: var(--font-display);
-  font-size: clamp(2rem, 3vw, 2.8rem);
+  font-size: clamp(1.9rem, 2.6vw, 2.45rem);
   font-weight: 800;
   letter-spacing: -0.03em;
   line-height: 0.96;
@@ -4811,7 +4811,7 @@ input[type="date"] {
 
 .focus-card__blurb {
   color: var(--muted);
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
 }
 
@@ -4831,7 +4831,7 @@ input[type="date"] {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 18px 20px;
+  padding: 16px 18px;
   border-radius: 24px;
   background: rgba(255, 255, 255, 0.72);
 }
@@ -4843,27 +4843,146 @@ input[type="date"] {
 }
 
 .focus-card__preview-copy strong {
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 800;
   line-height: 1.18;
 }
 
 .focus-card__preview-copy span {
   color: var(--muted);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
 }
 
 .focus-card__action {
-  padding: 14px 18px;
+  padding: 12px 16px;
   border: 0;
   border-radius: 999px;
   background: #1B1825;
   color: #fff;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 800;
   white-space: nowrap;
+}
+
+.focus-mode #subjects-view.focus-ask-open {
+  grid-template-columns: 1fr;
+  position: relative;
+}
+
+.focus-mode #subjects-view.focus-ask-open::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: rgba(17, 17, 17, 0.18);
+  backdrop-filter: blur(6px);
+  z-index: 60;
+}
+
+.focus-mode #subjects-view.focus-ask-open .workspace-main {
+  pointer-events: none;
+}
+
+.focus-mode #subjects-view.focus-ask-open .workspace-dock {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(640px, calc(100vw - 48px));
+  max-height: min(84vh, 920px);
+  z-index: 80;
+}
+
+.focus-mode #subjects-view.focus-ask-open .saved-tests,
+.focus-mode #subjects-view.focus-ask-open .dock-context-card {
+  display: none;
+}
+
+.focus-mode #subjects-view.focus-ask-open .ask-card {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  min-height: min(78vh, 820px);
+  padding: 36px;
+  border-radius: 42px;
+}
+
+.focus-mode #subjects-view.focus-ask-open .ask-card::before {
+  top: -54px;
+  right: -34px;
+  width: 220px;
+  height: 220px;
+  opacity: 0.2;
+}
+
+.focus-mode #subjects-view.focus-ask-open .ask-card__voice-row {
+  align-items: start;
+  gap: 18px;
+}
+
+.focus-mode #subjects-view.focus-ask-open .ask-card__avatar {
+  width: 74px;
+  height: 74px;
+  padding: 12px;
+}
+
+.focus-mode #subjects-view.focus-ask-open .ask-card__voice-copy h3 {
+  font-size: clamp(2.2rem, 4vw, 2.8rem);
+}
+
+.focus-mode #subjects-view.focus-ask-open .ask-card__voice-copy .helper-text {
+  max-width: 12ch;
+  font-size: 18px;
+  line-height: 1.45;
+}
+
+.focus-mode #subjects-view.focus-ask-open .ask-card__mic-button {
+  width: 84px;
+  height: 84px;
+  font-size: 30px;
+  box-shadow: 0 0 0 12px rgba(255, 107, 71, 0.16);
+}
+
+.focus-mode #subjects-view.focus-ask-open .ask-card__wave {
+  margin: 12px 0 8px;
+  min-height: 68px;
+}
+
+.focus-mode #subjects-view.focus-ask-open .ask-card__wave span {
+  width: 10px;
+}
+
+.focus-mode #subjects-view.focus-ask-open .ask-context,
+.focus-mode #subjects-view.focus-ask-open .ask-response {
+  padding: 18px 22px;
+  border-radius: 20px;
+  font-size: 15px;
+}
+
+.focus-mode #subjects-view.focus-ask-open .ask-card textarea {
+  min-height: 238px;
+  border-radius: 28px;
+  background: #FFFFFF;
+  color: #1B1825;
+  border-color: transparent;
+}
+
+.focus-mode #subjects-view.focus-ask-open .ask-card textarea::placeholder {
+  color: rgba(27, 24, 37, 0.42);
+}
+
+.focus-mode #subjects-view.focus-ask-open .ask-toolbar {
+  display: grid;
+  gap: 14px;
+}
+
+.focus-mode #subjects-view.focus-ask-open .ask-toolbar #ask-button {
+  width: 100%;
+}
+
+.focus-mode #subjects-view.focus-ask-open .ask-toolbar .ghost-button {
+  width: min(280px, 100%);
 }
 
 .focus-mode #subjects-view.focus-drilled .workspace-dock,
@@ -4961,7 +5080,16 @@ input[type="date"] {
   }
 
   .focus-card {
-    min-height: 340px;
+    min-height: 260px;
+  }
+
+  .focus-mode #subjects-view.focus-ask-open .workspace-dock {
+    width: min(560px, calc(100vw - 32px));
+  }
+
+  .focus-mode #subjects-view.focus-ask-open .ask-card {
+    min-height: auto;
+    padding: 28px;
   }
 }
 
@@ -5013,8 +5141,8 @@ input[type="date"] {
   }
 
   .focus-card {
-    min-height: 280px;
-    padding: 24px;
+    min-height: 230px;
+    padding: 20px;
   }
 
   .focus-card__header {
@@ -5048,5 +5176,35 @@ input[type="date"] {
   .focus-fab__avatar {
     width: 60px;
     height: 60px;
+  }
+
+  .focus-mode #subjects-view.focus-ask-open .workspace-dock {
+    width: calc(100vw - 20px);
+  }
+
+  .focus-mode #subjects-view.focus-ask-open .ask-card {
+    padding: 22px;
+    border-radius: 30px;
+  }
+
+  .focus-mode #subjects-view.focus-ask-open .ask-card__voice-row {
+    gap: 12px;
+  }
+
+  .focus-mode #subjects-view.focus-ask-open .ask-card__avatar {
+    width: 62px;
+    height: 62px;
+  }
+
+  .focus-mode #subjects-view.focus-ask-open .ask-card__mic-button {
+    width: 64px;
+    height: 64px;
+    font-size: 24px;
+    box-shadow: 0 0 0 8px rgba(255, 107, 71, 0.16);
+  }
+
+  .focus-mode #subjects-view.focus-ask-open .ask-card textarea {
+    min-height: 180px;
+    border-radius: 22px;
   }
 }

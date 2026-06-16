@@ -1302,6 +1302,17 @@ function focusAskComposer() {
   elements.askInput.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
+function closeFocusAskPopup({ stopMic = false } = {}) {
+  if (!state.focusAskOpen) {
+    return;
+  }
+  state.focusAskOpen = false;
+  if (stopMic) {
+    stopAskMicrophone();
+  }
+  render();
+}
+
 function openSubjectsWorkspace(tab = "reader") {
   state.currentView = "subjects";
   state.activeSubjectTab = tab;
@@ -1920,7 +1931,7 @@ function renderFocusHomeCard() {
 }
 
 function renderFocusAskFab() {
-  const shouldShow = state.focusMode && (state.currentView === "home" || state.currentView === "subjects");
+  const shouldShow = state.focusMode && (state.currentView === "home" || state.currentView === "subjects") && !state.focusAskOpen;
   elements.focusAskFab?.classList.toggle("hidden", !shouldShow);
   if (elements.focusAskLabel) {
     elements.focusAskLabel.textContent = state.currentView === "subjects" ? "Hold to talk" : "Ask Panda";
@@ -1934,8 +1945,9 @@ function renderFocusMode() {
 
   elements.subjectsView?.classList.toggle("focus-launchpad-open", showLaunchpad);
   elements.subjectsView?.classList.toggle("focus-drilled", drilledIn);
+  elements.subjectsView?.classList.toggle("focus-ask-open", askOpen);
   elements.subjectFocusLaunchpad?.classList.toggle("hidden", !showLaunchpad);
-  elements.focusBackButton?.classList.toggle("hidden", !(drilledIn || askOpen));
+  elements.focusBackButton?.classList.toggle("hidden", !drilledIn);
 
   renderFocusHomeCard();
   renderFocusAskFab();
@@ -3967,6 +3979,11 @@ function speakAssessmentEntry(entry, { context = null } = {}) {
 }
 
 function handleFocusAskLaunch() {
+  if (state.currentView === "subjects" && state.focusMode && state.focusAskOpen) {
+    closeFocusAskPopup({ stopMic: true });
+    return;
+  }
+
   if (state.currentView !== "subjects" || state.focusMode) {
     state.currentView = "subjects";
     state.activeSubjectTab = state.activeSubjectTab || "reader";
@@ -9585,6 +9602,15 @@ elements.focusBackButton?.addEventListener("click", () => {
   state.focusArea = null;
   render();
 });
+elements.subjectsView?.addEventListener("click", (event) => {
+  if (!state.focusAskOpen) {
+    return;
+  }
+  if (event.target.closest(".workspace-dock")) {
+    return;
+  }
+  closeFocusAskPopup({ stopMic: true });
+});
 elements.upcomingAssessmentsButton.addEventListener("click", openUpcomingModal);
 elements.closeUpcomingScrim.addEventListener("click", closeUpcomingModal);
 elements.closeUpcomingButton.addEventListener("click", closeUpcomingModal);
@@ -9729,6 +9755,9 @@ elements.signoutButton.addEventListener("click", () => {
   showLanding();
 });
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && state.focusAskOpen) {
+    closeFocusAskPopup({ stopMic: true });
+  }
   if (event.key === "Escape" && state.upcomingModalOpen) {
     closeUpcomingModal();
   }
