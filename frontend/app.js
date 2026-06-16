@@ -1865,19 +1865,29 @@ function renderFocusHomeCard() {
   }
 
   if (elements.focusHomeSubjectSummary) {
-    elements.focusHomeSubjectSummary.textContent = "Then pick a subject to jump in.";
+    const subjectCount = state.subjects.length;
+    elements.focusHomeSubjectSummary.textContent = `${subjectCount} subject${subjectCount === 1 ? "" : "s"} · a dot means something's waiting`;
   }
 
   const nextEntry = getNextAssessmentEntry();
   if (!nextEntry) {
     host.innerHTML = `
       <article class="focus-home-next-card__surface">
-        <div class="focus-home-next-card__empty">
-          <strong>No upcoming assessment yet</strong>
-          <span>Upload an assessment task or open the calendar to review due dates.</span>
+        <div class="focus-home-next-card__count focus-home-next-card__count--empty">
+          <strong>0</strong>
+          <span>days to go</span>
+        </div>
+        <div class="focus-home-next-card__copy">
+          <p class="eyebrow">Next thing due</p>
+          <h3>No upcoming assessment yet</h3>
+          <p>Upload an assessment task or open the calendar to review due dates.</p>
+        </div>
+        <div class="focus-home-next-card__actions">
+          <button type="button" class="primary-button primary-button--dark" id="focus-home-next-calendar-button">Open calendar</button>
         </div>
       </article>
     `;
+    host.querySelector("#focus-home-next-calendar-button")?.addEventListener("click", openUpcomingModal);
     return;
   }
 
@@ -4587,6 +4597,21 @@ function getSubjectTabCounts(subject) {
   };
 }
 
+function getHomeFocusSubjectStatus(subject) {
+  const unreadCount = getAllDocumentBundles(subject).filter((bundle) => !bundle.reviewed).length;
+  const remainingHomeworkCount = getSubjectHomeworkBundles(subject).filter(
+    (bundle) => getTextCompletionRatio(bundle.workNotes, 350) < 1
+  ).length;
+  const activeAssessmentCount = getActiveSubjectAssessments(subject).length;
+  const waitingCount = unreadCount + remainingHomeworkCount + activeAssessmentCount;
+
+  return {
+    waitingCount,
+    hasWaiting: waitingCount > 0,
+    summary: waitingCount ? `${waitingCount} to do` : "Nothing due"
+  };
+}
+
 function getSubjectHeroCopy(subject, tab) {
   const visibleDocuments = getReaderDocuments(subject);
   const selectedDocument = getSelectedDocument();
@@ -4712,7 +4737,27 @@ function renderSubjectList() {
   const palette = ["dark", "lilac", "peach", "yellow", "sky", "mint"];
   const homeSubjectTileMarkup = state.subjects
     .map((subject, index) => {
+      const focusStatus = getHomeFocusSubjectStatus(subject);
       const counts = getSubjectTabCounts(subject);
+      if (state.focusMode) {
+        return `
+          <button
+            type="button"
+            class="focus-home-subject-card${subject.id === state.selectedSubjectId ? " focus-home-subject-card--active" : ""}"
+            data-subject-id="${subject.id}"
+            style="--focus-subject-code-bg:${escapeHtml(getSubjectTileCodeBackground(subject, index))}; --focus-subject-dot:${escapeHtml(getSubjectTileOutlineColor(subject, index))}"
+          >
+            <span class="focus-home-subject-card__code">${escapeHtml(getSubjectShortCode(subject.name))}</span>
+            <span class="focus-home-subject-card__copy">
+              <strong>${escapeHtml(subject.name)}</strong>
+              <span class="focus-home-subject-card__pill${focusStatus.hasWaiting ? " focus-home-subject-card__pill--active" : ""}">
+                ${escapeHtml(focusStatus.summary)}
+              </span>
+            </span>
+            ${focusStatus.hasWaiting ? '<span class="focus-home-subject-card__dot" aria-hidden="true"></span>' : ""}
+          </button>
+        `;
+      }
       return `
         <button
           type="button"
