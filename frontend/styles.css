@@ -4427,6 +4427,10 @@ input[type="date"] {
 
 .focus-mode #home-view #home-hero .hero-band__actions,
 .focus-mode #subjects-view #subjects-hero .hero-band__actions {
+  display: flex;
+}
+
+.focus-mode #home-view #open-upcoming-from-hero-button {
   display: none;
 }
 

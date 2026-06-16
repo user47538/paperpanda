@@ -6265,12 +6265,18 @@ function buildAssessmentTaskStages(assessment, linkedDocumentBundles) {
 
   return stageDefinitions.map((stage, stageIndex) => {
     const currentStageState = Array.isArray(stageState[stageIndex]) ? stageState[stageIndex] : [];
-    const doneCount = assessment.completed ? stage.items.length : currentStageState.filter(Boolean).length;
+    const itemState = assessment.completed
+      ? Array.from({ length: stage.items.length }, () => true)
+      : Array.from({ length: stage.items.length }, (_, itemIndex) => Boolean(currentStageState[itemIndex]));
+    const doneCount = itemState.filter(Boolean).length;
+    const nextActionIndex = itemState.findIndex((done) => !done);
     return {
       number: stageIndex + 1,
       title: stage.title,
       items: stage.items,
+      itemState,
       doneCount,
+      nextActionIndex,
       active: stageIndex === (firstIncompleteStageIndex === -1 ? stageDefinitions.length - 1 : firstIncompleteStageIndex)
     };
   });
@@ -6942,8 +6948,8 @@ function renderTaskView() {
                         ${stage.items
                           .map(
                             (item, itemIndex) => `
-                              <button type="button" class="task-check-row${itemIndex < stage.doneCount ? " task-check-row--done" : ""}${stage.active && itemIndex === stage.doneCount ? " task-check-row--focus" : ""}" data-assessment-stage-toggle="${assessment.id}" data-stage-index="${stageIndex}" data-stage-item-index="${itemIndex}">
-                                <span class="task-check-row__box">${itemIndex < stage.doneCount ? "✓" : ""}</span>
+                              <button type="button" class="task-check-row${stage.itemState[itemIndex] ? " task-check-row--done" : ""}${stage.active && itemIndex === stage.nextActionIndex ? " task-check-row--focus" : ""}" data-assessment-stage-toggle="${assessment.id}" data-stage-index="${stageIndex}" data-stage-item-index="${itemIndex}">
+                                <span class="task-check-row__box">${stage.itemState[itemIndex] ? "✓" : ""}</span>
                                 <span>${escapeHtml(item)}</span>
                               </button>
                             `
