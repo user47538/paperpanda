@@ -513,6 +513,7 @@ const state = {
   currentUserId: "",
   currentUserPoints: 0,
   authMode: "signin",
+  authPending: false,
   selectedSubjectId: subjectSeed[0].id,
   activeSubjectTab: "reader",
   focusMode: window.localStorage.getItem(FOCUS_MODE_STORAGE_KEY) === "on",
@@ -3112,12 +3113,42 @@ function syncSignInMode() {
   elements.studentNameWrap.classList.toggle("hidden", !isCreateMode);
   elements.studentGradeWrap.classList.toggle("hidden", !isCreateMode);
   elements.studentPasswordConfirmWrap.classList.toggle("hidden", !isCreateMode);
-  elements.openDashboardButton.textContent = isCreateMode ? "Create account" : "Sign in";
+  elements.openDashboardButton.textContent = state.authPending
+    ? isCreateMode
+      ? "Creating account..."
+      : "Signing in..."
+    : isCreateMode
+      ? "Create account"
+      : "Sign in";
   elements.signInModeCreateButton.classList.toggle("signin-mode-button--active", isCreateMode);
   elements.signInModeLoginButton.classList.toggle("signin-mode-button--active", !isCreateMode);
+  elements.openDashboardButton.classList.toggle("is-loading", state.authPending);
+  elements.openDashboardButton.disabled = state.authPending;
+  elements.openDashboardButton.setAttribute("aria-busy", state.authPending ? "true" : "false");
+  [elements.signInModeCreateButton, elements.signInModeLoginButton].forEach((button) => {
+    button.disabled = state.authPending;
+  });
+  elements.signInForm?.querySelectorAll("input, select").forEach((field) => {
+    field.disabled = state.authPending;
+  });
+  elements.signInForm?.classList.toggle("signin-card--busy", state.authPending);
   elements.signInNote.textContent = isCreateMode
     ? "Create an account first, then sign in with your school email and password."
     : "Use the school email and password you created for this portal.";
+}
+
+function setAuthPending(isPending, statusText = "") {
+  state.authPending = Boolean(isPending);
+  syncSignInMode();
+  if (statusText || !state.authPending) {
+    elements.signInStatus.textContent = statusText;
+  }
+}
+
+function flushUiFrame() {
+  return new Promise((resolve) => {
+    window.requestAnimationFrame(() => resolve());
+  });
 }
 
 function hydrateSettingsView() {
@@ -4414,6 +4445,7 @@ function setFocusMode(on) {
 }
 
 function openDashboard(nextView = "home") {
+  setAuthPending(false);
   elements.landingPanel.classList.add("hidden");
   elements.appShell.classList.remove("hidden");
   elements.welcomeHeading.textContent = "";
@@ -4442,6 +4474,7 @@ function resetRevisionState() {
 }
 
 function showLanding() {
+  setAuthPending(false);
   stopListening();
   stopAskMicrophone({ preserveStatus: true });
   closeUpcomingModal();
@@ -5313,18 +5346,42 @@ function getSubjectTabCounts(subject) {
   };
 }
 
+function getPreferredSubjectTab(subject) {
+  const counts = getSubjectTabCounts(subject);
+  if (
+    subject?.id === "english" &&
+    counts.spelling &&
+    !counts.reader &&
+    !counts.homework &&
+    !counts.watch &&
+    !counts.assessments
+  ) {
+    return "spelling";
+  }
+
+  return "reader";
+}
+
 function getHomeFocusSubjectStatus(subject) {
   const unreadCount = getAllDocumentBundles(subject).filter((bundle) => !bundle.reviewed).length;
   const remainingHomeworkCount = getSubjectHomeworkBundles(subject).filter(
     (bundle) => getTextCompletionRatio(bundle.workNotes, 350) < 1
   ).length;
   const activeAssessmentCount = getActiveSubjectAssessments(subject).length;
-  const waitingCount = unreadCount + remainingHomeworkCount + activeAssessmentCount;
+  const spellingPendingCount = getSpellingPendingActivityCount(subject);
+  const waitingCount = unreadCount + remainingHomeworkCount + activeAssessmentCount + spellingPendingCount;
+  const summary = spellingPendingCount && waitingCount === spellingPendingCount
+    ? `${spellingPendingCount} spelling ${spellingPendingCount === 1 ? "activity" : "activities"}`
+    : spellingPendingCount
+      ? `${waitingCount} to do · ${spellingPendingCount} spelling`
+      : waitingCount
+        ? `${waitingCount} to do`
+        : "Nothing due";
 
   return {
     waitingCount,
     hasWaiting: waitingCount > 0,
-    summary: waitingCount ? `${waitingCount} to do` : "Nothing due"
+    summary
   };
 }
 
@@ -5419,7 +5476,8 @@ function renderHomeHero() {
   const unreadDocumentMetrics = getUnreadDocumentMetrics();
   const homeworkMetrics = getHomeworkMetrics();
   const assessmentMetrics = getAssessmentProgressMetrics();
-  const totalThings = unreadDocumentMetrics.unread + homeworkMetrics.remaining + assessmentMetrics.upcoming;
+  const spellingThings = state.subjects.reduce((total, subject) => total + getSpellingPendingActivityCount(subject), 0);
+  const totalThings = unreadDocumentMetrics.unread + homeworkMetrics.remaining + assessmentMetrics.upcoming + spellingThings;
   const nextEntry = getNextAssessmentEntry();
   const daysUntil = nextEntry?.dueDateObject ? getDaysUntilDate(nextEntry.dueDateObject) : 0;
 
@@ -5496,6 +5554,7 @@ function renderSubjectList() {
           <span class="subject-tile__code">${getSubjectTileCodeMarkup(subject)}</span>
           <span class="subject-tile__title">${escapeHtml(subject.name)}</span>
           <span class="subject-tile__meta">
+            ${counts.spelling ? `<span class="subject-tile__feature-chip">🐴 ${escapeHtml(`${counts.spelling} spelling`)}</span>` : ""}
             <span>${escapeHtml(`${counts.reader} notes`)}</span>
             <span>${escapeHtml(`${counts.homework} HW`)}</span>
           </span>
@@ -5514,6 +5573,7 @@ function renderSubjectList() {
       >
         <span class="subject-tile__code">${getSubjectTileCodeMarkup(subject)}</span>
         <span class="subject-tile__title">${escapeHtml(subject.name)}</span>
+        ${getSubjectTabCounts(subject).spelling ? `<span class="subject-tile__mini-chip">🐴 Spelling</span>` : ""}
       </button>
     `)
     .join("");
@@ -5533,7 +5593,7 @@ function renderSubjectList() {
       }
 
       state.selectedSubjectId = subject.id;
-      state.activeSubjectTab = "reader";
+      state.activeSubjectTab = getPreferredSubjectTab(subject);
       state.focusArea = null;
       state.selectedDocumentIds = [];
       state.expandedDocumentGroups = {};
@@ -10828,77 +10888,81 @@ async function handleDashboardOpen() {
     return;
   }
 
-  if (!isCreateMode) {
-    try {
-      const payload = await requestApi("/api/auth/signin", {
-        email: studentEmail,
-        password
-      });
-      state.authToken = payload.token || "";
-      applyAuthenticatedAccount(payload.account, {
-        token: payload.token || "",
-        subjects: payload.subjects,
-        settings: payload.settings,
-        skipRemoteSync: true
-      });
-      openDashboard("home");
+  if (isCreateMode) {
+    if (!studentName) {
+      elements.signInStatus.textContent = "Enter a student name.";
       return;
-    } catch (error) {
-      if (
-        error instanceof Error &&
-        error.status === 404 &&
-        existingLegacyAccount &&
-        existingLegacyAccount.password === password
-      ) {
-        try {
-          const legacySubjects = getStoredSubjectsForAccount(existingLegacyAccount);
-          const payload = await registerCloudAccountWithFallback({
-            name: existingLegacyAccount.name,
-            email: existingLegacyAccount.email,
-            password,
-            grade: normaliseGrade(existingLegacyAccount.grade),
-            subjects: legacySubjects,
-            settings: buildCloudAccountSettingsPayload()
-          });
-          state.authToken = payload.token || "";
-          applyAuthenticatedAccount(payload.account, {
-            token: payload.token || "",
-            subjects: legacySubjects,
-            settings: payload.settings,
-            skipRemoteSync: false
-          });
-          openDashboard("home");
-          return;
-        } catch (migrationError) {
-          elements.signInStatus.textContent =
-            migrationError instanceof Error ? migrationError.message : "Account migration failed.";
-          return;
-        }
-      }
-
-      if (studentName || confirmPassword) {
-        setAuthMode("create", { clearStatus: false });
-      } else {
-        elements.signInStatus.textContent = error instanceof Error ? error.message : "Sign-in failed.";
-      }
+    }
+    if (!confirmPassword) {
+      elements.signInStatus.textContent = "Confirm the password.";
+      return;
+    }
+    if (password !== confirmPassword) {
+      elements.signInStatus.textContent = "Passwords do not match.";
       return;
     }
   }
 
-  if (!studentName) {
-    elements.signInStatus.textContent = "Enter a student name.";
-    return;
-  }
-  if (!confirmPassword) {
-    elements.signInStatus.textContent = "Confirm the password.";
-    return;
-  }
-  if (password !== confirmPassword) {
-    elements.signInStatus.textContent = "Passwords do not match.";
-    return;
-  }
+  setAuthPending(true, isCreateMode ? "Creating your account..." : "Signing you in...");
+  await flushUiFrame();
 
   try {
+    if (!isCreateMode) {
+      try {
+        const payload = await requestApi("/api/auth/signin", {
+          email: studentEmail,
+          password
+        });
+        elements.signInStatus.textContent = "Loading your study space...";
+        state.authToken = payload.token || "";
+        applyAuthenticatedAccount(payload.account, {
+          token: payload.token || "",
+          subjects: payload.subjects,
+          settings: payload.settings,
+          skipRemoteSync: true
+        });
+        openDashboard("home");
+        return;
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.status === 404 &&
+          existingLegacyAccount &&
+          existingLegacyAccount.password === password
+        ) {
+          try {
+            elements.signInStatus.textContent = "Restoring your saved account...";
+            const legacySubjects = getStoredSubjectsForAccount(existingLegacyAccount);
+            const payload = await registerCloudAccountWithFallback({
+              name: existingLegacyAccount.name,
+              email: existingLegacyAccount.email,
+              password,
+              grade: normaliseGrade(existingLegacyAccount.grade),
+              subjects: legacySubjects,
+              settings: buildCloudAccountSettingsPayload()
+            });
+            elements.signInStatus.textContent = "Loading your study space...";
+            state.authToken = payload.token || "";
+            applyAuthenticatedAccount(payload.account, {
+              token: payload.token || "",
+              subjects: legacySubjects,
+              settings: payload.settings,
+              skipRemoteSync: false
+            });
+            openDashboard("home");
+            return;
+          } catch (migrationError) {
+            elements.signInStatus.textContent =
+              migrationError instanceof Error ? migrationError.message : "Account migration failed.";
+            return;
+          }
+        }
+
+        elements.signInStatus.textContent = error instanceof Error ? error.message : "Sign-in failed.";
+        return;
+      }
+    }
+
     const desiredSubjects = existingLegacyAccount
       ? getStoredSubjectsForAccount(existingLegacyAccount)
       : createInitialSubjectsForAccount({
@@ -10914,6 +10978,7 @@ async function handleDashboardOpen() {
       subjects: desiredSubjects,
       settings: buildCloudAccountSettingsPayload()
     });
+    elements.signInStatus.textContent = "Loading your study space...";
     state.authToken = payload.token || "";
     applyAuthenticatedAccount(payload.account, {
       token: payload.token || "",
@@ -10927,6 +10992,12 @@ async function handleDashboardOpen() {
       setAuthMode("signin", { clearStatus: false });
     }
     elements.signInStatus.textContent = error instanceof Error ? error.message : "Account creation failed.";
+  } finally {
+    if (!elements.landingPanel.classList.contains("hidden")) {
+      setAuthPending(false, elements.signInStatus.textContent);
+    } else {
+      state.authPending = false;
+    }
   }
 }
 
