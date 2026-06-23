@@ -127,9 +127,9 @@ const subjectSeed = [
     summary: "Use linked documents to keep rubrics, drafts, and teacher feedback beside each task.",
     practice: [
       {
-        title: "Spelling",
+        title: "Vocabulary",
         tag: "Word study",
-        description: "Review spelling patterns and use each word in a sentence."
+        description: "Unpack unfamiliar words, meanings, and examples before using them in writing."
       },
       {
         title: "Writing",
@@ -176,6 +176,31 @@ const subjectSeed = [
       seededAssessment("6", "Yearly Examination - Mythology critical paragraph and short answers", "Term 4 Week 1", "Term 4 Weeks 5/6", "20%"),
       seededAssessment("6", "Book Work", "Ongoing", "Term 3 and Term 4", "10%")
     ]
+  },
+  {
+    id: "spelling",
+    name: "Spelling",
+    focus: "structured literacy, spelling patterns, morphology, and sentence transfer",
+    summary: "Build spelling through sound chunks, word families, and short daily pattern practice.",
+    practice: [
+      {
+        title: "Chunk building",
+        tag: "Foal",
+        description: "Build target words with sound chunks before typing them from memory."
+      },
+      {
+        title: "Word families",
+        tag: "School Horse",
+        description: "Keep the root spelling stable as suffixes and endings are added."
+      },
+      {
+        title: "Sentence transfer",
+        tag: "Champion",
+        description: "Use the target spelling pattern in a real sentence so it sticks."
+      }
+    ],
+    documents: [],
+    assessments: []
   },
   {
     id: "science",
@@ -428,6 +453,7 @@ const legacyDocumentTemplateKeysBySubject = Object.fromEntries(
 const subjectAliasMap = {
   maths: ["Maths and Numeracy", "Maths", "Mathematics", "Numeracy"],
   english: ["English"],
+  spelling: ["Spelling", "Spelling Stables"],
   science: ["Science"],
   history: ["History"],
   music: ["Music"],
@@ -881,6 +907,28 @@ function createInitialSubjectsForAccount(account) {
     savedRevisionTests: [],
     spelling: createDefaultSpellingState(subject.id)
   }));
+}
+
+function resolveSubjectSeedEntry(subject, index) {
+  const explicitId = String(subject?.id || "").trim();
+  if (explicitId) {
+    const seededById = subjectTemplateSeed.find((seededSubject) => seededSubject.id === explicitId);
+    if (seededById) {
+      return seededById;
+    }
+  }
+
+  const subjectName = String(subject?.name || "").trim().toLowerCase();
+  if (subjectName) {
+    const seededByName = subjectTemplateSeed.find(
+      (seededSubject) => seededSubject.name.trim().toLowerCase() === subjectName
+    );
+    if (seededByName) {
+      return seededByName;
+    }
+  }
+
+  return subjectTemplateSeed[index] || null;
 }
 
 function buildScheduleMergedAssessments(parsedAssessments = [], existingAssessments = []) {
@@ -1388,10 +1436,13 @@ function closeFocusAskPopup({ stopMic = false } = {}) {
 }
 
 function openSubjectsWorkspace(tab = "reader") {
+  const subject = getSelectedSubject();
+  const availableTabs = getAvailableSubjectTabs(subject);
+  const nextTab = availableTabs.includes(tab) ? tab : availableTabs[0] || "reader";
   state.currentView = "subjects";
-  state.activeSubjectTab = tab;
+  state.activeSubjectTab = nextTab;
   state.focusAskOpen = false;
-  state.focusArea = state.focusMode ? tab : null;
+  state.focusArea = state.focusMode ? nextTab : null;
   render();
 }
 
@@ -2039,6 +2090,10 @@ function renderSubjectTabs() {
   if (!subject || !elements.subjectTabs) {
     return;
   }
+  const availableTabs = getAvailableSubjectTabs(subject);
+  if (!availableTabs.includes(state.activeSubjectTab)) {
+    state.activeSubjectTab = availableTabs[0] || "reader";
+  }
 
   const counts = {
     reader: getAllDocumentBundles(subject).length,
@@ -2054,6 +2109,7 @@ function renderSubjectTabs() {
   elements.tabCountWatch.textContent = String(counts.watch);
   elements.tabCountAssessments.textContent = String(counts.assessments);
   elements.subjectTabs.querySelectorAll("[data-viewer-tab]").forEach((button) => {
+    button.classList.toggle("hidden", !availableTabs.includes(button.dataset.viewerTab));
     button.classList.toggle("is-active", button.dataset.viewerTab === state.activeSubjectTab);
   });
   elements.readingViewerMeta.textContent = `${subject.name} · Year ${state.studentGrade}`;
@@ -2112,15 +2168,15 @@ function renderSubjectFocusLaunchpad() {
           meta: "Homework tasks will appear here when they are uploaded.",
           action: "✎ Open homework"
         },
-    spelling: subject.id === "english"
+    spelling: subject.id === "spelling"
       ? {
           title: SPELLING_UNIT_SEED.title,
           meta: `${getSpellingPendingActivityCount(subject)} activity${getSpellingPendingActivityCount(subject) === 1 ? "" : "ies"} left · ${Math.round(getSpellingMasteryRatio(subject) * 100)}% mastery`,
           action: "🐴 Open stables"
         }
       : {
-          title: "Spelling Stables opens in English",
-          meta: "This first spelling lesson is currently attached to the English subject.",
+          title: "Spelling lives in its own subject",
+          meta: "Open the Spelling subject from the subject list to train this lesson.",
           action: "🐴 Open spelling"
         },
     watch: watchItem
@@ -2155,7 +2211,9 @@ function renderSubjectFocusLaunchpad() {
     .map((item) => `<option value="${item.id}"${item.id === subject.id ? " selected" : ""}>${escapeHtml(item.name)}</option>`)
     .join("");
 
-  const cards = FOCUS_AREAS.map((area) => {
+  const cards = FOCUS_AREAS
+    .filter((area) => getAvailableSubjectTabs(subject).includes(area.id))
+    .map((area) => {
     const preview = focusPreview[area.id];
     return `
       <article class="focus-card focus-card--${area.id}" data-focus-area="${area.id}" tabindex="0" role="button">
@@ -2454,7 +2512,7 @@ function renderDockContext() {
   if (state.activeSubjectTab === "spelling") {
     const spelling = getSubjectSpellingState(subject);
     elements.dockContextTitle.textContent = "Horse skills";
-    elements.dockContextBody.innerHTML = subject.id === "english"
+    elements.dockContextBody.innerHTML = subject.id === "spelling"
       ? `
         <article class="dock-tile dock-tile--yellow">
           <div class="dock-tile__copy">
@@ -2463,7 +2521,7 @@ function renderDockContext() {
           </div>
         </article>
       `
-      : `<div class="empty-state empty-state--compact">Spelling Stables is available in English for the first release.</div>`;
+      : `<div class="empty-state empty-state--compact">Open the Spelling subject to train this lesson.</div>`;
     return;
   }
 
@@ -3526,9 +3584,10 @@ function saveStoredSubjectsMap(subjectsByAccount) {
 }
 
 function hydrateStoredSubject(subject, index) {
-  const resolvedSubjectId = String(subject?.id || subjectTemplateSeed[index]?.id || "");
+  const subjectSeedEntry = resolveSubjectSeedEntry(subject, index);
+  const resolvedSubjectId = String(subject?.id || subjectSeedEntry?.id || "");
   return {
-    ...structuredClone(subjectTemplateSeed[index] || {}),
+    ...structuredClone(subjectSeedEntry || {}),
     ...subject,
     documents: Array.isArray(subject.documents) ? subject.documents.map(normaliseDocument) : [],
     assessments: Array.isArray(subject.assessments) ? subject.assessments.map(normaliseAssessment) : [],
@@ -3551,12 +3610,12 @@ function hydrateStoredSubject(subject, index) {
     spelling: normaliseSpellingState(subject.spelling, resolvedSubjectId),
     practice: Array.isArray(subject.practice)
       ? subject.practice
-      : structuredClone(subjectTemplateSeed[index]?.practice || [])
+      : structuredClone(subjectSeedEntry?.practice || [])
   };
 }
 
 function createDefaultSpellingState(subjectId = "") {
-  const enabled = subjectId === "english";
+  const enabled = subjectId === "spelling";
   return {
     enabled,
     activeUnitId: SPELLING_UNIT_SEED.id,
@@ -3604,7 +3663,7 @@ function normaliseSpellingState(spelling, subjectId = "") {
   return {
     ...base,
     ...next,
-    enabled: subjectId === "english",
+    enabled: subjectId === "spelling",
     activeUnitId: next.activeUnitId || base.activeUnitId,
     coachMessage: String(next.coachMessage || base.coachMessage || ""),
     preferences: {
@@ -3838,9 +3897,31 @@ function normalizeManualWatchItemsAcrossSubjects() {
 
 function buildResolvedSubjectsFromStore(account, storedSubjects) {
   if (Array.isArray(storedSubjects)) {
+    const storedSubjectsById = new Map();
+    const extraSubjects = [];
+
+    storedSubjects.forEach((subject, index) => {
+      const hydratedSubject = hydrateStoredSubject(subject, index);
+      if (!hydratedSubject.id) {
+        return;
+      }
+
+      const isSeededSubject = subjectTemplateSeed.some((seededSubject) => seededSubject.id === hydratedSubject.id);
+      if (isSeededSubject) {
+        storedSubjectsById.set(hydratedSubject.id, hydratedSubject);
+        return;
+      }
+
+      extraSubjects.push(hydratedSubject);
+    });
+
+    const resolvedSubjects = subjectTemplateSeed.map((seededSubject, index) =>
+      storedSubjectsById.get(seededSubject.id) || hydrateStoredSubject({ id: seededSubject.id }, index)
+    );
+
     return mergeLegacyGroupedDocuments(
       removeLegacySeededDocuments(
-        removeLegacySeededAssessments(storedSubjects.map(hydrateStoredSubject))
+        removeLegacySeededAssessments([...resolvedSubjects, ...extraSubjects])
       )
     );
   }
@@ -5346,10 +5427,16 @@ function getSubjectTabCounts(subject) {
   };
 }
 
+function getAvailableSubjectTabs(subject) {
+  return subject?.id === "spelling"
+    ? ["spelling"]
+    : ["reader", "homework", "watch", "assessments"];
+}
+
 function getPreferredSubjectTab(subject) {
   const counts = getSubjectTabCounts(subject);
   if (
-    subject?.id === "english" &&
+    subject?.id === "spelling" &&
     counts.spelling &&
     !counts.reader &&
     !counts.homework &&
@@ -5359,7 +5446,7 @@ function getPreferredSubjectTab(subject) {
     return "spelling";
   }
 
-  return "reader";
+  return getAvailableSubjectTabs(subject)[0] || "reader";
 }
 
 function getHomeFocusSubjectStatus(subject) {
@@ -5422,11 +5509,11 @@ function getSubjectHeroCopy(subject, tab) {
   if (tab === "spelling") {
     return {
       big: `${spellingPending} ${spellingPending === 1 ? "stable" : "stables"}`,
-      rest: subject.id === "english"
+      rest: subject.id === "spelling"
         ? spellingPending
           ? `left in ${SPELLING_UNIT_SEED.title} — build the pattern before memorising the word.`
           : `cleared in ${SPELLING_UNIT_SEED.title} — ready for spaced review.`
-        : "ready in English when you want focused spelling practice."
+        : "ready in the Spelling subject when you want focused pattern practice."
     };
   }
 
@@ -8660,8 +8747,8 @@ function renderSpelling() {
       <section class="spelling-shell spelling-shell--empty">
         <article class="spelling-empty-card">
           <p class="eyebrow">Spelling Stables</p>
-          <h3>Open English to train this lesson</h3>
-          <p>The first spelling vertical slice is attached to English so the pattern work, morphology, and horse theme can be tested cleanly before it spreads to other subjects.</p>
+          <h3>Open the Spelling subject to train this lesson</h3>
+          <p>Spelling Stables now lives as its own subject so the horse-themed spelling practice can be selected directly from the subject list.</p>
         </article>
       </section>
     `;
