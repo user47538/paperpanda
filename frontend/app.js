@@ -4227,23 +4227,44 @@ function resetSpellingActivity(subject, activityId) {
 }
 
 function speakSpellingDiagnosticWord(wordEntry) {
-  if (!wordEntry || !("speechSynthesis" in window)) {
+  if (!wordEntry) {
     return;
   }
-  window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(`Spell the word ${wordEntry.word}. ${wordEntry.sentence}`);
-  utterance.rate = 0.9;
-  utterance.pitch = 1;
-  window.speechSynthesis.speak(utterance);
+  const audioContext = `spelling:diagnostic:${wordEntry.id}`;
+  if (currentAudioContext === audioContext) {
+    stopListening();
+    render();
+    return;
+  }
+
+  void speakTextWithOpenAi(`Spell the word ${wordEntry.word}. ${wordEntry.sentence}`, {
+    context: audioContext,
+    statusMessages: {
+      preparing: "Preparing spelling audio...",
+      playing: "Reading spelling word...",
+      error: "Spelling audio failed."
+    }
+  })
+    .then(() => {
+      render();
+    })
+    .catch((error) => {
+      console.error("Spelling audio failed.", error);
+      render();
+    });
 }
 
-function submitSpellingDiagnosticWord(subject) {
+function submitSpellingDiagnosticWord(subject, attemptOverride = null) {
   const spelling = getSubjectSpellingState(subject);
   const wordEntry = getSpellingDiagnosticCurrentWord(spelling);
   if (!wordEntry) {
     return;
   }
-  const attempt = String(spelling.diagnostic.currentInput || "").trim();
+  const attempt = String(
+    attemptOverride !== null && attemptOverride !== undefined
+      ? attemptOverride
+      : spelling.diagnostic.currentInput || ""
+  ).trim();
   if (!attempt) {
     spelling.coachMessage = "Type the word before moving to the next item.";
     persistSubjects();
@@ -9262,7 +9283,7 @@ function renderSpelling() {
     host.querySelector("#spelling-diagnostic-input")?.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
-        submitSpellingDiagnosticWord(subject);
+        submitSpellingDiagnosticWord(subject, event.currentTarget.value);
         render();
         if (!getSubjectSpellingState(subject).diagnostic.completed) {
           speakSpellingDiagnosticWord(getSpellingDiagnosticCurrentWord(getSubjectSpellingState(subject)));
@@ -9273,7 +9294,7 @@ function renderSpelling() {
       persistSubjects();
     });
     host.querySelector("[data-spelling-submit-diagnostic]")?.addEventListener("click", () => {
-      submitSpellingDiagnosticWord(subject);
+      submitSpellingDiagnosticWord(subject, host.querySelector("#spelling-diagnostic-input")?.value || "");
       render();
       if (!getSubjectSpellingState(subject).diagnostic.completed) {
         speakSpellingDiagnosticWord(getSpellingDiagnosticCurrentWord(getSubjectSpellingState(subject)));
