@@ -466,39 +466,251 @@ const subjectAliasMap = {
 const FOCUS_AREAS = [
   { id: "reader", icon: "📖", label: "Read", blurb: "Read & listen" },
   { id: "homework", icon: "✎", label: "Homework", blurb: "Tasks to do" },
-  { id: "spelling", icon: "🐴", label: "Spelling", blurb: "Pattern practice" },
+  { id: "spelling", icon: "Aa", label: "Spelling", blurb: "Targeted spelling practice" },
   { id: "watch", icon: "▶", label: "Watch", blurb: "Class videos" },
   { id: "assessments", icon: "🎯", label: "Assessments", blurb: "Tests & due dates" }
 ];
 
-const SPELLING_STAGE_ORDER = ["foal", "pony", "school-horse", "show-horse", "champion"];
+const SPELLING_STAGE_ORDER = ["diagnostic", "looks-right", "word-families", "tense-transfer"];
 const SPELLING_STAGE_LABELS = {
-  foal: "Foal",
-  pony: "Pony",
-  "school-horse": "School Horse",
-  "show-horse": "Show Horse",
-  champion: "Champion"
+  diagnostic: "Diagnostic",
+  "looks-right": "Looks Right",
+  "word-families": "Word Families",
+  "tense-transfer": "Tense Transfer"
+};
+const SPELLING_FOCUS_LABELS = {
+  "over-articulation": "Over-articulation and hidden sounds",
+  "word-family": "Word families and pattern transfer",
+  mnemonic: "Mnemonic-worthy spellings",
+  "look-right": "Visual checking: does it look right?"
 };
 const SPELLING_UNIT_SEED = {
-  id: "air-pattern-stables",
-  title: "AIR Pattern Stables",
-  horseName: "Dusty",
-  focusPattern: "AIR sound choices",
-  targetWord: "square",
+  id: "spelling-progression",
+  title: "Spelling Progression",
   intro:
-    "Train the /air/ pattern by building square with chunks, sorting matching words, and growing a word family instead of memorising one word at a time.",
-  chunkAnswer: ["squ", "are"],
-  tagChoices: ["u", "a", "i"],
-  sortBuckets: {
-    air: ["chair", "hair"],
-    are: ["square", "compare"],
-    ear: ["bear", "wear"]
-  },
-  familyOrder: ["square", "squared", "squarely", "squareness"],
-  sentenceWords: ["square", "compare", "aware"]
+    "Start with a spoken diagnostic, then move into visual checking, word families, and tense transfer built from the words the student actually missed.",
+  diagnosticTargetCount: 40,
+  followUpWordCount: 10,
+  reviewDays: ["Day 1", "Day 3", "Day 7", "Day 14", "Day 30"]
 };
-
-let activeSpellingDragPayload = null;
+const SPELLING_INTERVENTION_LIBRARY = {
+  believe: {
+    id: "believe",
+    word: "believe",
+    articulation: "be-lieve",
+    focuses: ["look-right", "word-family"],
+    familyWords: ["belief", "believable", "disbelieve"],
+    familyNote: "Keep the base believe visible as the word changes.",
+    lookRightWrong: "beleive",
+    lookRightNote: "The vowel order drifts in the common error.",
+    flashcardBreak: "be | lieve",
+    tense: {
+      present: "believe",
+      past: "believed",
+      future: "will believe",
+      options: ["believe", "believed", "will believe", "beleive", "will believed", "belief"]
+    }
+  },
+  describe: {
+    id: "describe",
+    word: "describe",
+    articulation: "de-scribe",
+    focuses: ["word-family", "look-right"],
+    familyWords: ["description", "descriptive", "describes"],
+    familyNote: "The scribe base stays visible in every family member.",
+    lookRightWrong: "desribe",
+    lookRightNote: "The missing c weakens the visual pattern straight away.",
+    flashcardBreak: "de | scribe",
+    tense: {
+      present: "describe",
+      past: "described",
+      future: "will describe",
+      options: ["describe", "described", "will describe", "desribe", "will described", "description"]
+    }
+  },
+  decide: {
+    id: "decide",
+    word: "decide",
+    articulation: "de-cide",
+    focuses: ["word-family", "look-right"],
+    familyWords: ["decision", "decisive", "deciding"],
+    familyNote: "The word family keeps the deci base even when the ending changes.",
+    lookRightWrong: "deside",
+    lookRightNote: "The soft c sound is still spelled with c, not s.",
+    flashcardBreak: "de | cide",
+    tense: {
+      present: "decide",
+      past: "decided",
+      future: "will decide",
+      options: ["decide", "decided", "will decide", "deside", "will decided", "decision"]
+    }
+  },
+  imagine: {
+    id: "imagine",
+    word: "imagine",
+    articulation: "im-ag-ine",
+    focuses: ["over-articulation", "word-family"],
+    familyWords: ["imagination", "imaginative", "imaginary"],
+    familyNote: "Stretching im-ag-ine helps the vowel pattern stay visible.",
+    lookRightWrong: "imajin",
+    lookRightNote: "The final e and middle g are both easy to drop when it is only sounded out loosely.",
+    flashcardBreak: "im | ag | ine",
+    tense: {
+      present: "imagine",
+      past: "imagined",
+      future: "will imagine",
+      options: ["imagine", "imagined", "will imagine", "imajin", "will imagined", "imagination"]
+    }
+  },
+  measure: {
+    id: "measure",
+    word: "measure",
+    articulation: "mea-sure",
+    focuses: ["look-right", "word-family"],
+    familyWords: ["measurement", "measurable", "measures"],
+    familyNote: "The mea start helps link measure with measurement and measurable.",
+    lookRightWrong: "mesure",
+    lookRightNote: "The common error loses the vowel pattern after m.",
+    flashcardBreak: "mea | sure",
+    tense: {
+      present: "measure",
+      past: "measured",
+      future: "will measure",
+      options: ["measure", "measured", "will measure", "mesure", "will measured", "measurement"]
+    }
+  },
+  notice: {
+    id: "notice",
+    word: "notice",
+    articulation: "no-tice",
+    focuses: ["look-right", "word-family"],
+    familyWords: ["noticed", "noticing", "noticeable"],
+    familyNote: "The notice base remains stable before each new ending.",
+    lookRightWrong: "notise",
+    lookRightNote: "The /s/ sound is still spelled c here because of the visual family pattern.",
+    flashcardBreak: "no | tice",
+    tense: {
+      present: "notice",
+      past: "noticed",
+      future: "will notice",
+      options: ["notice", "noticed", "will notice", "notise", "will noticed", "noticeable"]
+    }
+  },
+  remember: {
+    id: "remember",
+    word: "remember",
+    articulation: "re-mem-ber",
+    focuses: ["mnemonic", "word-family"],
+    familyWords: ["remembers", "remembered", "remembering"],
+    familyNote: "The middle mem chunk stays fixed through every change.",
+    lookRightWrong: "rember",
+    lookRightNote: "The missing mem chunk breaks the pattern the eye expects.",
+    flashcardBreak: "re | mem | ber",
+    tense: {
+      present: "remember",
+      past: "remembered",
+      future: "will remember",
+      options: ["remember", "remembered", "will remember", "rember", "will remembered", "remembering"]
+    }
+  },
+  appear: {
+    id: "appear",
+    word: "appear",
+    articulation: "ap-pear",
+    focuses: ["look-right", "word-family"],
+    familyWords: ["appearance", "appearing", "disappear"],
+    familyNote: "The double p stays visible across the family.",
+    lookRightWrong: "apear",
+    lookRightNote: "One missing p makes the word stop looking settled.",
+    flashcardBreak: "ap | pear",
+    tense: {
+      present: "appear",
+      past: "appeared",
+      future: "will appear",
+      options: ["appear", "appeared", "will appear", "apear", "will appeared", "appearance"]
+    }
+  },
+  separate: {
+    id: "separate",
+    word: "separate",
+    articulation: "sep-a-rate",
+    focuses: ["over-articulation", "mnemonic"],
+    familyWords: ["separation", "separately", "separator"],
+    familyNote: "Slow sep-a-rate makes the middle a audible again.",
+    lookRightWrong: "seperate",
+    lookRightNote: "The common error swaps the middle vowel because the word is not articulated clearly enough.",
+    flashcardBreak: "sep | a | rate",
+    tense: {
+      present: "separate",
+      past: "separated",
+      future: "will separate",
+      options: ["separate", "separated", "will separate", "seperate", "will separated", "separation"]
+    }
+  },
+  achieve: {
+    id: "achieve",
+    word: "achieve",
+    articulation: "a-chieve",
+    focuses: ["look-right", "word-family"],
+    familyWords: ["achievement", "achievable", "achieves"],
+    familyNote: "Keep the chieve pattern stable as the endings change.",
+    lookRightWrong: "acheive",
+    lookRightNote: "The common error flips the vowel order.",
+    flashcardBreak: "a | chieve",
+    tense: {
+      present: "achieve",
+      past: "achieved",
+      future: "will achieve",
+      options: ["achieve", "achieved", "will achieve", "acheive", "will achieved", "achievement"]
+    }
+  }
+};
+const SPELLING_DEFAULT_FOLLOW_UP_WORD_IDS = Object.keys(SPELLING_INTERVENTION_LIBRARY);
+const SPELLING_DIAGNOSTIC_WORDS = [
+  { id: "friend", word: "friend", yearLevel: "5", sentence: "A good friend tells the truth.", focuses: ["look-right"], articulation: "fri-end" },
+  { id: "because", word: "because", yearLevel: "5", sentence: "We stayed inside because it was raining.", focuses: ["mnemonic"], articulation: "be-cause" },
+  { id: "beautiful", word: "beautiful", yearLevel: "5", sentence: "The garden looked beautiful in the morning light.", focuses: ["mnemonic", "look-right"], articulation: "beau-ti-ful" },
+  { id: "through", word: "through", yearLevel: "5", sentence: "Read through the whole paragraph before answering.", focuses: ["look-right"], articulation: "through" },
+  { id: "answer", word: "answer", yearLevel: "5", sentence: "Write the answer in a full sentence.", focuses: ["over-articulation"], articulation: "ans-wer" },
+  { id: "which", word: "which", yearLevel: "5", sentence: "Which question will you answer first?", focuses: ["word-family"], articulation: "which" },
+  { id: "measure", word: "measure", yearLevel: "5", sentence: "Measure the line with a ruler.", focuses: ["look-right", "word-family"], articulation: "mea-sure", interventionId: "measure" },
+  { id: "believe", word: "believe", yearLevel: "5", sentence: "I believe you can solve it.", focuses: ["look-right", "word-family"], articulation: "be-lieve", interventionId: "believe" },
+  { id: "imagine", word: "imagine", yearLevel: "5", sentence: "Imagine the scene before you start writing.", focuses: ["over-articulation", "word-family"], articulation: "im-ag-ine", interventionId: "imagine" },
+  { id: "notice", word: "notice", yearLevel: "5", sentence: "Notice how the title hints at the theme.", focuses: ["look-right", "word-family"], articulation: "no-tice", interventionId: "notice" },
+  { id: "remember", word: "remember", yearLevel: "5", sentence: "Remember to justify your answer.", focuses: ["mnemonic", "word-family"], articulation: "re-mem-ber", interventionId: "remember" },
+  { id: "straight", word: "straight", yearLevel: "5", sentence: "Draw a straight line across the page.", focuses: ["look-right"], articulation: "straight" },
+  { id: "thought", word: "thought", yearLevel: "5", sentence: "Her thought was clear and precise.", focuses: ["look-right"], articulation: "thought" },
+  { id: "caught", word: "caught", yearLevel: "5", sentence: "He caught the ball near the fence.", focuses: ["look-right"], articulation: "caught" },
+  { id: "build", word: "build", yearLevel: "5", sentence: "Build your argument carefully.", focuses: ["look-right"], articulation: "build" },
+  { id: "early", word: "early", yearLevel: "5", sentence: "Arrive early so you can prepare.", focuses: ["look-right"], articulation: "ear-ly" },
+  { id: "regular", word: "regular", yearLevel: "5", sentence: "Regular practice improves spelling.", focuses: ["over-articulation"], articulation: "reg-u-lar" },
+  { id: "group", word: "group", yearLevel: "5", sentence: "Work with your group on the task.", focuses: ["look-right"], articulation: "group" },
+  { id: "library", word: "library", yearLevel: "5", sentence: "The library is open before school.", focuses: ["over-articulation"], articulation: "li-brar-y" },
+  { id: "minute", word: "minute", yearLevel: "5", sentence: "Wait a minute before you start.", focuses: ["look-right"], articulation: "min-ute" },
+  { id: "wednesday", word: "Wednesday", yearLevel: "7", sentence: "The assignment is due on Wednesday.", focuses: ["over-articulation"], articulation: "Wed-nes-day" },
+  { id: "island", word: "island", yearLevel: "7", sentence: "The map showed a small island offshore.", focuses: ["over-articulation", "look-right"], articulation: "iS-land" },
+  { id: "necessary", word: "necessary", yearLevel: "7", sentence: "Bring the necessary equipment to science.", focuses: ["mnemonic", "look-right"], articulation: "ne-ces-sar-y" },
+  { id: "embarrass", word: "embarrass", yearLevel: "7", sentence: "Mistakes should not embarrass you.", focuses: ["mnemonic", "look-right"], articulation: "em-bar-rass" },
+  { id: "accommodate", word: "accommodate", yearLevel: "7", sentence: "The room can accommodate the whole class.", focuses: ["mnemonic", "look-right"], articulation: "ac-com-mo-date" },
+  { id: "rhythm", word: "rhythm", yearLevel: "7", sentence: "The drummer kept a steady rhythm.", focuses: ["look-right", "mnemonic"], articulation: "rhyth-m" },
+  { id: "conscience", word: "conscience", yearLevel: "7", sentence: "His conscience told him to be honest.", focuses: ["look-right"], articulation: "con-science" },
+  { id: "environment", word: "environment", yearLevel: "7", sentence: "The environment changes over time.", focuses: ["over-articulation"], articulation: "en-vi-ron-ment" },
+  { id: "government", word: "government", yearLevel: "7", sentence: "The government announced a new policy.", focuses: ["over-articulation"], articulation: "gov-ern-ment" },
+  { id: "immediately", word: "immediately", yearLevel: "7", sentence: "Submit the response immediately after the bell.", focuses: ["over-articulation", "look-right"], articulation: "im-me-di-ate-ly" },
+  { id: "language", word: "language", yearLevel: "7", sentence: "Precise language improves your writing.", focuses: ["look-right"], articulation: "lang-uage" },
+  { id: "separate", word: "separate", yearLevel: "7", sentence: "Separate the evidence from the opinion.", focuses: ["over-articulation", "mnemonic"], articulation: "sep-a-rate", interventionId: "separate" },
+  { id: "achieve", word: "achieve", yearLevel: "7", sentence: "You can achieve better results with revision.", focuses: ["look-right", "word-family"], articulation: "a-chieve", interventionId: "achieve" },
+  { id: "appear", word: "appear", yearLevel: "7", sentence: "The theme will appear again in the final chapter.", focuses: ["look-right", "word-family"], articulation: "ap-pear", interventionId: "appear" },
+  { id: "describe", word: "describe", yearLevel: "7", sentence: "Describe the effect of the image in one sentence.", focuses: ["word-family", "look-right"], articulation: "de-scribe", interventionId: "describe" },
+  { id: "decide", word: "decide", yearLevel: "7", sentence: "Decide which example is strongest.", focuses: ["word-family", "look-right"], articulation: "de-cide", interventionId: "decide" },
+  { id: "privilege", word: "privilege", yearLevel: "7", sentence: "It is a privilege to represent the school.", focuses: ["look-right"], articulation: "priv-i-lege" },
+  { id: "persuade", word: "persuade", yearLevel: "7", sentence: "Use evidence to persuade the reader.", focuses: ["look-right", "word-family"], articulation: "per-suade" },
+  { id: "business", word: "business", yearLevel: "7", sentence: "The article discussed small business owners.", focuses: ["over-articulation", "mnemonic"], articulation: "busi-ness" },
+  { id: "definitely", word: "definitely", yearLevel: "7", sentence: "I will definitely revise tonight.", focuses: ["look-right", "mnemonic"], articulation: "def-in-ite-ly" }
+];
+const SPELLING_DIAGNOSTIC_WORDS_BY_ID = Object.fromEntries(
+  SPELLING_DIAGNOSTIC_WORDS.map((entry) => [entry.id, entry])
+);
 
 const TASK_WORKSPACE_PROVIDERS = [
   {
@@ -2171,13 +2383,13 @@ function renderSubjectFocusLaunchpad() {
     spelling: subject.id === "spelling"
       ? {
           title: SPELLING_UNIT_SEED.title,
-          meta: `${getSpellingPendingActivityCount(subject)} activity${getSpellingPendingActivityCount(subject) === 1 ? "" : "ies"} left · ${Math.round(getSpellingMasteryRatio(subject) * 100)}% mastery`,
-          action: "🐴 Open stables"
+          meta: `${getSpellingPendingActivityCount(subject)} stage${getSpellingPendingActivityCount(subject) === 1 ? "" : "s"} left · ${Math.round(getSpellingMasteryRatio(subject) * 100)}% complete`,
+          action: "Aa Open spelling"
         }
       : {
           title: "Spelling lives in its own subject",
           meta: "Open the Spelling subject from the subject list to train this lesson.",
-          action: "🐴 Open spelling"
+          action: "Aa Open spelling"
         },
     watch: watchItem
       ? {
@@ -2511,13 +2723,13 @@ function renderDockContext() {
 
   if (state.activeSubjectTab === "spelling") {
     const spelling = getSubjectSpellingState(subject);
-    elements.dockContextTitle.textContent = "Horse skills";
+    elements.dockContextTitle.textContent = "Spelling focus";
     elements.dockContextBody.innerHTML = subject.id === "spelling"
       ? `
         <article class="dock-tile dock-tile--yellow">
           <div class="dock-tile__copy">
-            <strong>${escapeHtml(`${getSpellingCompletedActivityCount(subject)}/${getSpellingTotalActivityCount(subject)} activities complete`)}</strong>
-            <span>${escapeHtml(spelling.coachMessage || `${SPELLING_UNIT_SEED.horseName} is ready for the next pattern run.`)}</span>
+            <strong>${escapeHtml(`${getSpellingCompletedActivityCount(subject)}/${getSpellingTotalActivityCount(subject)} stages complete`)}</strong>
+            <span>${escapeHtml(spelling.coachMessage || "The next spelling stage is ready.")}</span>
           </div>
         </article>
       `
@@ -3620,37 +3832,34 @@ function createDefaultSpellingState(subjectId = "") {
     enabled,
     activeUnitId: SPELLING_UNIT_SEED.id,
     coachMessage: enabled
-      ? `${SPELLING_UNIT_SEED.horseName} says: build the sound chunks first, then grow the whole word family.`
+      ? "Start with the spoken diagnostic so the follow-up work is built from real errors."
       : "",
     preferences: {
       font: "lexend",
       spacing: "wide",
       tint: "cream"
     },
-    activities: {
-      jump: {
-        slots: ["", ""],
-        completed: false
-      },
-      tag: {
-        letter: "",
-        completed: false
-      },
-      sort: {
-        air: [],
-        are: [],
-        ear: [],
-        completed: false
-      },
-      family: {
-        slots: ["", "", "", ""],
-        completed: false
-      },
-      sentence: {
-        value: "",
-        checked: false,
-        completed: false
-      }
+    focusSummary: [],
+    followUpWordIds: [],
+    diagnostic: {
+      currentIndex: 0,
+      currentInput: "",
+      responses: {},
+      completed: false
+    },
+    looksRight: {
+      answers: {},
+      checked: false,
+      completed: false
+    },
+    flashcards: {
+      cards: {},
+      completed: false
+    },
+    tenseTransfer: {
+      answers: {},
+      checked: false,
+      completed: false
     }
   };
 }
@@ -3658,7 +3867,10 @@ function createDefaultSpellingState(subjectId = "") {
 function normaliseSpellingState(spelling, subjectId = "") {
   const base = createDefaultSpellingState(subjectId);
   const next = spelling && typeof spelling === "object" && !Array.isArray(spelling) ? spelling : {};
-  const activities = next.activities && typeof next.activities === "object" ? next.activities : {};
+  const diagnostic = next.diagnostic && typeof next.diagnostic === "object" ? next.diagnostic : {};
+  const looksRight = next.looksRight && typeof next.looksRight === "object" ? next.looksRight : {};
+  const flashcards = next.flashcards && typeof next.flashcards === "object" ? next.flashcards : {};
+  const tenseTransfer = next.tenseTransfer && typeof next.tenseTransfer === "object" ? next.tenseTransfer : {};
 
   return {
     ...base,
@@ -3670,38 +3882,87 @@ function normaliseSpellingState(spelling, subjectId = "") {
       ...base.preferences,
       ...(next.preferences && typeof next.preferences === "object" ? next.preferences : {})
     },
-    activities: {
-      jump: {
-        ...base.activities.jump,
-        ...(activities.jump && typeof activities.jump === "object" ? activities.jump : {}),
-        slots: Array.isArray(activities.jump?.slots)
-          ? activities.jump.slots.slice(0, 2).map((value) => String(value || ""))
-          : [...base.activities.jump.slots]
-      },
-      tag: {
-        ...base.activities.tag,
-        ...(activities.tag && typeof activities.tag === "object" ? activities.tag : {}),
-        letter: String(activities.tag?.letter || "")
-      },
-      sort: {
-        ...base.activities.sort,
-        ...(activities.sort && typeof activities.sort === "object" ? activities.sort : {}),
-        air: Array.isArray(activities.sort?.air) ? activities.sort.air.map((value) => String(value || "")) : [],
-        are: Array.isArray(activities.sort?.are) ? activities.sort.are.map((value) => String(value || "")) : [],
-        ear: Array.isArray(activities.sort?.ear) ? activities.sort.ear.map((value) => String(value || "")) : []
-      },
-      family: {
-        ...base.activities.family,
-        ...(activities.family && typeof activities.family === "object" ? activities.family : {}),
-        slots: Array.isArray(activities.family?.slots)
-          ? activities.family.slots.slice(0, 4).map((value) => String(value || ""))
-          : [...base.activities.family.slots]
-      },
-      sentence: {
-        ...base.activities.sentence,
-        ...(activities.sentence && typeof activities.sentence === "object" ? activities.sentence : {}),
-        value: String(activities.sentence?.value || "")
-      }
+    focusSummary: Array.isArray(next.focusSummary)
+      ? next.focusSummary
+          .map((entry) => ({
+            id: String(entry?.id || ""),
+            count: Number(entry?.count || 0)
+          }))
+          .filter((entry) => entry.id && SPELLING_FOCUS_LABELS[entry.id] && entry.count > 0)
+      : [],
+    followUpWordIds: Array.isArray(next.followUpWordIds)
+      ? next.followUpWordIds
+          .map((value) => String(value || ""))
+          .filter((value) => SPELLING_INTERVENTION_LIBRARY[value])
+          .slice(0, SPELLING_UNIT_SEED.followUpWordCount)
+      : [],
+    diagnostic: {
+      ...base.diagnostic,
+      ...diagnostic,
+      currentIndex: Math.min(
+        SPELLING_DIAGNOSTIC_WORDS.length,
+        Math.max(0, Number(diagnostic.currentIndex || 0))
+      ),
+      currentInput: String(diagnostic.currentInput || ""),
+      responses: diagnostic.responses && typeof diagnostic.responses === "object" && !Array.isArray(diagnostic.responses)
+        ? Object.fromEntries(
+            Object.entries(diagnostic.responses).map(([wordId, entry]) => [
+              wordId,
+              {
+                attempt: String(entry?.attempt || ""),
+                correct: Boolean(entry?.correct)
+              }
+            ])
+          )
+        : {},
+      completed: Boolean(diagnostic.completed)
+    },
+    looksRight: {
+      ...base.looksRight,
+      ...looksRight,
+      answers: looksRight.answers && typeof looksRight.answers === "object" && !Array.isArray(looksRight.answers)
+        ? Object.fromEntries(
+            Object.entries(looksRight.answers).map(([wordId, value]) => [wordId, String(value || "")])
+          )
+        : {},
+      checked: Boolean(looksRight.checked),
+      completed: Boolean(looksRight.completed)
+    },
+    flashcards: {
+      ...base.flashcards,
+      ...flashcards,
+      cards: flashcards.cards && typeof flashcards.cards === "object" && !Array.isArray(flashcards.cards)
+        ? Object.fromEntries(
+            Object.entries(flashcards.cards).map(([wordId, entry]) => [
+              wordId,
+              {
+                revealed: Boolean(entry?.revealed),
+                attempt: String(entry?.attempt || ""),
+                checked: Boolean(entry?.checked),
+                completed: Boolean(entry?.completed)
+              }
+            ])
+          )
+        : {},
+      completed: Boolean(flashcards.completed)
+    },
+    tenseTransfer: {
+      ...base.tenseTransfer,
+      ...tenseTransfer,
+      answers: tenseTransfer.answers && typeof tenseTransfer.answers === "object" && !Array.isArray(tenseTransfer.answers)
+        ? Object.fromEntries(
+            Object.entries(tenseTransfer.answers).map(([wordId, entry]) => [
+              wordId,
+              {
+                past: String(entry?.past || ""),
+                present: String(entry?.present || ""),
+                future: String(entry?.future || "")
+              }
+            ])
+          )
+        : {},
+      checked: Boolean(tenseTransfer.checked),
+      completed: Boolean(tenseTransfer.completed)
     }
   };
 }
@@ -3714,22 +3975,33 @@ function getSubjectSpellingState(subject) {
   return subject.spelling;
 }
 
+function normalizeSpellingAttempt(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z]/g, "");
+}
+
+function getSpellingStageCompletionMap(subject) {
+  const spelling = getSubjectSpellingState(subject);
+  return {
+    diagnostic: Boolean(spelling.diagnostic.completed),
+    "looks-right": Boolean(spelling.looksRight.completed),
+    "word-families": Boolean(spelling.flashcards.completed),
+    "tense-transfer": Boolean(spelling.tenseTransfer.completed)
+  };
+}
+
 function getSpellingTotalActivityCount(subject) {
-  return getSubjectSpellingState(subject).enabled ? 5 : 0;
+  return getSubjectSpellingState(subject).enabled ? SPELLING_STAGE_ORDER.length : 0;
 }
 
 function getSpellingCompletedActivityCount(subject) {
-  const spelling = getSubjectSpellingState(subject);
-  if (!spelling.enabled) {
+  const completionMap = getSpellingStageCompletionMap(subject);
+  if (!getSubjectSpellingState(subject).enabled) {
     return 0;
   }
-  return [
-    spelling.activities.jump.completed,
-    spelling.activities.tag.completed,
-    spelling.activities.sort.completed,
-    spelling.activities.family.completed,
-    spelling.activities.sentence.completed
-  ].filter(Boolean).length;
+  return Object.values(completionMap).filter(Boolean).length;
 }
 
 function getSpellingPendingActivityCount(subject) {
@@ -3743,128 +4015,308 @@ function getSpellingMasteryRatio(subject) {
 }
 
 function getSpellingStageId(subject) {
-  const completed = getSpellingCompletedActivityCount(subject);
-  return SPELLING_STAGE_ORDER[Math.min(completed, SPELLING_STAGE_ORDER.length - 1)] || SPELLING_STAGE_ORDER[0];
+  const completionMap = getSpellingStageCompletionMap(subject);
+  return SPELLING_STAGE_ORDER.find((stageId) => !completionMap[stageId]) || SPELLING_STAGE_ORDER[SPELLING_STAGE_ORDER.length - 1];
 }
 
 function getSpellingStageLabel(subject) {
   const stageId = getSpellingStageId(subject);
-  return SPELLING_STAGE_LABELS[stageId] || SPELLING_STAGE_LABELS.foal;
+  return SPELLING_STAGE_LABELS[stageId] || SPELLING_STAGE_LABELS.diagnostic;
 }
 
-function getSpellingSortBankWords(spelling) {
-  const placed = new Set([
-    ...(spelling.activities.sort.air || []),
-    ...(spelling.activities.sort.are || []),
-    ...(spelling.activities.sort.ear || [])
-  ]);
-  return Object.values(SPELLING_UNIT_SEED.sortBuckets)
-    .flat()
-    .filter((word) => !placed.has(word));
+function getSpellingDiagnosticCurrentWord(spelling) {
+  return SPELLING_DIAGNOSTIC_WORDS[spelling.diagnostic.currentIndex] || null;
 }
 
-function getSpellingFamilyBankWords(spelling) {
-  const placed = new Set(spelling.activities.family.slots || []);
-  return SPELLING_UNIT_SEED.familyOrder.filter((word) => !placed.has(word));
+function getSpellingDiagnosticCorrectCount(spelling) {
+  return Object.values(spelling.diagnostic.responses).filter((entry) => entry?.correct).length;
+}
+
+function buildSpellingFocusSummaryFromResponses(responses) {
+  const counts = new Map();
+  SPELLING_DIAGNOSTIC_WORDS.forEach((wordEntry) => {
+    const response = responses[wordEntry.id];
+    if (!response || response.correct) {
+      return;
+    }
+    (wordEntry.focuses || []).forEach((focusId) => {
+      counts.set(focusId, (counts.get(focusId) || 0) + 1);
+    });
+  });
+  return [...counts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .map(([id, count]) => ({ id, count }));
+}
+
+function getSpellingTopFocuses(spelling, limit = 3) {
+  const focusSummary = spelling.focusSummary.length
+    ? spelling.focusSummary
+    : buildSpellingFocusSummaryFromResponses(spelling.diagnostic.responses);
+  return focusSummary.slice(0, limit);
+}
+
+function buildSpellingFollowUpWordIdsFromResponses(responses) {
+  const followUpWordIds = [];
+  SPELLING_DIAGNOSTIC_WORDS.forEach((wordEntry) => {
+    if (!wordEntry.interventionId) {
+      return;
+    }
+    const response = responses[wordEntry.id];
+    if (response && !response.correct && !followUpWordIds.includes(wordEntry.interventionId)) {
+      followUpWordIds.push(wordEntry.interventionId);
+    }
+  });
+  SPELLING_DEFAULT_FOLLOW_UP_WORD_IDS.forEach((wordId) => {
+    if (!followUpWordIds.includes(wordId)) {
+      followUpWordIds.push(wordId);
+    }
+  });
+  return followUpWordIds.slice(0, SPELLING_UNIT_SEED.followUpWordCount);
+}
+
+function ensureSpellingFollowUpWordIds(spelling) {
+  if (!spelling.followUpWordIds.length) {
+    spelling.followUpWordIds = buildSpellingFollowUpWordIdsFromResponses(spelling.diagnostic.responses);
+  }
+  return spelling.followUpWordIds;
+}
+
+function getSpellingFollowUpWords(spelling) {
+  return ensureSpellingFollowUpWordIds(spelling)
+    .map((wordId) => SPELLING_INTERVENTION_LIBRARY[wordId])
+    .filter(Boolean);
+}
+
+function getSpellingFlashcardWords(spelling) {
+  const followUpWords = getSpellingFollowUpWords(spelling);
+  const missedLooksRightIds = followUpWords
+    .filter((entry) => spelling.looksRight.answers[entry.id] !== entry.word)
+    .map((entry) => entry.id);
+  const stableIds = followUpWords
+    .filter((entry) => spelling.looksRight.answers[entry.id] === entry.word)
+    .map((entry) => entry.id);
+  return [...missedLooksRightIds, ...stableIds]
+    .map((wordId) => SPELLING_INTERVENTION_LIBRARY[wordId])
+    .filter(Boolean);
+}
+
+function ensureSpellingFlashcardCard(spelling, wordId) {
+  if (!spelling.flashcards.cards[wordId]) {
+    spelling.flashcards.cards[wordId] = {
+      revealed: false,
+      attempt: "",
+      checked: false,
+      completed: false
+    };
+  }
+  return spelling.flashcards.cards[wordId];
+}
+
+function ensureSpellingTenseAnswer(spelling, wordId) {
+  if (!spelling.tenseTransfer.answers[wordId]) {
+    spelling.tenseTransfer.answers[wordId] = {
+      past: "",
+      present: "",
+      future: ""
+    };
+  }
+  return spelling.tenseTransfer.answers[wordId];
+}
+
+function isSpellingLooksRightComplete(spelling) {
+  const followUpWords = getSpellingFollowUpWords(spelling);
+  return Boolean(followUpWords.length) && followUpWords.every((entry) => spelling.looksRight.answers[entry.id] === entry.word);
+}
+
+function isSpellingFlashcardsComplete(spelling) {
+  const flashcardWords = getSpellingFlashcardWords(spelling);
+  return Boolean(flashcardWords.length) && flashcardWords.every((entry) => ensureSpellingFlashcardCard(spelling, entry.id).completed);
+}
+
+function isSpellingTenseTransferComplete(spelling) {
+  const followUpWords = getSpellingFollowUpWords(spelling);
+  return Boolean(followUpWords.length) && followUpWords.every((entry) => {
+    const answer = ensureSpellingTenseAnswer(spelling, entry.id);
+    return (
+      answer.present === entry.tense.present &&
+      answer.past === entry.tense.past &&
+      answer.future === entry.tense.future
+    );
+  });
+}
+
+function finaliseSpellingDiagnostic(subject) {
+  const spelling = getSubjectSpellingState(subject);
+  spelling.diagnostic.completed = true;
+  spelling.focusSummary = buildSpellingFocusSummaryFromResponses(spelling.diagnostic.responses);
+  spelling.followUpWordIds = buildSpellingFollowUpWordIdsFromResponses(spelling.diagnostic.responses);
+  spelling.looksRight.checked = false;
+  spelling.looksRight.completed = false;
+  spelling.flashcards.completed = false;
+  spelling.tenseTransfer.completed = false;
+  const topFocuses = getSpellingTopFocuses(spelling, 2).map((entry) => SPELLING_FOCUS_LABELS[entry.id] || entry.id);
+  spelling.coachMessage = topFocuses.length
+    ? `Diagnostic complete. The strongest follow-up needs are ${topFocuses.join(" and ").toLowerCase()}.`
+    : "Diagnostic complete. The follow-up stages are ready.";
 }
 
 function resetSpellingActivity(subject, activityId) {
   const spelling = getSubjectSpellingState(subject);
-  if (activityId === "jump") {
-    spelling.activities.jump = { slots: ["", ""], completed: false };
-    spelling.coachMessage = `${SPELLING_UNIT_SEED.horseName} says: start with the two sound chunks, ${SPELLING_UNIT_SEED.chunkAnswer.join(" + ")}.`;
-  } else if (activityId === "tag") {
-    spelling.activities.tag = { letter: "", completed: false };
-    spelling.coachMessage = `${SPELLING_UNIT_SEED.horseName} says: after q, check whether the word needs a helper u.`;
-  } else if (activityId === "sort") {
-    spelling.activities.sort = { air: [], are: [], ear: [], completed: false };
-    spelling.coachMessage = `${SPELLING_UNIT_SEED.horseName} says: listen for the same /air/ sound, then choose the matching spelling pattern.`;
-  } else if (activityId === "family") {
-    spelling.activities.family = { slots: ["", "", "", ""], completed: false };
-    spelling.coachMessage = `${SPELLING_UNIT_SEED.horseName} says: keep the base word square stable as the ending changes.`;
-  } else if (activityId === "sentence") {
-    spelling.activities.sentence = { value: "", checked: false, completed: false };
-    spelling.coachMessage = `${SPELLING_UNIT_SEED.horseName} says: use one target word in a real sentence so the spelling sticks.`;
+  if (activityId === "diagnostic") {
+    spelling.diagnostic = {
+      currentIndex: 0,
+      currentInput: "",
+      responses: {},
+      completed: false
+    };
+    spelling.looksRight = {
+      answers: {},
+      checked: false,
+      completed: false
+    };
+    spelling.flashcards = {
+      cards: {},
+      completed: false
+    };
+    spelling.tenseTransfer = {
+      answers: {},
+      checked: false,
+      completed: false
+    };
+    spelling.focusSummary = [];
+    spelling.followUpWordIds = [];
+    spelling.coachMessage = "Start with the spoken diagnostic so the follow-up work is built from real errors.";
+  } else if (activityId === "looks-right") {
+    spelling.looksRight = {
+      answers: {},
+      checked: false,
+      completed: false
+    };
+    spelling.flashcards = {
+      cards: {},
+      completed: false
+    };
+    spelling.tenseTransfer = {
+      answers: {},
+      checked: false,
+      completed: false
+    };
+    spelling.coachMessage = "Use the visual check to decide which spelling pattern looks settled on the page.";
+  } else if (activityId === "word-families") {
+    spelling.flashcards = {
+      cards: {},
+      completed: false
+    };
+    spelling.tenseTransfer = {
+      answers: {},
+      checked: false,
+      completed: false
+    };
+    spelling.coachMessage = "Reveal the word map, hide it, then write the word from memory.";
+  } else if (activityId === "tense-transfer") {
+    spelling.tenseTransfer = {
+      answers: {},
+      checked: false,
+      completed: false
+    };
+    spelling.coachMessage = "Sort each form into present, past, and future to stabilise the spelling across grammar changes.";
   } else {
     subject.spelling = createDefaultSpellingState(subject.id);
   }
   persistSubjects();
 }
 
-function handleSpellingDrop(subject, sourceActivityId, targetActivityId, dropKey, value) {
-  if (!subject || !value || sourceActivityId !== targetActivityId) {
+function speakSpellingDiagnosticWord(wordEntry) {
+  if (!wordEntry || !("speechSynthesis" in window)) {
     return;
   }
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(`Spell the word ${wordEntry.word}. ${wordEntry.sentence}`);
+  utterance.rate = 0.9;
+  utterance.pitch = 1;
+  window.speechSynthesis.speak(utterance);
+}
 
+function submitSpellingDiagnosticWord(subject) {
   const spelling = getSubjectSpellingState(subject);
+  const wordEntry = getSpellingDiagnosticCurrentWord(spelling);
+  if (!wordEntry) {
+    return;
+  }
+  const attempt = String(spelling.diagnostic.currentInput || "").trim();
+  if (!attempt) {
+    spelling.coachMessage = "Type the word before moving to the next item.";
+    persistSubjects();
+    return;
+  }
+  spelling.diagnostic.responses[wordEntry.id] = {
+    attempt,
+    correct: normalizeSpellingAttempt(attempt) === normalizeSpellingAttempt(wordEntry.word)
+  };
+  spelling.diagnostic.currentInput = "";
+  spelling.diagnostic.currentIndex += 1;
 
-  if (targetActivityId === "jump") {
-    const slotIndex = Number(dropKey);
-    const expected = SPELLING_UNIT_SEED.chunkAnswer[slotIndex];
-    if (value !== expected) {
-      spelling.coachMessage = `${SPELLING_UNIT_SEED.horseName} says: this slot needs ${expected} because square is built as squ + are.`;
-      persistSubjects();
-      return;
-    }
-    spelling.activities.jump.slots[slotIndex] = value;
-    spelling.activities.jump.completed = SPELLING_UNIT_SEED.chunkAnswer.every(
-      (chunk, index) => spelling.activities.jump.slots[index] === chunk
+  if (spelling.diagnostic.currentIndex >= SPELLING_DIAGNOSTIC_WORDS.length) {
+    finaliseSpellingDiagnostic(subject);
+  } else {
+    const nextWord = getSpellingDiagnosticCurrentWord(spelling);
+    spelling.coachMessage = nextWord
+      ? `Saved. Word ${spelling.diagnostic.currentIndex + 1} of ${SPELLING_DIAGNOSTIC_WORDS.length} is ready.`
+      : spelling.coachMessage;
+  }
+
+  persistSubjects();
+}
+
+function checkSpellingLooksRight(subject) {
+  const spelling = getSubjectSpellingState(subject);
+  const followUpWords = getSpellingFollowUpWords(spelling);
+  spelling.looksRight.checked = true;
+  spelling.looksRight.completed = isSpellingLooksRightComplete(spelling);
+  const incorrectWords = followUpWords.filter((entry) => spelling.looksRight.answers[entry.id] !== entry.word);
+  spelling.coachMessage = spelling.looksRight.completed
+    ? "Visual check complete. You are ready to stabilise the same words across their families."
+    : incorrectWords.length
+      ? `Recheck ${incorrectWords[0].word}. Ask whether the spelling looks settled before you submit again.`
+      : "Choose an answer for each word before checking this stage.";
+  persistSubjects();
+}
+
+function checkSpellingFlashcardWord(subject, wordId) {
+  const spelling = getSubjectSpellingState(subject);
+  const entry = SPELLING_INTERVENTION_LIBRARY[wordId];
+  if (!entry) {
+    return;
+  }
+  const card = ensureSpellingFlashcardCard(spelling, wordId);
+  card.checked = true;
+  card.completed = normalizeSpellingAttempt(card.attempt) === normalizeSpellingAttempt(entry.word);
+  spelling.flashcards.completed = isSpellingFlashcardsComplete(spelling);
+  spelling.coachMessage = card.completed
+    ? `${entry.word} is secure. Move to the next family word.`
+    : `${entry.articulation} can help here. Reveal the word map again, hide it, then retry ${entry.word}.`;
+  persistSubjects();
+}
+
+function checkSpellingTenseTransfer(subject) {
+  const spelling = getSubjectSpellingState(subject);
+  const followUpWords = getSpellingFollowUpWords(spelling);
+  spelling.tenseTransfer.checked = true;
+  spelling.tenseTransfer.completed = isSpellingTenseTransferComplete(spelling);
+  const firstIncorrect = followUpWords.find((entry) => {
+    const answer = ensureSpellingTenseAnswer(spelling, entry.id);
+    return (
+      answer.present !== entry.tense.present ||
+      answer.past !== entry.tense.past ||
+      answer.future !== entry.tense.future
     );
-    spelling.coachMessage = spelling.activities.jump.completed
-      ? `${SPELLING_UNIT_SEED.horseName} says: perfect. You built square by chunks, not by guessing letter by letter.`
-      : `${SPELLING_UNIT_SEED.horseName} says: good. Place the last sound chunk to finish the jump.`;
-    persistSubjects();
-    return;
-  }
-
-  if (targetActivityId === "tag") {
-    if (value !== "u") {
-      spelling.coachMessage = `${SPELLING_UNIT_SEED.horseName} says: close. In square, q is followed by u before the /air/ ending.`;
-      persistSubjects();
-      return;
-    }
-    spelling.activities.tag.letter = value;
-    spelling.activities.tag.completed = true;
-    spelling.coachMessage = `${SPELLING_UNIT_SEED.horseName} says: yes. The missing letter is u, so the word starts with squ.`;
-    persistSubjects();
-    return;
-  }
-
-  if (targetActivityId === "sort") {
-    const expectedBucket = Object.entries(SPELLING_UNIT_SEED.sortBuckets).find(([, words]) => words.includes(value))?.[0] || "";
-    if (dropKey !== expectedBucket) {
-      spelling.coachMessage = `${SPELLING_UNIT_SEED.horseName} says: listen again. ${value} uses the ${expectedBucket.toUpperCase()} spelling for the /air/ sound.`;
-      persistSubjects();
-      return;
-    }
-    const nextBucketWords = new Set(spelling.activities.sort[dropKey] || []);
-    nextBucketWords.add(value);
-    spelling.activities.sort[dropKey] = [...nextBucketWords];
-    spelling.activities.sort.completed = getSpellingSortBankWords(spelling).length === 0;
-    spelling.coachMessage = spelling.activities.sort.completed
-      ? `${SPELLING_UNIT_SEED.horseName} says: strong sorting. Now you can see three ways English spells the same /air/ sound.`
-      : `${SPELLING_UNIT_SEED.horseName} says: good pick. Keep sorting by spelling pattern, not by the first letter.`;
-    persistSubjects();
-    return;
-  }
-
-  if (targetActivityId === "family") {
-    const slotIndex = Number(dropKey);
-    const expectedWord = SPELLING_UNIT_SEED.familyOrder[slotIndex];
-    if (value !== expectedWord) {
-      spelling.coachMessage = `${SPELLING_UNIT_SEED.horseName} says: keep the base word square first, then add the ending that changes the job of the word.`;
-      persistSubjects();
-      return;
-    }
-    spelling.activities.family.slots[slotIndex] = value;
-    spelling.activities.family.completed = SPELLING_UNIT_SEED.familyOrder.every(
-      (word, index) => spelling.activities.family.slots[index] === word
-    );
-    spelling.coachMessage = spelling.activities.family.completed
-      ? `${SPELLING_UNIT_SEED.horseName} says: excellent. The spelling stayed stable all the way from square to squareness.`
-      : `${SPELLING_UNIT_SEED.horseName} says: nice. Add the next family word without changing the base square spelling.`;
-    persistSubjects();
-  }
+  });
+  spelling.coachMessage = spelling.tenseTransfer.completed
+    ? "Final stage complete. The words now hold steady across spelling, family, and tense changes."
+    : firstIncorrect
+      ? `Check the tense pattern for ${firstIncorrect.word}. The spelling should stay stable as the grammar changes.`
+      : "Choose a present, past, and future form for each word before checking this stage.";
+  persistSubjects();
 }
 
 function normalizeManualWatchItemsAcrossSubjects() {
@@ -5458,9 +5910,9 @@ function getHomeFocusSubjectStatus(subject) {
   const spellingPendingCount = getSpellingPendingActivityCount(subject);
   const waitingCount = unreadCount + remainingHomeworkCount + activeAssessmentCount + spellingPendingCount;
   const summary = spellingPendingCount && waitingCount === spellingPendingCount
-    ? `${spellingPendingCount} spelling ${spellingPendingCount === 1 ? "activity" : "activities"}`
+    ? `${spellingPendingCount} spelling ${spellingPendingCount === 1 ? "stage" : "stages"}`
     : spellingPendingCount
-      ? `${waitingCount} to do · ${spellingPendingCount} spelling`
+      ? `${waitingCount} to do · ${spellingPendingCount} spelling stage${spellingPendingCount === 1 ? "" : "s"}`
       : waitingCount
         ? `${waitingCount} to do`
         : "Nothing due";
@@ -5507,11 +5959,12 @@ function getSubjectHeroCopy(subject, tab) {
   }
 
   if (tab === "spelling") {
+    const stageId = getSpellingStageId(subject);
     return {
-      big: `${spellingPending} ${spellingPending === 1 ? "stable" : "stables"}`,
+      big: `${spellingPending} ${spellingPending === 1 ? "stage" : "stages"}`,
       rest: subject.id === "spelling"
         ? spellingPending
-          ? `left in ${SPELLING_UNIT_SEED.title} — build the pattern before memorising the word.`
+          ? `left in ${SPELLING_UNIT_SEED.title} — current focus: ${SPELLING_STAGE_LABELS[stageId].toLowerCase()}.`
           : `cleared in ${SPELLING_UNIT_SEED.title} — ready for spaced review.`
         : "ready in the Spelling subject when you want focused pattern practice."
     };
@@ -5641,7 +6094,7 @@ function renderSubjectList() {
           <span class="subject-tile__code">${getSubjectTileCodeMarkup(subject)}</span>
           <span class="subject-tile__title">${escapeHtml(subject.name)}</span>
           <span class="subject-tile__meta">
-            ${counts.spelling ? `<span class="subject-tile__feature-chip">🐴 ${escapeHtml(`${counts.spelling} spelling`)}</span>` : ""}
+            ${counts.spelling ? `<span class="subject-tile__feature-chip">Aa ${escapeHtml(`${counts.spelling} stages`)}</span>` : ""}
             <span>${escapeHtml(`${counts.reader} notes`)}</span>
             <span>${escapeHtml(`${counts.homework} HW`)}</span>
           </span>
@@ -5660,7 +6113,7 @@ function renderSubjectList() {
       >
         <span class="subject-tile__code">${getSubjectTileCodeMarkup(subject)}</span>
         <span class="subject-tile__title">${escapeHtml(subject.name)}</span>
-        ${getSubjectTabCounts(subject).spelling ? `<span class="subject-tile__mini-chip">🐴 Spelling</span>` : ""}
+        ${getSubjectTabCounts(subject).spelling ? `<span class="subject-tile__mini-chip">Aa Spelling</span>` : ""}
       </button>
     `)
     .join("");
@@ -8760,102 +9213,286 @@ function renderSpelling() {
   const masteryPercent = Math.round(getSpellingMasteryRatio(subject) * 100);
   const stageId = getSpellingStageId(subject);
   const stageIndex = SPELLING_STAGE_ORDER.indexOf(stageId);
-  const sortBankWords = getSpellingSortBankWords(spelling);
-  const familyBankWords = getSpellingFamilyBankWords(spelling);
-  const sentenceValue = spelling.activities.sentence.value || "";
-  const sentenceChecked = spelling.activities.sentence.checked;
-  const sentenceWordCount = sentenceValue.trim().split(/\s+/).filter(Boolean).length;
+  const diagnosticWord = getSpellingDiagnosticCurrentWord(spelling);
+  const focusSummary = getSpellingTopFocuses(spelling, 3);
+  const followUpWords = getSpellingFollowUpWords(spelling);
+
+  if (stageId === "diagnostic" && !spelling.diagnostic.completed) {
+    host.innerHTML = `
+      <section class="spelling-shell spelling-shell--diagnostic-only" data-spelling-font="${escapeHtml(spelling.preferences.font)}" data-spelling-spacing="${escapeHtml(spelling.preferences.spacing)}" data-spelling-tint="${escapeHtml(spelling.preferences.tint)}">
+        <article class="spelling-stage-card spelling-stage-card--diagnostic">
+          <p class="eyebrow">Spelling Diagnostic</p>
+          <h3>Spoken baseline</h3>
+          <p>Listen to each word, type it once, and move on. This stage uses 20 Year 5 words and 20 Year 7 words to map the patterns that need the most work.</p>
+          <div class="spelling-stage-meta">
+            <span>Word ${escapeHtml(String(Math.min(spelling.diagnostic.currentIndex + 1, SPELLING_DIAGNOSTIC_WORDS.length)))} of ${escapeHtml(String(SPELLING_DIAGNOSTIC_WORDS.length))}</span>
+            <span>${escapeHtml(`${getSpellingDiagnosticCorrectCount(spelling)} correct so far`)}</span>
+          </div>
+          <div class="spelling-audio-panel">
+            <button type="button" class="primary-button primary-button--dark" data-spelling-play-diagnostic="true">Play word</button>
+            <p>The voice reads the target word in a sentence. Replay it as often as needed before you submit.</p>
+          </div>
+          <label class="spelling-input-label" for="spelling-diagnostic-input">Type the word you hear</label>
+          <input
+            id="spelling-diagnostic-input"
+            class="reader-editor spelling-inline-input"
+            type="text"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+            value="${escapeHtml(spelling.diagnostic.currentInput)}"
+            placeholder="Type the spelling exactly as you hear it"
+          />
+          <div class="spelling-stage-actions">
+            <button type="button" class="primary-button primary-button--dark" data-spelling-submit-diagnostic="true">
+              ${spelling.diagnostic.currentIndex >= SPELLING_DIAGNOSTIC_WORDS.length - 1 ? "Finish diagnostic" : "Submit and next"}
+            </button>
+          </div>
+          <p class="spelling-stage-note">This screen stays minimal on purpose so the diagnostic is the only task in view.</p>
+        </article>
+      </section>
+    `;
+
+    host.querySelector("[data-spelling-play-diagnostic]")?.addEventListener("click", () => {
+      speakSpellingDiagnosticWord(diagnosticWord);
+    });
+    host.querySelector("#spelling-diagnostic-input")?.addEventListener("input", (event) => {
+      spelling.diagnostic.currentInput = event.target.value;
+    });
+    host.querySelector("#spelling-diagnostic-input")?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        submitSpellingDiagnosticWord(subject);
+        render();
+        if (!getSubjectSpellingState(subject).diagnostic.completed) {
+          speakSpellingDiagnosticWord(getSpellingDiagnosticCurrentWord(getSubjectSpellingState(subject)));
+        }
+      }
+    });
+    host.querySelector("#spelling-diagnostic-input")?.addEventListener("blur", () => {
+      persistSubjects();
+    });
+    host.querySelector("[data-spelling-submit-diagnostic]")?.addEventListener("click", () => {
+      submitSpellingDiagnosticWord(subject);
+      render();
+      if (!getSubjectSpellingState(subject).diagnostic.completed) {
+        speakSpellingDiagnosticWord(getSpellingDiagnosticCurrentWord(getSubjectSpellingState(subject)));
+      }
+    });
+    return;
+  }
+
+  let stageBody = "";
+
+  if (stageId === "looks-right") {
+    stageBody = `
+      <article class="spelling-stage-card">
+        <div class="spelling-card__header">
+          <div>
+            <p class="eyebrow">Stage 2</p>
+            <h4>Which word looks right?</h4>
+          </div>
+          <span class="spelling-card__status${spelling.looksRight.completed ? " is-complete" : ""}">${spelling.looksRight.completed ? "Ribbon earned" : "Ribbon available"}</span>
+        </div>
+        <p>These ten targets come from the diagnostic profile. Choose the spelling that looks settled and accurate on the page.</p>
+        <div class="spelling-comparison-grid">
+          ${followUpWords
+            .map((entry) => {
+              const selectedValue = spelling.looksRight.answers[entry.id] || "";
+              const checked = spelling.looksRight.checked;
+              const isCorrect = selectedValue === entry.word;
+              return `
+                <article class="spelling-comparison-card${checked ? (isCorrect ? " is-correct" : " is-incorrect") : ""}">
+                  <div class="spelling-comparison-card__top">
+                    <strong>${escapeHtml(entry.articulation)}</strong>
+                    <span>${escapeHtml((entry.focuses || []).map((focusId) => SPELLING_FOCUS_LABELS[focusId] || focusId).join(" · "))}</span>
+                  </div>
+                  <div class="spelling-choice-row spelling-choice-row--stacked">
+                    ${[entry.word, entry.lookRightWrong]
+                      .map(
+                        (value) => `
+                          <button
+                            type="button"
+                            class="spelling-choice${selectedValue === value ? " is-active" : ""}"
+                            data-spelling-looks-right-word="${entry.id}"
+                            data-spelling-looks-right-value="${value}"
+                          >
+                            ${escapeHtml(value)}
+                          </button>
+                        `
+                      )
+                      .join("")}
+                  </div>
+                  ${checked ? `<p class="spelling-choice-feedback${isCorrect ? " is-correct" : " is-incorrect"}">${escapeHtml(isCorrect ? "Correct. That spelling looks stable." : entry.lookRightNote)}</p>` : ""}
+                </article>
+              `;
+            })
+            .join("")}
+        </div>
+        <div class="spelling-stage-actions">
+          <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="looks-right">Reset stage</button>
+          <button type="button" class="primary-button primary-button--dark" data-spelling-check-looks-right="true">Check stage</button>
+        </div>
+      </article>
+    `;
+  } else if (stageId === "word-families") {
+    const flashcardWords = getSpellingFlashcardWords(spelling);
+    stageBody = `
+      <article class="spelling-stage-card">
+        <div class="spelling-card__header">
+          <div>
+            <p class="eyebrow">Stage 3</p>
+            <h4>Word family flashcards</h4>
+          </div>
+          <span class="spelling-card__status${spelling.flashcards.completed ? " is-complete" : ""}">${spelling.flashcards.completed ? "Ribbon earned" : "Ribbon available"}</span>
+        </div>
+        <p>Reveal the word map, hide it, then type the target word from memory. The family words below show how the base pattern stays stable.</p>
+        <div class="spelling-comparison-grid">
+          ${flashcardWords
+            .map((entry) => {
+              const card = ensureSpellingFlashcardCard(spelling, entry.id);
+              return `
+                <article class="spelling-flashcard-card${card.completed ? " is-complete" : ""}">
+                  <div class="spelling-flashcard-card__top">
+                    <strong>${escapeHtml(entry.word)}</strong>
+                    <span>${escapeHtml(entry.familyNote)}</span>
+                  </div>
+                  <div class="spelling-hero__chips">
+                    ${entry.familyWords.map((word) => `<span class="spelling-chip spelling-chip--static">${escapeHtml(word)}</span>`).join("")}
+                  </div>
+                  <div class="spelling-flashcard-visual${card.revealed ? " is-revealed" : ""}">
+                    ${card.revealed ? escapeHtml(entry.flashcardBreak) : "Word map hidden"}
+                  </div>
+                  <div class="spelling-stage-actions spelling-stage-actions--compact">
+                    <button type="button" class="ghost-button ghost-button--small" data-spelling-toggle-flashcard="${entry.id}">
+                      ${card.revealed ? "Hide word map" : "Reveal word map"}
+                    </button>
+                  </div>
+                  <input
+                    class="reader-editor spelling-inline-input"
+                    type="text"
+                    autocomplete="off"
+                    autocapitalize="off"
+                    spellcheck="false"
+                    value="${escapeHtml(card.attempt)}"
+                    placeholder="Type the target word from memory"
+                    data-spelling-flashcard-input="${entry.id}"
+                  />
+                  <div class="spelling-stage-actions spelling-stage-actions--compact">
+                    <button type="button" class="primary-button primary-button--dark" data-spelling-check-flashcard="${entry.id}">Check word</button>
+                  </div>
+                  ${card.checked ? `<p class="spelling-choice-feedback${card.completed ? " is-correct" : " is-incorrect"}">${escapeHtml(card.completed ? "Correct. The spelling held after the word map disappeared." : `Retry ${entry.word} using ${entry.articulation}.`)}</p>` : ""}
+                </article>
+              `;
+            })
+            .join("")}
+        </div>
+        <div class="spelling-stage-actions">
+          <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="word-families">Reset stage</button>
+        </div>
+      </article>
+    `;
+  } else {
+    stageBody = `
+      <article class="spelling-stage-card">
+        <div class="spelling-card__header">
+          <div>
+            <p class="eyebrow">Stage 4</p>
+            <h4>Past, present, future</h4>
+          </div>
+          <span class="spelling-card__status${spelling.tenseTransfer.completed ? " is-complete" : ""}">${spelling.tenseTransfer.completed ? "Ribbon earned" : "Final ribbon"}</span>
+        </div>
+        <p>Use the list of correct and incorrect forms to sort each target word into present, past, and future. The interaction is selection-based rather than drag-and-drop.</p>
+        <div class="spelling-tense-grid">
+          ${followUpWords
+            .map((entry) => {
+              const answer = ensureSpellingTenseAnswer(spelling, entry.id);
+              const checked = spelling.tenseTransfer.checked;
+              const isCorrect =
+                answer.present === entry.tense.present &&
+                answer.past === entry.tense.past &&
+                answer.future === entry.tense.future;
+              return `
+                <article class="spelling-tense-card${checked ? (isCorrect ? " is-correct" : " is-incorrect") : ""}">
+                  <div class="spelling-tense-card__top">
+                    <strong>${escapeHtml(entry.word)}</strong>
+                    <span>${escapeHtml(entry.articulation)}</span>
+                  </div>
+                  <div class="spelling-hero__chips">
+                    ${entry.tense.options.map((option) => `<span class="spelling-chip spelling-chip--static">${escapeHtml(option)}</span>`).join("")}
+                  </div>
+                  ${[
+                    ["present", "Present"],
+                    ["past", "Past"],
+                    ["future", "Future"]
+                  ]
+                    .map(
+                      ([tenseKey, label]) => `
+                        <label class="spelling-select-field">
+                          <span>${label}</span>
+                          <select data-spelling-tense-word="${entry.id}" data-spelling-tense-key="${tenseKey}">
+                            <option value="">Choose from the list</option>
+                            ${entry.tense.options
+                              .map(
+                                (option) => `
+                                  <option value="${escapeHtml(option)}"${answer[tenseKey] === option ? " selected" : ""}>
+                                    ${escapeHtml(option)}
+                                  </option>
+                                `
+                              )
+                              .join("")}
+                          </select>
+                        </label>
+                      `
+                    )
+                    .join("")}
+                  ${checked ? `<p class="spelling-choice-feedback${isCorrect ? " is-correct" : " is-incorrect"}">${escapeHtml(isCorrect ? "Correct. The spelling stayed stable across all three tenses." : "One or more tense forms still needs adjusting.")}</p>` : ""}
+                </article>
+              `;
+            })
+            .join("")}
+        </div>
+        <div class="spelling-stage-actions">
+          <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="tense-transfer">Reset stage</button>
+          <button type="button" class="primary-button primary-button--dark" data-spelling-check-tense="true">Check final stage</button>
+        </div>
+        ${spelling.tenseTransfer.completed ? `
+          <article class="spelling-complete-card">
+            <p class="eyebrow">Complete</p>
+            <h4>All four ribbons earned</h4>
+            <p>The diagnostic, visual check, word family work, and tense transfer are all complete. Keep the same words in review on ${escapeHtml(SPELLING_UNIT_SEED.reviewDays.join(", "))}.</p>
+          </article>
+        ` : ""}
+      </article>
+    `;
+  }
 
   host.innerHTML = `
     <section class="spelling-shell" data-spelling-font="${escapeHtml(spelling.preferences.font)}" data-spelling-spacing="${escapeHtml(spelling.preferences.spacing)}" data-spelling-tint="${escapeHtml(spelling.preferences.tint)}">
-      <article class="spelling-hero">
-        <div class="spelling-hero__copy">
-          <p class="eyebrow">Spelling Stables</p>
+      <article class="spelling-stage-header">
+        <div>
+          <p class="eyebrow">Spelling</p>
           <div class="spelling-hero__title-row">
             <h3>${escapeHtml(SPELLING_UNIT_SEED.title)}</h3>
-            <span class="spelling-hero__stage">${escapeHtml(getSpellingStageLabel(subject))}</span>
+            <span class="spelling-hero__stage">Stage ${escapeHtml(String(stageIndex + 1))} · ${escapeHtml(SPELLING_STAGE_LABELS[stageId])}</span>
           </div>
           <p>${escapeHtml(SPELLING_UNIT_SEED.intro)}</p>
-          <div class="spelling-hero__chips">
-            <span class="spelling-chip spelling-chip--static">Target word: ${escapeHtml(SPELLING_UNIT_SEED.targetWord)}</span>
-            <span class="spelling-chip spelling-chip--static">Pattern: ${escapeHtml(SPELLING_UNIT_SEED.focusPattern)}</span>
-            <span class="spelling-chip spelling-chip--static">Horse: ${escapeHtml(SPELLING_UNIT_SEED.horseName)}</span>
-          </div>
         </div>
-        <div class="spelling-hero__stats">
-          <div class="spelling-progress-ring" style="--spelling-progress:${getSpellingMasteryRatio(subject)}">
-            <strong>${escapeHtml(String(masteryPercent))}%</strong>
-            <span>mastery</span>
+        <div class="spelling-progress-copy spelling-progress-copy--compact">
+          <strong>${escapeHtml(`${completedCount}/${totalCount} ribbons earned`)}</strong>
+          <span>${escapeHtml(`${masteryPercent}% complete`)}</span>
+          <div class="spelling-stage-actions spelling-stage-actions--compact">
+            <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-unit="true">Reset all stages</button>
           </div>
-          <div class="spelling-progress-copy">
-            <strong>${escapeHtml(`${completedCount}/${totalCount} ribbons earned`)}</strong>
-            <span>${escapeHtml(getSpellingPendingActivityCount(subject) ? "Train the next activity to move Dusty up a level." : "Dusty is ready for the next review ride.")}</span>
-          </div>
-          <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-unit="true">Reset lesson</button>
         </div>
       </article>
 
-      <section class="spelling-toolbar">
-        <div class="spelling-toolbar__group">
-          <span class="spelling-toolbar__label">Font</span>
-          <div class="spelling-choice-row">
-            ${[
-              ["lexend", "Lexend"],
-              ["atkinson", "Atkinson"],
-              ["study", "PaperPanda"]
-            ]
-              .map(
-                ([value, label]) => `
-                  <button type="button" class="spelling-choice${spelling.preferences.font === value ? " is-active" : ""}" data-spelling-set-font="${value}">
-                    ${label}
-                  </button>
-                `
-              )
-              .join("")}
-          </div>
-        </div>
-        <div class="spelling-toolbar__group">
-          <span class="spelling-toolbar__label">Spacing</span>
-          <div class="spelling-choice-row">
-            ${[
-              ["standard", "Standard"],
-              ["wide", "Wide"]
-            ]
-              .map(
-                ([value, label]) => `
-                  <button type="button" class="spelling-choice${spelling.preferences.spacing === value ? " is-active" : ""}" data-spelling-set-spacing="${value}">
-                    ${label}
-                  </button>
-                `
-              )
-              .join("")}
-          </div>
-        </div>
-        <div class="spelling-toolbar__group">
-          <span class="spelling-toolbar__label">Colour</span>
-          <div class="spelling-choice-row">
-            ${[
-              ["cream", "Warm cream"],
-              ["mist", "Soft mist"]
-            ]
-              .map(
-                ([value, label]) => `
-                  <button type="button" class="spelling-choice${spelling.preferences.tint === value ? " is-active" : ""}" data-spelling-set-tint="${value}">
-                    ${label}
-                  </button>
-                `
-              )
-              .join("")}
-          </div>
-        </div>
-      </section>
-
-      <section class="spelling-level-rail" aria-label="Horse levels">
+      <section class="spelling-stage-rail" aria-label="Spelling stages">
         ${SPELLING_STAGE_ORDER
           .map(
             (levelId, index) => `
-              <article class="spelling-level${index <= stageIndex ? " is-active" : ""}${index === stageIndex ? " is-current" : ""}">
-                <span class="spelling-level__step">${index + 1}</span>
+              <article class="spelling-stage-pill${index < completedCount ? " is-complete" : ""}${levelId === stageId ? " is-current" : ""}">
+                <span>${index + 1}</span>
                 <strong>${escapeHtml(SPELLING_STAGE_LABELS[levelId])}</strong>
               </article>
             `
@@ -8863,221 +9500,56 @@ function renderSpelling() {
           .join("")}
       </section>
 
+      ${focusSummary.length ? `
+        <section class="spelling-focus-summary">
+          ${focusSummary
+            .map(
+              (entry) => `
+                <article class="spelling-focus-card">
+                  <strong>${escapeHtml(SPELLING_FOCUS_LABELS[entry.id] || entry.id)}</strong>
+                  <span>${escapeHtml(`${entry.count} diagnostic miss${entry.count === 1 ? "" : "es"}`)}</span>
+                </article>
+              `
+            )
+            .join("")}
+        </section>
+      ` : ""}
+
       <article class="spelling-coach-card">
-        <span class="spelling-coach-card__icon">🐴</span>
+        <span class="spelling-coach-card__icon">Aa</span>
         <div>
-          <strong>${escapeHtml(`${SPELLING_UNIT_SEED.horseName} says`)}</strong>
+          <strong>Current focus</strong>
           <p>${escapeHtml(spelling.coachMessage)}</p>
         </div>
       </article>
 
-      <section class="spelling-grid">
-        <article class="spelling-card">
-          <div class="spelling-card__header">
-            <div>
-              <p class="eyebrow">Build the jump</p>
-              <h4>Chunk the word</h4>
-            </div>
-            <span class="spelling-card__status${spelling.activities.jump.completed ? " is-complete" : ""}">${spelling.activities.jump.completed ? "Ribbon earned" : "In training"}</span>
-          </div>
-          <p>Drag the sound chunks into order for <strong>${escapeHtml(SPELLING_UNIT_SEED.targetWord)}</strong>.</p>
-          <div class="spelling-bank">
-            ${["squ", "are", "air", "ear"]
-              .map(
-                (chunk) => `
-                  <button type="button" class="spelling-drag" draggable="true" data-spelling-drag="true" data-spelling-activity="jump" data-spelling-value="${chunk}">
-                    ${chunk}
-                  </button>
-                `
-              )
-              .join("")}
-          </div>
-          <div class="spelling-drop-row">
-            ${SPELLING_UNIT_SEED.chunkAnswer
-              .map(
-                (chunk, index) => `
-                  <div class="spelling-dropzone" data-spelling-dropzone="true" data-spelling-activity="jump" data-spelling-drop="${index}">
-                    ${spelling.activities.jump.slots[index] ? `<span class="spelling-dropzone__value">${escapeHtml(spelling.activities.jump.slots[index])}</span>` : `<span class="spelling-dropzone__hint">Drop chunk ${index + 1}</span>`}
-                  </div>
-                `
-              )
-              .join("")}
-          </div>
-          <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="jump">Reset activity</button>
-        </article>
-
-        <article class="spelling-card">
-          <div class="spelling-card__header">
-            <div>
-              <p class="eyebrow">Groom the horse</p>
-              <h4>Fix the name tag</h4>
-            </div>
-            <span class="spelling-card__status${spelling.activities.tag.completed ? " is-complete" : ""}">${spelling.activities.tag.completed ? "Ribbon earned" : "In training"}</span>
-          </div>
-          <p>${escapeHtml(SPELLING_UNIT_SEED.horseName)} needs the missing letter in <strong>sq_are</strong>.</p>
-          <div class="spelling-tag-row">
-            <div class="spelling-tag-word">s q <span class="spelling-tag-slot" data-spelling-dropzone="true" data-spelling-activity="tag" data-spelling-drop="letter">${spelling.activities.tag.letter ? escapeHtml(spelling.activities.tag.letter) : "?"}</span> a r e</div>
-            <div class="spelling-bank spelling-bank--tight">
-              ${SPELLING_UNIT_SEED.tagChoices
-                .map(
-                  (letter) => `
-                    <button type="button" class="spelling-drag spelling-drag--letter" draggable="true" data-spelling-drag="true" data-spelling-activity="tag" data-spelling-value="${letter}">
-                      ${letter}
-                    </button>
-                  `
-                )
-                .join("")}
-            </div>
-          </div>
-          <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="tag">Reset activity</button>
-        </article>
-
-        <article class="spelling-card spelling-card--wide">
-          <div class="spelling-card__header">
-            <div>
-              <p class="eyebrow">Feed the horses</p>
-              <h4>Sort the /air/ pattern</h4>
-            </div>
-            <span class="spelling-card__status${spelling.activities.sort.completed ? " is-complete" : ""}">${spelling.activities.sort.completed ? "Ribbon earned" : "In training"}</span>
-          </div>
-          <p>Drag each word into the spelling bucket that matches the /air/ sound.</p>
-          <div class="spelling-bank">
-            ${sortBankWords
-              .map(
-                (word) => `
-                  <button type="button" class="spelling-drag" draggable="true" data-spelling-drag="true" data-spelling-activity="sort" data-spelling-value="${word}">
-                    ${word}
-                  </button>
-                `
-              )
-              .join("") || '<span class="spelling-bank__done">All words sorted.</span>'}
-          </div>
-          <div class="spelling-bucket-grid">
-            ${["air", "are", "ear"]
-              .map(
-                (bucket) => `
-                  <div class="spelling-bucket" data-spelling-dropzone="true" data-spelling-activity="sort" data-spelling-drop="${bucket}">
-                    <strong>${bucket.toUpperCase()}</strong>
-                    <div class="spelling-bucket__words">
-                      ${(spelling.activities.sort[bucket] || [])
-                        .map((word) => `<span class="spelling-chip spelling-chip--placed">${escapeHtml(word)}</span>`)
-                        .join("") || '<span class="spelling-bucket__hint">Drop words here</span>'}
-                    </div>
-                  </div>
-                `
-              )
-              .join("")}
-          </div>
-          <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="sort">Reset activity</button>
-        </article>
-
-        <article class="spelling-card spelling-card--wide">
-          <div class="spelling-card__header">
-            <div>
-              <p class="eyebrow">Word family stable</p>
-              <h4>Grow the root word</h4>
-            </div>
-            <span class="spelling-card__status${spelling.activities.family.completed ? " is-complete" : ""}">${spelling.activities.family.completed ? "Ribbon earned" : "In training"}</span>
-          </div>
-          <p>Keep <strong>square</strong> stable as the ending changes.</p>
-          <div class="spelling-bank">
-            ${familyBankWords
-              .map(
-                (word) => `
-                  <button type="button" class="spelling-drag" draggable="true" data-spelling-drag="true" data-spelling-activity="family" data-spelling-value="${word}">
-                    ${word}
-                  </button>
-                `
-              )
-              .join("") || '<span class="spelling-bank__done">Family complete.</span>'}
-          </div>
-          <div class="spelling-family-row">
-            ${SPELLING_UNIT_SEED.familyOrder
-              .map(
-                (word, index) => `
-                  <div class="spelling-family-slot" data-spelling-dropzone="true" data-spelling-activity="family" data-spelling-drop="${index}">
-                    <span class="spelling-family-slot__label">${index === 0 ? "Base" : `Step ${index + 1}`}</span>
-                    ${spelling.activities.family.slots[index]
-                      ? `<strong>${escapeHtml(spelling.activities.family.slots[index])}</strong>`
-                      : '<span class="spelling-family-slot__hint">Drop family word</span>'}
-                  </div>
-                `
-              )
-              .join("")}
-          </div>
-          <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="family">Reset activity</button>
-        </article>
-
-        <article class="spelling-card spelling-card--wide">
-          <div class="spelling-card__header">
-            <div>
-              <p class="eyebrow">Sentence ride</p>
-              <h4>Use the pattern in context</h4>
-            </div>
-            <span class="spelling-card__status${spelling.activities.sentence.completed ? " is-complete" : ""}">${spelling.activities.sentence.completed ? "Ribbon earned" : "In training"}</span>
-          </div>
-          <p>Write one complete sentence using <strong>square</strong>, <strong>compare</strong>, or <strong>aware</strong>.</p>
-          <div class="spelling-hero__chips">
-            ${SPELLING_UNIT_SEED.sentenceWords.map((word) => `<span class="spelling-chip spelling-chip--static">${escapeHtml(word)}</span>`).join("")}
-          </div>
-          <textarea class="reader-editor spelling-textarea" data-spelling-sentence-input="true" placeholder="Example: The paddock was perfectly square after the fence was measured.">${escapeHtml(sentenceValue)}</textarea>
-          <div class="spelling-card__footer">
-            <span class="spelling-card__note">${escapeHtml(sentenceChecked ? `${sentenceWordCount} words checked.` : "Write a full sentence, then check it.")}</span>
-            <div class="spelling-card__actions">
-              <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="sentence">Clear</button>
-              <button type="button" class="primary-button primary-button--dark" data-spelling-check-sentence="true">Check sentence</button>
-            </div>
-          </div>
-        </article>
-      </section>
+      ${stageBody}
 
       <section class="spelling-review-strip">
         <article class="spelling-review-card">
           <p class="eyebrow">Review rhythm</p>
           <h4>Spaced practice</h4>
           <div class="spelling-review-card__days">
-            <span class="is-done">Day 1</span>
-            <span class="${completedCount >= 2 ? "is-done" : "is-next"}">Day 3</span>
-            <span>Day 7</span>
-            <span>Day 14</span>
-            <span>Day 30</span>
+            ${SPELLING_UNIT_SEED.reviewDays
+              .map((dayLabel, index) => `<span class="${index <= completedCount ? "is-done" : index === completedCount + 1 ? "is-next" : ""}">${escapeHtml(dayLabel)}</span>`)
+              .join("")}
           </div>
         </article>
         <article class="spelling-review-card spelling-review-card--skills">
-          <p class="eyebrow">Horse skills</p>
-          <h4>What this unit is teaching</h4>
+          <p class="eyebrow">Target words</p>
+          <h4>Words carrying through the sequence</h4>
           <div class="spelling-skill-list">
-            <span class="spelling-skill${spelling.activities.jump.completed ? " is-strong" : ""}">SQU chunking</span>
-            <span class="spelling-skill${spelling.activities.sort.completed ? " is-strong" : ""}">AIR / ARE / EAR choice</span>
-            <span class="spelling-skill${spelling.activities.family.completed ? " is-strong" : ""}">Morphology stability</span>
+            ${followUpWords.map((entry) => `<span class="spelling-skill">${escapeHtml(entry.word)}</span>`).join("")}
           </div>
         </article>
       </section>
     </section>
   `;
 
-  host.querySelectorAll("[data-spelling-set-font]").forEach((button) => {
-    button.addEventListener("click", () => {
-      spelling.preferences.font = button.dataset.spellingSetFont;
-      persistSubjects();
-      render();
-    });
-  });
-
-  host.querySelectorAll("[data-spelling-set-spacing]").forEach((button) => {
-    button.addEventListener("click", () => {
-      spelling.preferences.spacing = button.dataset.spellingSetSpacing;
-      persistSubjects();
-      render();
-    });
-  });
-
-  host.querySelectorAll("[data-spelling-set-tint]").forEach((button) => {
-    button.addEventListener("click", () => {
-      spelling.preferences.tint = button.dataset.spellingSetTint;
-      persistSubjects();
-      render();
-    });
+  host.querySelector("[data-spelling-reset-unit]")?.addEventListener("click", () => {
+    subject.spelling = createDefaultSpellingState(subject.id);
+    persistSubjects();
+    render();
   });
 
   host.querySelectorAll("[data-spelling-reset-activity]").forEach((button) => {
@@ -9087,90 +9559,62 @@ function renderSpelling() {
     });
   });
 
-  host.querySelector("[data-spelling-reset-unit]")?.addEventListener("click", () => {
-    subject.spelling = createDefaultSpellingState(subject.id);
-    persistSubjects();
-    render();
-  });
-
-  host.querySelector("[data-spelling-sentence-input]")?.addEventListener("input", (event) => {
-    spelling.activities.sentence.value = event.target.value;
-    spelling.activities.sentence.checked = false;
-    spelling.activities.sentence.completed = false;
-  });
-
-  host.querySelector("[data-spelling-sentence-input]")?.addEventListener("blur", () => {
-    persistSubjects();
-  });
-
-  host.querySelector("[data-spelling-check-sentence]")?.addEventListener("click", () => {
-    const value = String(spelling.activities.sentence.value || "").trim();
-    const hasTargetWord = SPELLING_UNIT_SEED.sentenceWords.some((word) => new RegExp(`\\b${escapeRegex(word)}\\b`, "i").test(value));
-    spelling.activities.sentence.checked = true;
-
-    if (!hasTargetWord) {
-      spelling.activities.sentence.completed = false;
-      spelling.coachMessage = `${SPELLING_UNIT_SEED.horseName} says: include square, compare, or aware so you practise the target pattern in context.`;
-    } else if (value.split(/\s+/).filter(Boolean).length < 5) {
-      spelling.activities.sentence.completed = false;
-      spelling.coachMessage = `${SPELLING_UNIT_SEED.horseName} says: make it a full sentence so the spelling sits inside real meaning.`;
-    } else {
-      spelling.activities.sentence.completed = true;
-      spelling.coachMessage = `${SPELLING_UNIT_SEED.horseName} says: strong sentence. You used the pattern in context, which helps it stick for longer.`;
-    }
-
-    persistSubjects();
-    render();
-  });
-
-  host.querySelectorAll("[data-spelling-drag]").forEach((item) => {
-    item.addEventListener("dragstart", (event) => {
-      activeSpellingDragPayload = {
-        activityId: item.dataset.spellingActivity,
-        value: item.dataset.spellingValue
-      };
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", JSON.stringify(activeSpellingDragPayload));
-    });
-
-    item.addEventListener("dragend", () => {
-      activeSpellingDragPayload = null;
-    });
-  });
-
-  host.querySelectorAll("[data-spelling-dropzone]").forEach((zone) => {
-    zone.addEventListener("dragover", (event) => {
-      event.preventDefault();
-      zone.classList.add("is-over");
-    });
-
-    zone.addEventListener("dragleave", () => {
-      zone.classList.remove("is-over");
-    });
-
-    zone.addEventListener("drop", (event) => {
-      event.preventDefault();
-      zone.classList.remove("is-over");
-      if (!activeSpellingDragPayload) {
-        try {
-          activeSpellingDragPayload = JSON.parse(event.dataTransfer.getData("text/plain"));
-        } catch (error) {
-          activeSpellingDragPayload = null;
-        }
-      }
-      if (!activeSpellingDragPayload) {
-        return;
-      }
-      handleSpellingDrop(
-        subject,
-        activeSpellingDragPayload.activityId,
-        zone.dataset.spellingActivity,
-        zone.dataset.spellingDrop,
-        activeSpellingDragPayload.value
-      );
-      activeSpellingDragPayload = null;
+  host.querySelectorAll("[data-spelling-looks-right-word]").forEach((button) => {
+    button.addEventListener("click", () => {
+      spelling.looksRight.answers[button.dataset.spellingLooksRightWord] = button.dataset.spellingLooksRightValue;
+      spelling.looksRight.checked = false;
+      spelling.looksRight.completed = false;
+      persistSubjects();
       render();
     });
+  });
+
+  host.querySelector("[data-spelling-check-looks-right]")?.addEventListener("click", () => {
+    checkSpellingLooksRight(subject);
+    render();
+  });
+
+  host.querySelectorAll("[data-spelling-toggle-flashcard]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const card = ensureSpellingFlashcardCard(spelling, button.dataset.spellingToggleFlashcard);
+      card.revealed = !card.revealed;
+      persistSubjects();
+      render();
+    });
+  });
+
+  host.querySelectorAll("[data-spelling-flashcard-input]").forEach((input) => {
+    input.addEventListener("input", (event) => {
+      const card = ensureSpellingFlashcardCard(spelling, input.dataset.spellingFlashcardInput);
+      card.attempt = event.target.value;
+      card.checked = false;
+      card.completed = false;
+    });
+    input.addEventListener("blur", () => {
+      persistSubjects();
+    });
+  });
+
+  host.querySelectorAll("[data-spelling-check-flashcard]").forEach((button) => {
+    button.addEventListener("click", () => {
+      checkSpellingFlashcardWord(subject, button.dataset.spellingCheckFlashcard);
+      render();
+    });
+  });
+
+  host.querySelectorAll("[data-spelling-tense-word]").forEach((select) => {
+    select.addEventListener("change", () => {
+      const answer = ensureSpellingTenseAnswer(spelling, select.dataset.spellingTenseWord);
+      answer[select.dataset.spellingTenseKey] = select.value;
+      spelling.tenseTransfer.checked = false;
+      spelling.tenseTransfer.completed = false;
+      persistSubjects();
+    });
+  });
+
+  host.querySelector("[data-spelling-check-tense]")?.addEventListener("click", () => {
+    checkSpellingTenseTransfer(subject);
+    render();
   });
 }
 
