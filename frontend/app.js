@@ -489,7 +489,7 @@ const SPELLING_UNIT_SEED = {
   title: "Spelling Progression",
   intro:
     "Start with a spoken diagnostic, then move into visual checking, word families, and tense transfer built from the words the student actually missed.",
-  diagnosticTargetCount: 40,
+  diagnosticTargetCount: 20,
   followUpWordCount: 10,
   reviewDays: ["Day 1", "Day 3", "Day 7", "Day 14", "Day 30"]
 };
@@ -670,7 +670,6 @@ const SPELLING_DIAGNOSTIC_WORDS = [
   { id: "friend", word: "friend", yearLevel: "5", sentence: "A good friend tells the truth.", focuses: ["look-right"], articulation: "fri-end" },
   { id: "because", word: "because", yearLevel: "5", sentence: "We stayed inside because it was raining.", focuses: ["mnemonic"], articulation: "be-cause" },
   { id: "beautiful", word: "beautiful", yearLevel: "5", sentence: "The garden looked beautiful in the morning light.", focuses: ["mnemonic", "look-right"], articulation: "beau-ti-ful" },
-  { id: "through", word: "through", yearLevel: "5", sentence: "Read through the whole paragraph before answering.", focuses: ["look-right"], articulation: "through" },
   { id: "answer", word: "answer", yearLevel: "5", sentence: "Write the answer in a full sentence.", focuses: ["over-articulation"], articulation: "ans-wer" },
   { id: "which", word: "which", yearLevel: "5", sentence: "Which question will you answer first?", focuses: ["word-family"], articulation: "which" },
   { id: "measure", word: "measure", yearLevel: "5", sentence: "Measure the line with a ruler.", focuses: ["look-right", "word-family"], articulation: "mea-sure", interventionId: "measure" },
@@ -678,15 +677,8 @@ const SPELLING_DIAGNOSTIC_WORDS = [
   { id: "imagine", word: "imagine", yearLevel: "5", sentence: "Imagine the scene before you start writing.", focuses: ["over-articulation", "word-family"], articulation: "im-ag-ine", interventionId: "imagine" },
   { id: "notice", word: "notice", yearLevel: "5", sentence: "Notice how the title hints at the theme.", focuses: ["look-right", "word-family"], articulation: "no-tice", interventionId: "notice" },
   { id: "remember", word: "remember", yearLevel: "5", sentence: "Remember to justify your answer.", focuses: ["mnemonic", "word-family"], articulation: "re-mem-ber", interventionId: "remember" },
-  { id: "straight", word: "straight", yearLevel: "5", sentence: "Draw a straight line across the page.", focuses: ["look-right"], articulation: "straight" },
-  { id: "thought", word: "thought", yearLevel: "5", sentence: "Her thought was clear and precise.", focuses: ["look-right"], articulation: "thought" },
-  { id: "caught", word: "caught", yearLevel: "5", sentence: "He caught the ball near the fence.", focuses: ["look-right"], articulation: "caught" },
-  { id: "build", word: "build", yearLevel: "5", sentence: "Build your argument carefully.", focuses: ["look-right"], articulation: "build" },
-  { id: "early", word: "early", yearLevel: "5", sentence: "Arrive early so you can prepare.", focuses: ["look-right"], articulation: "ear-ly" },
   { id: "regular", word: "regular", yearLevel: "5", sentence: "Regular practice improves spelling.", focuses: ["over-articulation"], articulation: "reg-u-lar" },
-  { id: "group", word: "group", yearLevel: "5", sentence: "Work with your group on the task.", focuses: ["look-right"], articulation: "group" },
   { id: "library", word: "library", yearLevel: "5", sentence: "The library is open before school.", focuses: ["over-articulation"], articulation: "li-brar-y" },
-  { id: "minute", word: "minute", yearLevel: "5", sentence: "Wait a minute before you start.", focuses: ["look-right"], articulation: "min-ute" },
   { id: "wednesday", word: "Wednesday", yearLevel: "7", sentence: "The assignment is due on Wednesday.", focuses: ["over-articulation"], articulation: "Wed-nes-day" },
   { id: "island", word: "island", yearLevel: "7", sentence: "The map showed a small island offshore.", focuses: ["over-articulation", "look-right"], articulation: "iS-land" },
   { id: "necessary", word: "necessary", yearLevel: "7", sentence: "Bring the necessary equipment to science.", focuses: ["mnemonic", "look-right"], articulation: "ne-ces-sar-y" },
@@ -696,17 +688,11 @@ const SPELLING_DIAGNOSTIC_WORDS = [
   { id: "conscience", word: "conscience", yearLevel: "7", sentence: "His conscience told him to be honest.", focuses: ["look-right"], articulation: "con-science" },
   { id: "environment", word: "environment", yearLevel: "7", sentence: "The environment changes over time.", focuses: ["over-articulation"], articulation: "en-vi-ron-ment" },
   { id: "government", word: "government", yearLevel: "7", sentence: "The government announced a new policy.", focuses: ["over-articulation"], articulation: "gov-ern-ment" },
-  { id: "immediately", word: "immediately", yearLevel: "7", sentence: "Submit the response immediately after the bell.", focuses: ["over-articulation", "look-right"], articulation: "im-me-di-ate-ly" },
-  { id: "language", word: "language", yearLevel: "7", sentence: "Precise language improves your writing.", focuses: ["look-right"], articulation: "lang-uage" },
   { id: "separate", word: "separate", yearLevel: "7", sentence: "Separate the evidence from the opinion.", focuses: ["over-articulation", "mnemonic"], articulation: "sep-a-rate", interventionId: "separate" },
   { id: "achieve", word: "achieve", yearLevel: "7", sentence: "You can achieve better results with revision.", focuses: ["look-right", "word-family"], articulation: "a-chieve", interventionId: "achieve" },
   { id: "appear", word: "appear", yearLevel: "7", sentence: "The theme will appear again in the final chapter.", focuses: ["look-right", "word-family"], articulation: "ap-pear", interventionId: "appear" },
   { id: "describe", word: "describe", yearLevel: "7", sentence: "Describe the effect of the image in one sentence.", focuses: ["word-family", "look-right"], articulation: "de-scribe", interventionId: "describe" },
-  { id: "decide", word: "decide", yearLevel: "7", sentence: "Decide which example is strongest.", focuses: ["word-family", "look-right"], articulation: "de-cide", interventionId: "decide" },
-  { id: "privilege", word: "privilege", yearLevel: "7", sentence: "It is a privilege to represent the school.", focuses: ["look-right"], articulation: "priv-i-lege" },
-  { id: "persuade", word: "persuade", yearLevel: "7", sentence: "Use evidence to persuade the reader.", focuses: ["look-right", "word-family"], articulation: "per-suade" },
-  { id: "business", word: "business", yearLevel: "7", sentence: "The article discussed small business owners.", focuses: ["over-articulation", "mnemonic"], articulation: "busi-ness" },
-  { id: "definitely", word: "definitely", yearLevel: "7", sentence: "I will definitely revise tonight.", focuses: ["look-right", "mnemonic"], articulation: "def-in-ite-ly" }
+  { id: "decide", word: "decide", yearLevel: "7", sentence: "Decide which example is strongest.", focuses: ["word-family", "look-right"], articulation: "de-cide", interventionId: "decide" }
 ];
 const SPELLING_DIAGNOSTIC_WORDS_BY_ID = Object.fromEntries(
   SPELLING_DIAGNOSTIC_WORDS.map((entry) => [entry.id, entry])
@@ -4125,7 +4111,22 @@ function ensureSpellingTenseAnswer(spelling, wordId) {
 
 function isSpellingLooksRightComplete(spelling) {
   const followUpWords = getSpellingFollowUpWords(spelling);
-  return Boolean(followUpWords.length) && followUpWords.every((entry) => spelling.looksRight.answers[entry.id] === entry.word);
+  return Boolean(followUpWords.length) && followUpWords.every((entry) => Boolean(spelling.looksRight.answers[entry.id]));
+}
+
+function getSpellingLooksRightSentence(entry) {
+  const diagnosticMatch = SPELLING_DIAGNOSTIC_WORDS.find(
+    (wordEntry) => wordEntry.interventionId === entry.id || normalizeSpellingAttempt(wordEntry.word) === normalizeSpellingAttempt(entry.word)
+  );
+  return diagnosticMatch?.sentence || `Use ${entry.word} in a sentence with precision.`;
+}
+
+function buildSpellingLooksRightChoiceSentence(sentence, originalWord, replacementWord) {
+  const wordPattern = new RegExp(`\\b${escapeRegex(originalWord)}\\b`, "i");
+  if (wordPattern.test(sentence)) {
+    return sentence.replace(wordPattern, replacementWord);
+  }
+  return `${sentence} (${replacementWord})`;
 }
 
 function isSpellingFlashcardsComplete(spelling) {
@@ -4295,11 +4296,16 @@ function checkSpellingLooksRight(subject) {
   spelling.looksRight.checked = true;
   spelling.looksRight.completed = isSpellingLooksRightComplete(spelling);
   const incorrectWords = followUpWords.filter((entry) => spelling.looksRight.answers[entry.id] !== entry.word);
+  const unansweredWords = followUpWords.filter((entry) => !spelling.looksRight.answers[entry.id]);
   spelling.coachMessage = spelling.looksRight.completed
-    ? "Visual check complete. You are ready to stabilise the same words across their families."
+    ? incorrectWords.length
+      ? `Visual check complete. Stage 3 will start with ${incorrectWords[0].word} because it still needs stabilising.`
+      : "Visual check complete. You are ready to stabilise the same words across their families."
     : incorrectWords.length
       ? `Recheck ${incorrectWords[0].word}. Ask whether the spelling looks settled before you submit again.`
-      : "Choose an answer for each word before checking this stage.";
+      : unansweredWords.length
+        ? "Choose an answer for each sentence before checking this stage."
+        : "Visual check complete. Continue to the next stage.";
   persistSubjects();
 }
 
@@ -9244,7 +9250,7 @@ function renderSpelling() {
         <article class="spelling-stage-card spelling-stage-card--diagnostic">
           <p class="eyebrow">Spelling Diagnostic</p>
           <h3>Spoken baseline</h3>
-          <p>Listen to each word, type it once, and move on. This stage uses 20 Year 5 words and 20 Year 7 words to map the patterns that need the most work.</p>
+          <p>Listen to each word, type it once, and move on. This stage uses 10 Year 5 words and 10 Year 7 words to map the patterns that need the most work.</p>
           <div class="spelling-stage-meta">
             <span>Word ${escapeHtml(String(Math.min(spelling.diagnostic.currentIndex + 1, SPELLING_DIAGNOSTIC_WORDS.length)))} of ${escapeHtml(String(SPELLING_DIAGNOSTIC_WORDS.length))}</span>
             <span>${escapeHtml(`${getSpellingDiagnosticCorrectCount(spelling)} correct so far`)}</span>
@@ -9315,36 +9321,42 @@ function renderSpelling() {
           </div>
           <span class="spelling-card__status${spelling.looksRight.completed ? " is-complete" : ""}">${spelling.looksRight.completed ? "Ribbon earned" : "Ribbon available"}</span>
         </div>
-        <p>These ten targets come from the diagnostic profile. Choose the spelling that looks settled and accurate on the page.</p>
+        <p>These ten targets come from the diagnostic profile. Read the sentence, use the articulation cue, and click the sentence that looks right.</p>
         <div class="spelling-comparison-grid">
           ${followUpWords
             .map((entry) => {
               const selectedValue = spelling.looksRight.answers[entry.id] || "";
               const checked = spelling.looksRight.checked;
               const isCorrect = selectedValue === entry.word;
+              const sentence = getSpellingLooksRightSentence(entry);
               return `
                 <article class="spelling-comparison-card${checked ? (isCorrect ? " is-correct" : " is-incorrect") : ""}">
                   <div class="spelling-comparison-card__top">
                     <strong>${escapeHtml(entry.articulation)}</strong>
                     <span>${escapeHtml((entry.focuses || []).map((focusId) => SPELLING_FOCUS_LABELS[focusId] || focusId).join(" · "))}</span>
                   </div>
+                  <p class="spelling-comparison-card__prompt">Which sentence looks right?</p>
                   <div class="spelling-choice-row spelling-choice-row--stacked">
-                    ${[entry.word, entry.lookRightWrong]
+                    ${[
+                      [entry.word, buildSpellingLooksRightChoiceSentence(sentence, entry.word, entry.word)],
+                      [entry.lookRightWrong, buildSpellingLooksRightChoiceSentence(sentence, entry.word, entry.lookRightWrong)]
+                    ]
                       .map(
-                        (value) => `
+                        ([value, sentenceChoice]) => `
                           <button
                             type="button"
-                            class="spelling-choice${selectedValue === value ? " is-active" : ""}"
+                            class="spelling-choice spelling-choice--sentence${selectedValue === value ? " is-active" : ""}"
                             data-spelling-looks-right-word="${entry.id}"
                             data-spelling-looks-right-value="${value}"
                           >
-                            ${escapeHtml(value)}
+                            <span class="spelling-choice__hint">${escapeHtml(entry.articulation)}</span>
+                            <span>${escapeHtml(sentenceChoice)}</span>
                           </button>
                         `
                       )
                       .join("")}
                   </div>
-                  ${checked ? `<p class="spelling-choice-feedback${isCorrect ? " is-correct" : " is-incorrect"}">${escapeHtml(isCorrect ? "Correct. That spelling looks stable." : entry.lookRightNote)}</p>` : ""}
+                  ${checked ? `<p class="spelling-choice-feedback${isCorrect ? " is-correct" : " is-incorrect"}">${escapeHtml(isCorrect ? "Answer recorded. This one looked right on the page." : entry.lookRightNote)}</p>` : ""}
                 </article>
               `;
             })
@@ -9352,7 +9364,7 @@ function renderSpelling() {
         </div>
         <div class="spelling-stage-actions">
           <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="looks-right">Reset stage</button>
-          <button type="button" class="primary-button primary-button--dark" data-spelling-check-looks-right="true">Check stage</button>
+          <button type="button" class="primary-button primary-button--dark" data-spelling-check-looks-right="true">Finish stage</button>
         </div>
       </article>
     `;

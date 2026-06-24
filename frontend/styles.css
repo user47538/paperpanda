@@ -6083,6 +6083,26 @@ input[type="date"] {
   grid-template-columns: 1fr;
 }
 
+.spelling-choice--sentence {
+  justify-items: start;
+  text-align: left;
+  gap: 8px;
+  padding: 16px 18px;
+}
+
+.spelling-choice__hint,
+.spelling-comparison-card__prompt {
+  color: var(--spelling-muted);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.spelling-comparison-card__prompt {
+  margin: 0;
+}
+
 .spelling-choice-feedback {
   margin: 0;
   color: var(--spelling-muted);
