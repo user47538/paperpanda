@@ -5924,6 +5924,12 @@ input[type="date"] {
   margin: 18px 0;
 }
 
+.spelling-stage-meta--single {
+  max-width: 720px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
 .spelling-stage-meta span,
 .spelling-stage-pill,
 .spelling-focus-card,
@@ -6051,6 +6057,16 @@ input[type="date"] {
   gap: 14px;
 }
 
+.spelling-stage-card--single {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.spelling-comparison-card--single {
+  max-width: 720px;
+  margin: 0 auto;
+}
+
 .spelling-comparison-card.is-correct,
 .spelling-flashcard-card.is-complete,
 .spelling-tense-card.is-correct {
@@ -6088,6 +6104,21 @@ input[type="date"] {
   text-align: left;
   gap: 8px;
   padding: 16px 18px;
+}
+
+.spelling-choice--sentence-large {
+  border-radius: 48px;
+  min-height: 150px;
+  padding: 28px 34px;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.45;
+  justify-content: center;
+}
+
+.spelling-choice--sentence-large span {
+  display: block;
+  width: 100%;
 }
 
 .spelling-choice__hint,

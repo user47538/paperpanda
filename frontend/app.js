@@ -498,6 +498,8 @@ const SPELLING_INTERVENTION_LIBRARY = {
     id: "believe",
     word: "believe",
     articulation: "be-lieve",
+    lookRightChoiceCorrect: "be-lieve",
+    lookRightChoiceWrong: "be-leive",
     focuses: ["look-right", "word-family"],
     familyWords: ["belief", "believable", "disbelieve"],
     familyNote: "Keep the base believe visible as the word changes.",
@@ -515,6 +517,8 @@ const SPELLING_INTERVENTION_LIBRARY = {
     id: "describe",
     word: "describe",
     articulation: "de-scribe",
+    lookRightChoiceCorrect: "de-scribe",
+    lookRightChoiceWrong: "de-sribe",
     focuses: ["word-family", "look-right"],
     familyWords: ["description", "descriptive", "describes"],
     familyNote: "The scribe base stays visible in every family member.",
@@ -532,6 +536,8 @@ const SPELLING_INTERVENTION_LIBRARY = {
     id: "decide",
     word: "decide",
     articulation: "de-cide",
+    lookRightChoiceCorrect: "de-cide",
+    lookRightChoiceWrong: "de-side",
     focuses: ["word-family", "look-right"],
     familyWords: ["decision", "decisive", "deciding"],
     familyNote: "The word family keeps the deci base even when the ending changes.",
@@ -548,7 +554,9 @@ const SPELLING_INTERVENTION_LIBRARY = {
   imagine: {
     id: "imagine",
     word: "imagine",
-    articulation: "im-ag-ine",
+    articulation: "im-a-gine",
+    lookRightChoiceCorrect: "im-a-gine",
+    lookRightChoiceWrong: "im-a-jin",
     focuses: ["over-articulation", "word-family"],
     familyWords: ["imagination", "imaginative", "imaginary"],
     familyNote: "Stretching im-ag-ine helps the vowel pattern stay visible.",
@@ -566,6 +574,8 @@ const SPELLING_INTERVENTION_LIBRARY = {
     id: "measure",
     word: "measure",
     articulation: "mea-sure",
+    lookRightChoiceCorrect: "mea-sure",
+    lookRightChoiceWrong: "me-sure",
     focuses: ["look-right", "word-family"],
     familyWords: ["measurement", "measurable", "measures"],
     familyNote: "The mea start helps link measure with measurement and measurable.",
@@ -583,6 +593,8 @@ const SPELLING_INTERVENTION_LIBRARY = {
     id: "notice",
     word: "notice",
     articulation: "no-tice",
+    lookRightChoiceCorrect: "no-tice",
+    lookRightChoiceWrong: "no-tise",
     focuses: ["look-right", "word-family"],
     familyWords: ["noticed", "noticing", "noticeable"],
     familyNote: "The notice base remains stable before each new ending.",
@@ -600,6 +612,8 @@ const SPELLING_INTERVENTION_LIBRARY = {
     id: "remember",
     word: "remember",
     articulation: "re-mem-ber",
+    lookRightChoiceCorrect: "re-mem-ber",
+    lookRightChoiceWrong: "re-mber",
     focuses: ["mnemonic", "word-family"],
     familyWords: ["remembers", "remembered", "remembering"],
     familyNote: "The middle mem chunk stays fixed through every change.",
@@ -617,6 +631,8 @@ const SPELLING_INTERVENTION_LIBRARY = {
     id: "appear",
     word: "appear",
     articulation: "ap-pear",
+    lookRightChoiceCorrect: "ap-pear",
+    lookRightChoiceWrong: "a-pear",
     focuses: ["look-right", "word-family"],
     familyWords: ["appearance", "appearing", "disappear"],
     familyNote: "The double p stays visible across the family.",
@@ -634,6 +650,8 @@ const SPELLING_INTERVENTION_LIBRARY = {
     id: "separate",
     word: "separate",
     articulation: "sep-a-rate",
+    lookRightChoiceCorrect: "sep-a-rate",
+    lookRightChoiceWrong: "sep-e-rate",
     focuses: ["over-articulation", "mnemonic"],
     familyWords: ["separation", "separately", "separator"],
     familyNote: "Slow sep-a-rate makes the middle a audible again.",
@@ -651,6 +669,8 @@ const SPELLING_INTERVENTION_LIBRARY = {
     id: "achieve",
     word: "achieve",
     articulation: "a-chieve",
+    lookRightChoiceCorrect: "a-chieve",
+    lookRightChoiceWrong: "a-cheive",
     focuses: ["look-right", "word-family"],
     familyWords: ["achievement", "achievable", "achieves"],
     familyNote: "Keep the chieve pattern stable as the endings change.",
@@ -4129,6 +4149,11 @@ function buildSpellingLooksRightChoiceSentence(sentence, originalWord, replaceme
   return `${sentence} (${replacementWord})`;
 }
 
+function getSpellingLooksRightCurrentWord(spelling) {
+  const followUpWords = getSpellingFollowUpWords(spelling);
+  return followUpWords.find((entry) => !spelling.looksRight.answers[entry.id]) || followUpWords[0] || null;
+}
+
 function isSpellingFlashcardsComplete(spelling) {
   const flashcardWords = getSpellingFlashcardWords(spelling);
   return Boolean(flashcardWords.length) && flashcardWords.every((entry) => ensureSpellingFlashcardCard(spelling, entry.id).completed);
@@ -4306,6 +4331,23 @@ function checkSpellingLooksRight(subject) {
       : unansweredWords.length
         ? "Choose an answer for each sentence before checking this stage."
         : "Visual check complete. Continue to the next stage.";
+  persistSubjects();
+}
+
+function selectSpellingLooksRightAnswer(subject, wordId, value) {
+  const spelling = getSubjectSpellingState(subject);
+  const followUpWords = getSpellingFollowUpWords(spelling);
+  spelling.looksRight.answers[wordId] = value;
+  spelling.looksRight.checked = false;
+  spelling.looksRight.completed = false;
+
+  if (followUpWords.every((entry) => Boolean(spelling.looksRight.answers[entry.id]))) {
+    checkSpellingLooksRight(subject);
+    return;
+  }
+
+  const answeredCount = followUpWords.filter((entry) => Boolean(spelling.looksRight.answers[entry.id])).length;
+  spelling.coachMessage = `Answer saved. Sentence ${Math.min(answeredCount + 1, followUpWords.length)} of ${followUpWords.length} is ready.`;
   persistSubjects();
 }
 
@@ -9312,8 +9354,10 @@ function renderSpelling() {
   let stageBody = "";
 
   if (stageId === "looks-right") {
+    const currentLookWord = getSpellingLooksRightCurrentWord(spelling);
+    const answeredLookCount = followUpWords.filter((entry) => Boolean(spelling.looksRight.answers[entry.id])).length;
     stageBody = `
-      <article class="spelling-stage-card">
+      <article class="spelling-stage-card spelling-stage-card--single">
         <div class="spelling-card__header">
           <div>
             <p class="eyebrow">Stage 2</p>
@@ -9321,50 +9365,55 @@ function renderSpelling() {
           </div>
           <span class="spelling-card__status${spelling.looksRight.completed ? " is-complete" : ""}">${spelling.looksRight.completed ? "Ribbon earned" : "Ribbon available"}</span>
         </div>
-        <p>These ten targets come from the diagnostic profile. Read the sentence, use the articulation cue, and click the sentence that looks right.</p>
-        <div class="spelling-comparison-grid">
-          ${followUpWords
-            .map((entry) => {
-              const selectedValue = spelling.looksRight.answers[entry.id] || "";
-              const checked = spelling.looksRight.checked;
-              const isCorrect = selectedValue === entry.word;
-              const sentence = getSpellingLooksRightSentence(entry);
-              return `
-                <article class="spelling-comparison-card${checked ? (isCorrect ? " is-correct" : " is-incorrect") : ""}">
-                  <div class="spelling-comparison-card__top">
-                    <strong>${escapeHtml(entry.articulation)}</strong>
-                    <span>${escapeHtml((entry.focuses || []).map((focusId) => SPELLING_FOCUS_LABELS[focusId] || focusId).join(" · "))}</span>
-                  </div>
-                  <p class="spelling-comparison-card__prompt">Which sentence looks right?</p>
-                  <div class="spelling-choice-row spelling-choice-row--stacked">
-                    ${[
-                      [entry.word, buildSpellingLooksRightChoiceSentence(sentence, entry.word, entry.word)],
-                      [entry.lookRightWrong, buildSpellingLooksRightChoiceSentence(sentence, entry.word, entry.lookRightWrong)]
-                    ]
-                      .map(
-                        ([value, sentenceChoice]) => `
-                          <button
-                            type="button"
-                            class="spelling-choice spelling-choice--sentence${selectedValue === value ? " is-active" : ""}"
-                            data-spelling-looks-right-word="${entry.id}"
-                            data-spelling-looks-right-value="${value}"
-                          >
-                            <span class="spelling-choice__hint">${escapeHtml(entry.articulation)}</span>
-                            <span>${escapeHtml(sentenceChoice)}</span>
-                          </button>
-                        `
-                      )
-                      .join("")}
-                  </div>
-                  ${checked ? `<p class="spelling-choice-feedback${isCorrect ? " is-correct" : " is-incorrect"}">${escapeHtml(isCorrect ? "Answer recorded. This one looked right on the page." : entry.lookRightNote)}</p>` : ""}
-                </article>
-              `;
-            })
-            .join("")}
+        <p>Read the sentence, then click the version that looks right. The target word is written inside each sentence with the sound splits visible.</p>
+        <div class="spelling-stage-meta spelling-stage-meta--single">
+          <span>Sentence ${escapeHtml(String(Math.min(answeredLookCount + 1, followUpWords.length)))} of ${escapeHtml(String(followUpWords.length))}</span>
+          <span>${escapeHtml(`${answeredLookCount} answered`)}</span>
         </div>
+        ${currentLookWord ? `
+          <article class="spelling-comparison-card spelling-comparison-card--single">
+            <div class="spelling-comparison-card__top">
+              <strong>Sentence check</strong>
+              <span>${escapeHtml((currentLookWord.focuses || []).map((focusId) => SPELLING_FOCUS_LABELS[focusId] || focusId).join(" · "))}</span>
+            </div>
+            <p class="spelling-comparison-card__prompt">Which sentence looks right?</p>
+            <div class="spelling-choice-row spelling-choice-row--stacked">
+              ${[
+                [
+                  currentLookWord.word,
+                  buildSpellingLooksRightChoiceSentence(
+                    getSpellingLooksRightSentence(currentLookWord),
+                    currentLookWord.word,
+                    currentLookWord.lookRightChoiceCorrect || currentLookWord.articulation
+                  )
+                ],
+                [
+                  currentLookWord.lookRightWrong,
+                  buildSpellingLooksRightChoiceSentence(
+                    getSpellingLooksRightSentence(currentLookWord),
+                    currentLookWord.word,
+                    currentLookWord.lookRightChoiceWrong || currentLookWord.lookRightWrong
+                  )
+                ]
+              ]
+                .map(
+                  ([value, sentenceChoice]) => `
+                    <button
+                      type="button"
+                      class="spelling-choice spelling-choice--sentence spelling-choice--sentence-large"
+                      data-spelling-looks-right-word="${currentLookWord.id}"
+                      data-spelling-looks-right-value="${value}"
+                    >
+                      <span>${escapeHtml(sentenceChoice)}</span>
+                    </button>
+                  `
+                )
+                .join("")}
+            </div>
+          </article>
+        ` : ""}
         <div class="spelling-stage-actions">
           <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="looks-right">Reset stage</button>
-          <button type="button" class="primary-button primary-button--dark" data-spelling-check-looks-right="true">Finish stage</button>
         </div>
       </article>
     `;
@@ -9594,17 +9643,9 @@ function renderSpelling() {
 
   host.querySelectorAll("[data-spelling-looks-right-word]").forEach((button) => {
     button.addEventListener("click", () => {
-      spelling.looksRight.answers[button.dataset.spellingLooksRightWord] = button.dataset.spellingLooksRightValue;
-      spelling.looksRight.checked = false;
-      spelling.looksRight.completed = false;
-      persistSubjects();
+      selectSpellingLooksRightAnswer(subject, button.dataset.spellingLooksRightWord, button.dataset.spellingLooksRightValue);
       render();
     });
-  });
-
-  host.querySelector("[data-spelling-check-looks-right]")?.addEventListener("click", () => {
-    checkSpellingLooksRight(subject);
-    render();
   });
 
   host.querySelectorAll("[data-spelling-toggle-flashcard]").forEach((button) => {
