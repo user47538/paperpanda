@@ -4,7 +4,7 @@ const authTokenStorageKey = "paperpanda-session-token";
 const subjectsStorageKey = "paperpanda-subjects-by-account";
 const settingsStorageKey = "studylift-settings";
 const uiVersionStorageKey = "paperpanda-ui-version";
-const currentUiVersion = "2026-06-25-spelling-score-summary";
+const currentUiVersion = "2026-06-25-spelling-rotating-attempts";
 const previewDatabaseName = "paperpanda-assets";
 const previewStoreName = "document-previews";
 const settingsAssetStoreName = "settings-assets";
@@ -747,6 +747,246 @@ const SPELLING_INTERVENTION_LIBRARY = {
       future: "will achieve",
       options: ["achieve", "achieved", "will achieve", "acheive", "will achieved", "achievement"]
     }
+  },
+  compare: {
+    id: "compare",
+    word: "compare",
+    articulation: "com-pare",
+    lookRightChoiceCorrect: "com-pare",
+    lookRightChoiceWrong: "com-pair",
+    focuses: ["word-family", "look-right"],
+    familyWords: ["comparison", "comparable", "compares"],
+    familySentences: [
+      "The comparison between the two texts was clear.",
+      "The examples were comparable because they used the same structure.",
+      "She compares each paragraph before choosing the best one."
+    ],
+    familyNote: "The compare base stays visible as the ending changes.",
+    lookRightWrong: "compair",
+    lookRightNote: "The /pare/ ending is spelled are here, not air.",
+    flashcardBreak: "com | pare",
+    tense: {
+      present: "compare",
+      past: "compared",
+      future: "will compare",
+      options: ["compare", "compared", "will compare", "compair", "will compared", "comparison"]
+    }
+  },
+  complete: {
+    id: "complete",
+    word: "complete",
+    articulation: "com-plete",
+    lookRightChoiceCorrect: "com-plete",
+    lookRightChoiceWrong: "com-pleet",
+    focuses: ["look-right", "word-family"],
+    familyWords: ["completion", "completely", "completed"],
+    familySentences: [
+      "The completion of the draft took the whole lesson.",
+      "The instructions were completely clear after the example.",
+      "She completed the final paragraph before the bell."
+    ],
+    familyNote: "Keep the complete base visible before the ending changes.",
+    lookRightWrong: "compleet",
+    lookRightNote: "The long e sound is not written with double e in this pattern.",
+    flashcardBreak: "com | plete",
+    tense: {
+      present: "complete",
+      past: "completed",
+      future: "will complete",
+      options: ["complete", "completed", "will complete", "compleet", "will completed", "completion"]
+    }
+  },
+  consider: {
+    id: "consider",
+    word: "consider",
+    articulation: "con-sid-er",
+    lookRightChoiceCorrect: "con-sid-er",
+    lookRightChoiceWrong: "con-sid-a",
+    focuses: ["word-family", "look-right"],
+    familyWords: ["consideration", "considered", "considering"],
+    familySentences: [
+      "Careful consideration improved the final answer.",
+      "She considered each quote before selecting the strongest one.",
+      "He is considering a better way to explain the idea."
+    ],
+    familyNote: "The consider base remains visible across the family.",
+    lookRightWrong: "consida",
+    lookRightNote: "The ending still uses er, even when the last sound is soft.",
+    flashcardBreak: "con | sid | er",
+    tense: {
+      present: "consider",
+      past: "considered",
+      future: "will consider",
+      options: ["consider", "considered", "will consider", "consida", "will considered", "consideration"]
+    }
+  },
+  continue: {
+    id: "continue",
+    word: "continue",
+    articulation: "con-tin-ue",
+    lookRightChoiceCorrect: "con-tin-ue",
+    lookRightChoiceWrong: "con-tin-ew",
+    focuses: ["over-articulation", "word-family"],
+    familyWords: ["continued", "continuing", "continuation"],
+    familySentences: [
+      "She continued writing after the short break.",
+      "He is continuing the explanation with a better example.",
+      "The continuation of the story felt more confident."
+    ],
+    familyNote: "Over-articulating con-tin-ue keeps the final ue visible.",
+    lookRightWrong: "continew",
+    lookRightNote: "The final sound is written ue, not ew, in this word family.",
+    flashcardBreak: "con | tin | ue",
+    tense: {
+      present: "continue",
+      past: "continued",
+      future: "will continue",
+      options: ["continue", "continued", "will continue", "continew", "will continued", "continuation"]
+    }
+  },
+  discover: {
+    id: "discover",
+    word: "discover",
+    articulation: "dis-cov-er",
+    lookRightChoiceCorrect: "dis-cov-er",
+    lookRightChoiceWrong: "dis-cuv-a",
+    focuses: ["word-family", "look-right"],
+    familyWords: ["discovery", "discovered", "discovering"],
+    familySentences: [
+      "The discovery changed the whole discussion.",
+      "She discovered a better quote in the final paragraph.",
+      "He is discovering how the pattern repeats."
+    ],
+    familyNote: "The discover base stays stable as the word changes.",
+    lookRightWrong: "discuva",
+    lookRightNote: "The ending still uses er, and the middle vowel stays o in the base.",
+    flashcardBreak: "dis | cov | er",
+    tense: {
+      present: "discover",
+      past: "discovered",
+      future: "will discover",
+      options: ["discover", "discovered", "will discover", "discuva", "will discovered", "discovery"]
+    }
+  },
+  improve: {
+    id: "improve",
+    word: "improve",
+    articulation: "im-prove",
+    lookRightChoiceCorrect: "im-prove",
+    lookRightChoiceWrong: "im-proov",
+    focuses: ["look-right", "word-family"],
+    familyWords: ["improvement", "improved", "improving"],
+    familySentences: [
+      "The improvement was obvious in the second draft.",
+      "She improved the sentence by adding evidence.",
+      "He is improving his spelling through daily practice."
+    ],
+    familyNote: "The improve base carries forward into each family word.",
+    lookRightWrong: "improov",
+    lookRightNote: "The long oo sound is not written with double o here.",
+    flashcardBreak: "im | prove",
+    tense: {
+      present: "improve",
+      past: "improved",
+      future: "will improve",
+      options: ["improve", "improved", "will improve", "improov", "will improved", "improvement"]
+    }
+  },
+  include: {
+    id: "include",
+    word: "include",
+    articulation: "in-clude",
+    lookRightChoiceCorrect: "in-clude",
+    lookRightChoiceWrong: "in-clewd",
+    focuses: ["look-right", "word-family"],
+    familyWords: ["inclusion", "included", "including"],
+    familySentences: [
+      "The inclusion of one detail made the answer stronger.",
+      "She included a quotation to support the point.",
+      "He is including more precise vocabulary this time."
+    ],
+    familyNote: "The include base remains visible before each new ending.",
+    lookRightWrong: "inclewd",
+    lookRightNote: "The final sound is written ude, not ewd, in this family.",
+    flashcardBreak: "in | clude",
+    tense: {
+      present: "include",
+      past: "included",
+      future: "will include",
+      options: ["include", "included", "will include", "inclewd", "will included", "inclusion"]
+    }
+  },
+  observe: {
+    id: "observe",
+    word: "observe",
+    articulation: "ob-serve",
+    lookRightChoiceCorrect: "ob-serve",
+    lookRightChoiceWrong: "ub-serve",
+    focuses: ["word-family", "look-right"],
+    familyWords: ["observation", "observed", "observing"],
+    familySentences: [
+      "Her observation about the poem was precise.",
+      "He observed the pattern before the class discussion.",
+      "She is observing how the writer repeats that idea."
+    ],
+    familyNote: "The observe base stays visible through the family.",
+    lookRightWrong: "ubserve",
+    lookRightNote: "The word begins with ob, not ub, even though the first vowel is unstressed.",
+    flashcardBreak: "ob | serve",
+    tense: {
+      present: "observe",
+      past: "observed",
+      future: "will observe",
+      options: ["observe", "observed", "will observe", "ubserve", "will observed", "observation"]
+    }
+  },
+  prepare: {
+    id: "prepare",
+    word: "prepare",
+    articulation: "pre-pare",
+    lookRightChoiceCorrect: "pre-pare",
+    lookRightChoiceWrong: "pre-pair",
+    focuses: ["word-family", "look-right"],
+    familyWords: ["preparation", "prepared", "preparing"],
+    familySentences: [
+      "Good preparation made the speech more confident.",
+      "She prepared her answer before sharing it.",
+      "He is preparing a stronger opening sentence."
+    ],
+    familyNote: "The prepare base stays settled as the word changes.",
+    lookRightWrong: "prepair",
+    lookRightNote: "The /pare/ sound is written are in this family.",
+    flashcardBreak: "pre | pare",
+    tense: {
+      present: "prepare",
+      past: "prepared",
+      future: "will prepare",
+      options: ["prepare", "prepared", "will prepare", "prepair", "will prepared", "preparation"]
+    }
+  },
+  deliver: {
+    id: "deliver",
+    word: "deliver",
+    articulation: "de-liv-er",
+    lookRightChoiceCorrect: "de-liv-er",
+    lookRightChoiceWrong: "de-liv-a",
+    focuses: ["word-family", "look-right"],
+    familyWords: ["delivery", "delivered", "delivering"],
+    familySentences: [
+      "The delivery of the speech was calm and clear.",
+      "She delivered the point with strong evidence.",
+      "He is delivering a more confident response now."
+    ],
+    familyNote: "The deliver base remains visible across the family.",
+    lookRightWrong: "deliva",
+    lookRightNote: "The ending still uses er, not a, even when the sound is weak.",
+    flashcardBreak: "de | liv | er",
+    tense: {
+      present: "deliver",
+      past: "delivered",
+      future: "will deliver",
+      options: ["deliver", "delivered", "will deliver", "deliva", "will delivered", "delivery"]
+    }
   }
 };
 const SPELLING_DEFAULT_FOLLOW_UP_WORD_IDS = Object.keys(SPELLING_INTERVENTION_LIBRARY);
@@ -776,7 +1016,17 @@ const SPELLING_DIAGNOSTIC_WORDS = [
   { id: "achieve", word: "achieve", yearLevel: "7", sentence: "You can achieve better results with revision.", focuses: ["look-right", "word-family"], articulation: "a-chieve", interventionId: "achieve" },
   { id: "appear", word: "appear", yearLevel: "7", sentence: "The theme will appear again in the final chapter.", focuses: ["look-right", "word-family"], articulation: "ap-pear", interventionId: "appear" },
   { id: "describe", word: "describe", yearLevel: "7", sentence: "Describe the effect of the image in one sentence.", focuses: ["word-family", "look-right"], articulation: "de-scribe", interventionId: "describe" },
-  { id: "decide", word: "decide", yearLevel: "7", sentence: "Decide which example is strongest.", focuses: ["word-family", "look-right"], articulation: "de-cide", interventionId: "decide" }
+  { id: "decide", word: "decide", yearLevel: "7", sentence: "Decide which example is strongest.", focuses: ["word-family", "look-right"], articulation: "de-cide", interventionId: "decide" },
+  { id: "compare", word: "compare", yearLevel: "5", sentence: "Compare the two characters in one sentence.", focuses: ["word-family", "look-right"], articulation: "com-pare", interventionId: "compare" },
+  { id: "complete", word: "complete", yearLevel: "5", sentence: "Complete the final line before you stop.", focuses: ["look-right", "word-family"], articulation: "com-plete", interventionId: "complete" },
+  { id: "continue", word: "continue", yearLevel: "5", sentence: "Continue writing after the planner is checked.", focuses: ["over-articulation", "word-family"], articulation: "con-tin-ue", interventionId: "continue" },
+  { id: "discover", word: "discover", yearLevel: "5", sentence: "Discover a better detail in the next paragraph.", focuses: ["word-family", "look-right"], articulation: "dis-cov-er", interventionId: "discover" },
+  { id: "include", word: "include", yearLevel: "5", sentence: "Include one quote in your answer.", focuses: ["look-right", "word-family"], articulation: "in-clude", interventionId: "include" },
+  { id: "consider", word: "consider", yearLevel: "7", sentence: "Consider how the evidence supports the claim.", focuses: ["word-family", "look-right"], articulation: "con-sid-er", interventionId: "consider" },
+  { id: "deliver", word: "deliver", yearLevel: "7", sentence: "Deliver the speech with a steady pace.", focuses: ["word-family", "look-right"], articulation: "de-liv-er", interventionId: "deliver" },
+  { id: "improve", word: "improve", yearLevel: "7", sentence: "Improve the topic sentence with precise language.", focuses: ["look-right", "word-family"], articulation: "im-prove", interventionId: "improve" },
+  { id: "observe", word: "observe", yearLevel: "7", sentence: "Observe how the motif returns in the final scene.", focuses: ["word-family", "look-right"], articulation: "ob-serve", interventionId: "observe" },
+  { id: "prepare", word: "prepare", yearLevel: "7", sentence: "Prepare your response before the discussion begins.", focuses: ["word-family", "look-right"], articulation: "pre-pare", interventionId: "prepare" }
 ];
 const SPELLING_DIAGNOSTIC_WORDS_BY_ID = Object.fromEntries(
   SPELLING_DIAGNOSTIC_WORDS.map((entry) => [entry.id, entry])
@@ -3899,6 +4149,7 @@ function hydrateStoredSubject(subject, index) {
 
 function createDefaultSpellingState(subjectId = "") {
   const enabled = subjectId === "spelling";
+  const initialAttemptPoolOffset = 0;
   return {
     enabled,
     activeUnitId: SPELLING_UNIT_SEED.id,
@@ -3911,7 +4162,8 @@ function createDefaultSpellingState(subjectId = "") {
       tint: "cream"
     },
     focusSummary: [],
-    followUpWordIds: [...SPELLING_DEFAULT_FOLLOW_UP_WORD_IDS].slice(0, SPELLING_UNIT_SEED.followUpWordCount),
+    attemptPoolOffset: initialAttemptPoolOffset,
+    followUpWordIds: buildSpellingAttemptWordIds(initialAttemptPoolOffset),
     diagnostic: {
       currentIndex: 0,
       currentInput: "",
@@ -3967,6 +4219,13 @@ function normaliseSpellingState(spelling, subjectId = "") {
   const isCurrentFlashcardsVersion = Number(flashcards.version || 0) === SPELLING_FLASHCARDS_VERSION;
   const isCurrentTenseTransferVersion = Number(tenseTransfer.version || 0) === SPELLING_TENSE_TRANSFER_VERSION;
   const isCurrentChallengeVersion = Number(challenge.version || 0) === SPELLING_CHALLENGE_VERSION;
+  const attemptPoolOffset = normalizeSpellingAttemptPoolOffset(next.attemptPoolOffset);
+  const followUpWordIds = Array.isArray(next.followUpWordIds)
+    ? next.followUpWordIds
+        .map((value) => String(value || ""))
+        .filter((value) => SPELLING_INTERVENTION_LIBRARY[value])
+        .slice(0, SPELLING_UNIT_SEED.followUpWordCount)
+    : [];
 
   return {
     ...base,
@@ -3986,12 +4245,8 @@ function normaliseSpellingState(spelling, subjectId = "") {
           }))
           .filter((entry) => entry.id && SPELLING_FOCUS_LABELS[entry.id] && entry.count > 0)
       : [],
-    followUpWordIds: Array.isArray(next.followUpWordIds)
-      ? next.followUpWordIds
-          .map((value) => String(value || ""))
-          .filter((value) => SPELLING_INTERVENTION_LIBRARY[value])
-          .slice(0, SPELLING_UNIT_SEED.followUpWordCount)
-      : [],
+    attemptPoolOffset,
+    followUpWordIds: followUpWordIds.length ? followUpWordIds : buildSpellingAttemptWordIds(attemptPoolOffset),
     diagnostic: {
       ...base.diagnostic,
       ...diagnostic,
@@ -4240,8 +4495,33 @@ function getSpellingDiagnosticWordCount(spelling) {
   return getSpellingAttemptWords(spelling).length || SPELLING_UNIT_SEED.diagnosticTargetCount;
 }
 
-function buildSpellingAttemptWordIds() {
-  return [...SPELLING_DEFAULT_FOLLOW_UP_WORD_IDS].slice(0, SPELLING_UNIT_SEED.followUpWordCount);
+function normalizeSpellingAttemptPoolOffset(value) {
+  const poolSize = SPELLING_DEFAULT_FOLLOW_UP_WORD_IDS.length;
+  if (!poolSize) {
+    return 0;
+  }
+  const numericValue = Math.max(0, Number(value || 0) || 0);
+  return numericValue % poolSize;
+}
+
+function buildSpellingAttemptWordIds(offset = 0) {
+  const wordIds = [...SPELLING_DEFAULT_FOLLOW_UP_WORD_IDS];
+  if (!wordIds.length) {
+    return [];
+  }
+  const startIndex = normalizeSpellingAttemptPoolOffset(offset);
+  const attemptWordCount = Math.min(SPELLING_UNIT_SEED.followUpWordCount, wordIds.length);
+  return Array.from({ length: attemptWordCount }, (_, index) => wordIds[(startIndex + index) % wordIds.length]);
+}
+
+function setSpellingAttemptWordIds(spelling, offset) {
+  const nextOffset = normalizeSpellingAttemptPoolOffset(offset);
+  spelling.attemptPoolOffset = nextOffset;
+  spelling.followUpWordIds = buildSpellingAttemptWordIds(nextOffset);
+}
+
+function advanceSpellingAttemptWordIds(spelling) {
+  setSpellingAttemptWordIds(spelling, normalizeSpellingAttemptPoolOffset(spelling.attemptPoolOffset) + SPELLING_UNIT_SEED.followUpWordCount);
 }
 
 function getSpellingAttemptWords(spelling) {
@@ -4282,7 +4562,7 @@ function buildSpellingChallengeItemsFromAttempts(completedAttempts = []) {
 }
 
 function resetSpellingProgressForNewAttempt(spelling) {
-  spelling.followUpWordIds = buildSpellingAttemptWordIds();
+  advanceSpellingAttemptWordIds(spelling);
   spelling.focusSummary = [];
   spelling.diagnostic = {
     currentIndex: 0,
@@ -4398,6 +4678,12 @@ function continueSpellingStage(subject) {
   const spelling = getSubjectSpellingState(subject);
   const celebrationStageId = String(spelling.celebrationStageId || "");
   const celebrationStageIndex = SPELLING_STAGE_ORDER.indexOf(celebrationStageId);
+  if (celebrationStageId === "tense-transfer" && SPELLING_STAGE_ORDER.every((stageId) => getSpellingStageCompletionMap(subject)[stageId])) {
+    resetSpellingProgressForNewAttempt(spelling);
+    spelling.sessionPreparedKey = currentSpellingSessionKey;
+    persistSubjects();
+    return;
+  }
   const nextStageId =
     celebrationStageIndex >= 0 && celebrationStageIndex < SPELLING_STAGE_ORDER.length - 1
       ? SPELLING_STAGE_ORDER[celebrationStageIndex + 1]
@@ -4435,8 +4721,8 @@ function getSpellingCelebrationCopy(stageId) {
   return {
     eyebrow: "Final ribbon",
     title: "Program complete",
-    body: "All four stages are complete. You can now review earlier stages and keep these words in spaced practice.",
-    action: "Finish"
+    body: "All four stages are complete. Continue to log this session and reset back to the beginning for the next spelling round.",
+    action: "Continue"
   };
 }
 
@@ -4674,6 +4960,7 @@ function recordCompletedSpellingAttempt(subject) {
 function resetSpellingActivity(subject, activityId) {
   const spelling = getSubjectSpellingState(subject);
   if (activityId === "diagnostic") {
+    advanceSpellingAttemptWordIds(spelling);
     spelling.diagnostic = {
       currentIndex: 0,
       currentInput: "",
@@ -4698,7 +4985,6 @@ function resetSpellingActivity(subject, activityId) {
       completed: false
     };
     spelling.focusSummary = [];
-    spelling.followUpWordIds = buildSpellingAttemptWordIds();
     spelling.currentAttemptId = createId();
     spelling.challenge.active = false;
     spelling.challenge.currentIndex = 0;
@@ -5150,6 +5436,19 @@ function selectSpellingTenseOption(subject, wordId, optionValue) {
   answer.feedbackMessage = "";
   spelling.coachMessage = `${normalizedValue} selected. Now place it onto yesterday, today, or tomorrow.`;
   persistSubjects();
+}
+
+function getSpellingTenseOptionOrder(entry) {
+  const options = [...(entry?.tense?.options || [])];
+  const seededRank = (value) =>
+    String(`${entry?.id || ""}:${value}`)
+      .split("")
+      .reduce((total, character, index) => total + character.charCodeAt(0) * (index + 1), 0);
+
+  return options.sort((left, right) => {
+    const rankDifference = (seededRank(left) % 97) - (seededRank(right) % 97);
+    return rankDifference || left.localeCompare(right);
+  });
 }
 
 function placeSelectedSpellingTenseOption(subject, wordId, slotId) {
@@ -10732,7 +11031,7 @@ function renderSpelling() {
                   .join("")}
               </div>
               <div class="spelling-option-bank">
-                ${(currentFamilyWord.tense?.options || [])
+                ${getSpellingTenseOptionOrder(currentFamilyWord)
                   .map((option) => `
                     <button
                       type="button"
@@ -10861,7 +11160,9 @@ function renderSpelling() {
   `;
 
   host.querySelector("[data-spelling-reset-unit]")?.addEventListener("click", () => {
-    subject.spelling = createDefaultSpellingState(subject.id);
+    const spelling = getSubjectSpellingState(subject);
+    resetSpellingProgressForNewAttempt(spelling);
+    spelling.sessionPreparedKey = currentSpellingSessionKey;
     persistSubjects();
     render();
   });
