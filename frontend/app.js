@@ -4,7 +4,7 @@ const authTokenStorageKey = "paperpanda-session-token";
 const subjectsStorageKey = "paperpanda-subjects-by-account";
 const settingsStorageKey = "studylift-settings";
 const uiVersionStorageKey = "paperpanda-ui-version";
-const currentUiVersion = "2026-06-25-spelling-recall-feedback";
+const currentUiVersion = "2026-06-25-spelling-tense-fallback";
 const previewDatabaseName = "paperpanda-assets";
 const previewStoreName = "document-previews";
 const settingsAssetStoreName = "settings-assets";
@@ -4048,14 +4048,18 @@ function normaliseSpellingState(spelling, subjectId = "") {
             Object.entries(tenseTransfer.answers).map(([wordId, entry]) => [
               wordId,
               {
-                exposureIndex: Math.max(0, Math.min(3, Number(entry?.exposureIndex || 0))),
-                isShowingSentence: Boolean(entry?.isShowingSentence),
-                typedValue: String(entry?.typedValue || ""),
+                placements: {
+                  past: String(entry?.placements?.past || ""),
+                  present: String(entry?.placements?.present || ""),
+                  future: String(entry?.placements?.future || "")
+                },
                 checked: Boolean(entry?.checked),
                 completed: Boolean(entry?.completed),
                 awaitingAdvance: Boolean(entry?.awaitingAdvance),
                 feedbackKind: ["correct", "incorrect"].includes(String(entry?.feedbackKind || "")) ? String(entry.feedbackKind) : "",
-                feedbackMessage: String(entry?.feedbackMessage || "")
+                feedbackMessage: String(entry?.feedbackMessage || ""),
+                lastCheckedAt: String(entry?.lastCheckedAt || ""),
+                selectedOption: String(entry?.selectedOption || "")
               }
             ])
           )
@@ -4479,7 +4483,8 @@ function ensureSpellingTenseAnswer(spelling, wordId) {
       awaitingAdvance: false,
       feedbackKind: "",
       feedbackMessage: "",
-      lastCheckedAt: ""
+      lastCheckedAt: "",
+      selectedOption: ""
     };
   }
   return spelling.tenseTransfer.answers[wordId];
@@ -4964,6 +4969,7 @@ function assignSpellingTensePlacement(subject, wordId, slotId, optionValue) {
     }
   });
   answer.placements[slotId] = normalizedValue;
+  answer.selectedOption = "";
   answer.checked = false;
   answer.awaitingAdvance = false;
   answer.feedbackKind = "";
@@ -4979,6 +4985,7 @@ function clearSpellingTensePlacement(subject, wordId, slotId) {
   }
   const answer = ensureSpellingTenseAnswer(spelling, wordId);
   answer.placements[slotId] = "";
+  answer.selectedOption = "";
   answer.checked = false;
   answer.awaitingAdvance = false;
   answer.feedbackKind = "";
@@ -5044,8 +5051,40 @@ function checkSpellingTenseTransfer(subject, wordId) {
   }
 
   answer.awaitingAdvance = true;
+  answer.selectedOption = "";
   spelling.coachMessage = `${entry.word} is correct across past, present, and future.`;
   persistSubjects();
+}
+
+function selectSpellingTenseOption(subject, wordId, optionValue) {
+  const spelling = getSubjectSpellingState(subject);
+  const entry = SPELLING_INTERVENTION_LIBRARY[wordId];
+  if (!entry) {
+    return;
+  }
+  const normalizedValue = String(optionValue || "").trim();
+  if (!normalizedValue || !(entry.tense?.options || []).includes(normalizedValue)) {
+    return;
+  }
+  const answer = ensureSpellingTenseAnswer(spelling, wordId);
+  answer.selectedOption = normalizedValue;
+  answer.checked = false;
+  answer.awaitingAdvance = false;
+  answer.feedbackKind = "";
+  answer.feedbackMessage = "";
+  spelling.coachMessage = `${normalizedValue} selected. Now place it onto yesterday, today, or tomorrow.`;
+  persistSubjects();
+}
+
+function placeSelectedSpellingTenseOption(subject, wordId, slotId) {
+  const spelling = getSubjectSpellingState(subject);
+  const answer = ensureSpellingTenseAnswer(spelling, wordId);
+  if (!answer.selectedOption) {
+    spelling.coachMessage = "Select a word first, then choose yesterday, today, or tomorrow.";
+    persistSubjects();
+    return;
+  }
+  assignSpellingTensePlacement(subject, wordId, slotId, answer.selectedOption);
 }
 
 function advanceSpellingTenseTransfer(subject, wordId) {
@@ -10563,12 +10602,11 @@ function renderSpelling() {
               <span>Word ${escapeHtml(String(followUpWords.filter((entry) => ensureSpellingTenseAnswer(spelling, entry.id).completed).length + 1))} of ${escapeHtml(String(followUpWords.length))}</span>
               <span>${escapeHtml(currentFamilyWord.word)}</span>
             </div>
-            ${getSpellingWordFamilyReferenceMarkup(currentFamilyWord)}
             <article class="spelling-tense-card spelling-tense-card--single${currentFamilyAnswer?.checked ? (currentFamilyAnswer?.feedbackKind === "correct" ? " is-correct" : " is-incorrect") : ""}">
               <div class="spelling-tense-board">
                 ${["past", "present", "future"]
                   .map((slotId) => `
-                    <div class="spelling-tense-slot" data-spelling-tense-slot="${slotId}" data-spelling-tense-word="${currentFamilyWord.id}">
+                    <div class="spelling-tense-slot" data-spelling-tense-slot="${slotId}" data-spelling-tense-word="${currentFamilyWord.id}" role="button" tabindex="0">
                       <span class="spelling-tense-slot__label">${escapeHtml(tenseLabels[slotId])}</span>
                       ${
                         currentFamilyAnswer?.placements?.[slotId]
@@ -10588,7 +10626,7 @@ function renderSpelling() {
                   .map((option) => `
                     <button
                       type="button"
-                      class="spelling-option-chip${Object.values(currentFamilyAnswer?.placements || {}).includes(option) ? " is-used" : ""}"
+                      class="spelling-option-chip${Object.values(currentFamilyAnswer?.placements || {}).includes(option) ? " is-used" : ""}${currentFamilyAnswer?.selectedOption === option ? " is-selected" : ""}"
                       draggable="true"
                       data-spelling-tense-option="${escapeHtml(option)}"
                       data-spelling-tense-word="${currentFamilyWord.id}"
@@ -10791,6 +10829,10 @@ function renderSpelling() {
   });
 
   host.querySelectorAll("[data-spelling-tense-option]").forEach((button) => {
+    button.addEventListener("click", () => {
+      selectSpellingTenseOption(subject, button.dataset.spellingTenseWord, button.dataset.spellingTenseOption);
+      render();
+    });
     button.addEventListener("dragstart", (event) => {
       event.dataTransfer?.setData("text/plain", button.dataset.spellingTenseOption || "");
       event.dataTransfer?.setData("application/x-spelling-word", button.dataset.spellingTenseWord || "");
@@ -10799,6 +10841,17 @@ function renderSpelling() {
   });
 
   host.querySelectorAll("[data-spelling-tense-slot]").forEach((slot) => {
+    slot.addEventListener("click", () => {
+      placeSelectedSpellingTenseOption(subject, slot.dataset.spellingTenseWord, slot.dataset.spellingTenseSlot);
+      render();
+    });
+    slot.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        placeSelectedSpellingTenseOption(subject, slot.dataset.spellingTenseWord, slot.dataset.spellingTenseSlot);
+        render();
+      }
+    });
     slot.addEventListener("dragover", (event) => {
       event.preventDefault();
       event.dataTransfer.dropEffect = "move";
@@ -10819,7 +10872,8 @@ function renderSpelling() {
   });
 
   host.querySelectorAll("[data-spelling-tense-clear]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
       clearSpellingTensePlacement(subject, button.dataset.spellingTenseWord, button.dataset.spellingTenseClear);
       render();
     });

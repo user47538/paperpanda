@@ -6217,6 +6217,7 @@ input[type="date"] {
   border: 1px dashed rgba(72, 54, 24, 0.2);
   background: rgba(248, 245, 238, 0.8);
   transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+  cursor: pointer;
 }
 
 .spelling-tense-slot.is-drag-over {
@@ -6270,6 +6271,12 @@ input[type="date"] {
   background: #edf7f0;
   border-color: rgba(37, 107, 74, 0.2);
   color: var(--spelling-green);
+}
+
+.spelling-option-chip.is-selected {
+  border-color: rgba(31, 61, 122, 0.28);
+  background: #eef3ff;
+  color: #1f3d7a;
 }
 
 .spelling-choice-row--stacked {
