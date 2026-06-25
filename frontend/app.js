@@ -4,7 +4,7 @@ const authTokenStorageKey = "paperpanda-session-token";
 const subjectsStorageKey = "paperpanda-subjects-by-account";
 const settingsStorageKey = "studylift-settings";
 const uiVersionStorageKey = "paperpanda-ui-version";
-const currentUiVersion = "2026-06-25-spelling-ui-refresh";
+const currentUiVersion = "2026-06-25-spelling-weekly-challenge";
 const previewDatabaseName = "paperpanda-assets";
 const previewStoreName = "document-previews";
 const settingsAssetStoreName = "settings-assets";
@@ -472,8 +472,9 @@ const FOCUS_AREAS = [
 ];
 
 const SPELLING_STAGE_ORDER = ["diagnostic", "looks-right", "word-families", "tense-transfer"];
-const SPELLING_FLASHCARDS_VERSION = 2;
+const SPELLING_FLASHCARDS_VERSION = 3;
 const SPELLING_TENSE_TRANSFER_VERSION = 2;
+const SPELLING_CHALLENGE_VERSION = 2;
 const SPELLING_STAGE_LABELS = {
   diagnostic: "Diagnostic",
   "looks-right": "Looks Right",
@@ -491,10 +492,11 @@ const SPELLING_UNIT_SEED = {
   title: "Spelling Progression",
   intro:
     "Start with a spoken diagnostic, then move into visual checking, word families, and tense transfer built from the words the student actually missed.",
-  diagnosticTargetCount: 20,
+  diagnosticTargetCount: 10,
   followUpWordCount: 10,
   reviewDays: ["Day 1", "Day 3", "Day 7", "Day 14", "Day 30"]
 };
+const SPELLING_CHALLENGE_MODE_ORDER = ["looks-right", "dictation", "root-word", "missing-letter"];
 const SPELLING_INTERVENTION_LIBRARY = {
   believe: {
     id: "believe",
@@ -878,6 +880,7 @@ const state = {
   },
   subjects: createBaseSubjects()
 };
+const currentSpellingSessionKey = createId();
 
 const elements = {
   landingPanel: document.getElementById("landing-panel"),
@@ -3898,7 +3901,7 @@ function createDefaultSpellingState(subjectId = "") {
       tint: "cream"
     },
     focusSummary: [],
-    followUpWordIds: [],
+    followUpWordIds: [...SPELLING_DEFAULT_FOLLOW_UP_WORD_IDS].slice(0, SPELLING_UNIT_SEED.followUpWordCount),
     diagnostic: {
       currentIndex: 0,
       currentInput: "",
@@ -3923,7 +3926,21 @@ function createDefaultSpellingState(subjectId = "") {
       completed: false
     },
     selectedStageId: "",
-    celebrationStageId: ""
+    celebrationStageId: "",
+    currentAttemptId: createId(),
+    sessionPreparedKey: "",
+    completedAttempts: [],
+    challenge: {
+      version: SPELLING_CHALLENGE_VERSION,
+      active: false,
+      weekKey: "",
+      currentIndex: 0,
+      items: [],
+      checked: false,
+      completed: false,
+      inputValue: "",
+      lastCompletedWeekKey: ""
+    }
   };
 }
 
@@ -3934,8 +3951,10 @@ function normaliseSpellingState(spelling, subjectId = "") {
   const looksRight = next.looksRight && typeof next.looksRight === "object" ? next.looksRight : {};
   const flashcards = next.flashcards && typeof next.flashcards === "object" ? next.flashcards : {};
   const tenseTransfer = next.tenseTransfer && typeof next.tenseTransfer === "object" ? next.tenseTransfer : {};
+  const challenge = next.challenge && typeof next.challenge === "object" ? next.challenge : {};
   const isCurrentFlashcardsVersion = Number(flashcards.version || 0) === SPELLING_FLASHCARDS_VERSION;
   const isCurrentTenseTransferVersion = Number(tenseTransfer.version || 0) === SPELLING_TENSE_TRANSFER_VERSION;
+  const isCurrentChallengeVersion = Number(challenge.version || 0) === SPELLING_CHALLENGE_VERSION;
 
   return {
     ...base,
@@ -3965,7 +3984,7 @@ function normaliseSpellingState(spelling, subjectId = "") {
       ...base.diagnostic,
       ...diagnostic,
       currentIndex: Math.min(
-        SPELLING_DIAGNOSTIC_WORDS.length,
+        SPELLING_UNIT_SEED.diagnosticTargetCount,
         Math.max(0, Number(diagnostic.currentIndex || 0))
       ),
       currentInput: String(diagnostic.currentInput || ""),
@@ -4036,7 +4055,44 @@ function normaliseSpellingState(spelling, subjectId = "") {
       completed: isCurrentTenseTransferVersion ? Boolean(tenseTransfer.completed) : false
     },
     selectedStageId: SPELLING_STAGE_ORDER.includes(String(next.selectedStageId || "")) ? String(next.selectedStageId || "") : "",
-    celebrationStageId: SPELLING_STAGE_ORDER.includes(String(next.celebrationStageId || "")) ? String(next.celebrationStageId || "") : ""
+    celebrationStageId: SPELLING_STAGE_ORDER.includes(String(next.celebrationStageId || "")) ? String(next.celebrationStageId || "") : "",
+    currentAttemptId: String(next.currentAttemptId || base.currentAttemptId || createId()),
+    sessionPreparedKey: String(next.sessionPreparedKey || ""),
+    completedAttempts: Array.isArray(next.completedAttempts)
+      ? next.completedAttempts
+          .map((entry) => ({
+            attemptId: String(entry?.attemptId || ""),
+            weekKey: String(entry?.weekKey || ""),
+            completedAt: String(entry?.completedAt || ""),
+            wordIds: Array.isArray(entry?.wordIds)
+              ? entry.wordIds.map((value) => String(value || "")).filter((value) => SPELLING_INTERVENTION_LIBRARY[value]).slice(0, SPELLING_UNIT_SEED.followUpWordCount)
+              : []
+          }))
+          .filter((entry) => entry.attemptId && entry.weekKey && entry.wordIds.length)
+      : [],
+    challenge: {
+      ...base.challenge,
+      ...(isCurrentChallengeVersion ? challenge : {}),
+      version: SPELLING_CHALLENGE_VERSION,
+      active: isCurrentChallengeVersion ? Boolean(challenge.active) : false,
+      weekKey: isCurrentChallengeVersion ? String(challenge.weekKey || "") : "",
+      currentIndex: isCurrentChallengeVersion ? Math.max(0, Number(challenge.currentIndex || 0)) : 0,
+      items: isCurrentChallengeVersion && Array.isArray(challenge.items)
+        ? challenge.items
+            .map((item, index) => ({
+              id: String(item?.id || `challenge-item-${index + 1}`),
+              mode: SPELLING_CHALLENGE_MODE_ORDER.includes(String(item?.mode || "")) ? String(item.mode) : SPELLING_CHALLENGE_MODE_ORDER[index % SPELLING_CHALLENGE_MODE_ORDER.length],
+              wordId: String(item?.wordId || ""),
+              familyWord: String(item?.familyWord || ""),
+              missingIndex: Math.max(0, Number(item?.missingIndex || 0))
+            }))
+            .filter((item) => SPELLING_INTERVENTION_LIBRARY[item.wordId])
+        : [],
+      checked: isCurrentChallengeVersion ? Boolean(challenge.checked) : false,
+      completed: isCurrentChallengeVersion ? Boolean(challenge.completed) : false,
+      inputValue: isCurrentChallengeVersion ? String(challenge.inputValue || "") : "",
+      lastCompletedWeekKey: isCurrentChallengeVersion ? String(challenge.lastCompletedWeekKey || "") : ""
+    }
   };
 }
 
@@ -4090,6 +4146,128 @@ function getSpellingMasteryRatio(subject) {
 function getSpellingStageId(subject) {
   const completionMap = getSpellingStageCompletionMap(subject);
   return SPELLING_STAGE_ORDER.find((stageId) => !completionMap[stageId]) || SPELLING_STAGE_ORDER[SPELLING_STAGE_ORDER.length - 1];
+}
+
+function getSpellingDiagnosticWordCount(spelling) {
+  return getSpellingAttemptWords(spelling).length || SPELLING_UNIT_SEED.diagnosticTargetCount;
+}
+
+function buildSpellingAttemptWordIds() {
+  return [...SPELLING_DEFAULT_FOLLOW_UP_WORD_IDS].slice(0, SPELLING_UNIT_SEED.followUpWordCount);
+}
+
+function getSpellingAttemptWords(spelling) {
+  const attemptWordIds = Array.isArray(spelling.followUpWordIds) && spelling.followUpWordIds.length
+    ? spelling.followUpWordIds
+    : buildSpellingAttemptWordIds();
+  return attemptWordIds
+    .map((wordId) =>
+      SPELLING_DIAGNOSTIC_WORDS.find((entry) => entry.interventionId === wordId || normalizeSpellingAttempt(entry.word) === normalizeSpellingAttempt(wordId))
+        || SPELLING_DIAGNOSTIC_WORDS.find((entry) => entry.interventionId === wordId)
+    )
+    .filter(Boolean)
+    .slice(0, SPELLING_UNIT_SEED.diagnosticTargetCount);
+}
+
+function buildSpellingChallengeItemsFromAttempts(completedAttempts = []) {
+  return completedAttempts
+    .slice(-4)
+    .flatMap((attempt, attemptIndex) =>
+      (attempt.wordIds || []).map((wordId, wordIndex) => {
+        const entry = SPELLING_INTERVENTION_LIBRARY[wordId];
+        if (!entry) {
+          return null;
+        }
+        const mode = SPELLING_CHALLENGE_MODE_ORDER[(attemptIndex * SPELLING_UNIT_SEED.followUpWordCount + wordIndex) % SPELLING_CHALLENGE_MODE_ORDER.length];
+        const familyWord = entry.familyWords[wordIndex % Math.max(1, entry.familyWords.length)] || entry.word;
+        const missingIndex = Math.max(1, Math.min(entry.word.length - 2, (attemptIndex + wordIndex) % Math.max(2, entry.word.length - 1)));
+        return {
+          id: `${attempt.attemptId}:${wordId}:${wordIndex}`,
+          mode,
+          wordId,
+          familyWord,
+          missingIndex
+        };
+      })
+    )
+    .filter(Boolean);
+}
+
+function resetSpellingProgressForNewAttempt(spelling) {
+  spelling.followUpWordIds = buildSpellingAttemptWordIds();
+  spelling.focusSummary = [];
+  spelling.diagnostic = {
+    currentIndex: 0,
+    currentInput: "",
+    responses: {},
+    completed: false
+  };
+  spelling.looksRight = {
+    answers: {},
+    checked: false,
+    completed: false
+  };
+  spelling.flashcards = {
+    version: SPELLING_FLASHCARDS_VERSION,
+    cards: {},
+    currentWordId: "",
+    completed: false
+  };
+  spelling.tenseTransfer = {
+    version: SPELLING_TENSE_TRANSFER_VERSION,
+    answers: {},
+    currentWordId: "",
+    completed: false
+  };
+  spelling.selectedStageId = "";
+  spelling.celebrationStageId = "";
+  spelling.currentAttemptId = createId();
+  spelling.challenge.active = false;
+  spelling.challenge.version = SPELLING_CHALLENGE_VERSION;
+  spelling.challenge.currentIndex = 0;
+  spelling.challenge.items = [];
+  spelling.challenge.checked = false;
+  spelling.challenge.completed = false;
+  spelling.challenge.inputValue = "";
+  spelling.coachMessage = "Start with the spoken diagnostic so the follow-up work is built from the ten words for this attempt.";
+}
+
+function getWeeklyCompletedSpellingAttempts(spelling, weekKey = currentWeekKey()) {
+  return (spelling.completedAttempts || []).filter((entry) => entry.weekKey === weekKey);
+}
+
+function ensureSpellingSessionState(subject) {
+  const spelling = getSubjectSpellingState(subject);
+  if (!spelling.enabled || spelling.sessionPreparedKey === currentSpellingSessionKey) {
+    return;
+  }
+
+  spelling.sessionPreparedKey = currentSpellingSessionKey;
+  const weekKey = currentWeekKey();
+  spelling.completedAttempts = (spelling.completedAttempts || []).slice(-16);
+  const weeklyAttempts = getWeeklyCompletedSpellingAttempts(spelling, weekKey);
+  const attemptComplete = SPELLING_STAGE_ORDER.every((stage) => getSpellingStageCompletionMap(subject)[stage]);
+
+  if (weeklyAttempts.length >= 4 && spelling.challenge.lastCompletedWeekKey !== weekKey) {
+    spelling.challenge = {
+      version: SPELLING_CHALLENGE_VERSION,
+      active: true,
+      weekKey,
+      currentIndex: 0,
+      items: buildSpellingChallengeItemsFromAttempts(weeklyAttempts),
+      checked: false,
+      completed: false,
+      inputValue: "",
+      lastCompletedWeekKey: spelling.challenge.lastCompletedWeekKey || ""
+    };
+    persistSubjects();
+    return;
+  }
+
+  if (attemptComplete && weeklyAttempts.length < 4) {
+    resetSpellingProgressForNewAttempt(spelling);
+    persistSubjects();
+  }
 }
 
 function getSpellingVisibleStageId(subject) {
@@ -4180,16 +4358,17 @@ function getSpellingStageLabel(subject) {
 }
 
 function getSpellingDiagnosticCurrentWord(spelling) {
-  return SPELLING_DIAGNOSTIC_WORDS[spelling.diagnostic.currentIndex] || null;
+  return getSpellingAttemptWords(spelling)[spelling.diagnostic.currentIndex] || null;
 }
 
 function getSpellingDiagnosticCorrectCount(spelling) {
-  return Object.values(spelling.diagnostic.responses).filter((entry) => entry?.correct).length;
+  return getSpellingAttemptWords(spelling).filter((wordEntry) => spelling.diagnostic.responses[wordEntry.id]?.correct).length;
 }
 
-function buildSpellingFocusSummaryFromResponses(responses) {
+function buildSpellingFocusSummaryFromResponses(responses, spelling = null) {
   const counts = new Map();
-  SPELLING_DIAGNOSTIC_WORDS.forEach((wordEntry) => {
+  const diagnosticWords = spelling ? getSpellingAttemptWords(spelling) : SPELLING_DIAGNOSTIC_WORDS;
+  diagnosticWords.forEach((wordEntry) => {
     const response = responses[wordEntry.id];
     if (!response || response.correct) {
       return;
@@ -4206,32 +4385,21 @@ function buildSpellingFocusSummaryFromResponses(responses) {
 function getSpellingTopFocuses(spelling, limit = 3) {
   const focusSummary = spelling.focusSummary.length
     ? spelling.focusSummary
-    : buildSpellingFocusSummaryFromResponses(spelling.diagnostic.responses);
+    : buildSpellingFocusSummaryFromResponses(spelling.diagnostic.responses, spelling);
   return focusSummary.slice(0, limit);
 }
 
-function buildSpellingFollowUpWordIdsFromResponses(responses) {
-  const followUpWordIds = [];
-  SPELLING_DIAGNOSTIC_WORDS.forEach((wordEntry) => {
-    if (!wordEntry.interventionId) {
-      return;
-    }
-    const response = responses[wordEntry.id];
-    if (response && !response.correct && !followUpWordIds.includes(wordEntry.interventionId)) {
-      followUpWordIds.push(wordEntry.interventionId);
-    }
-  });
-  SPELLING_DEFAULT_FOLLOW_UP_WORD_IDS.forEach((wordId) => {
-    if (!followUpWordIds.includes(wordId)) {
-      followUpWordIds.push(wordId);
-    }
-  });
+function buildSpellingFollowUpWordIdsFromResponses(responses, spelling = null) {
+  const diagnosticWords = spelling ? getSpellingAttemptWords(spelling) : SPELLING_DIAGNOSTIC_WORDS;
+  const followUpWordIds = diagnosticWords
+    .map((wordEntry) => String(wordEntry.interventionId || ""))
+    .filter(Boolean);
   return followUpWordIds.slice(0, SPELLING_UNIT_SEED.followUpWordCount);
 }
 
 function ensureSpellingFollowUpWordIds(spelling) {
   if (!spelling.followUpWordIds.length) {
-    spelling.followUpWordIds = buildSpellingFollowUpWordIdsFromResponses(spelling.diagnostic.responses);
+    spelling.followUpWordIds = buildSpellingFollowUpWordIdsFromResponses(spelling.diagnostic.responses, spelling);
   }
   return spelling.followUpWordIds;
 }
@@ -4363,8 +4531,8 @@ function isSpellingTenseTransferComplete(spelling) {
 function finaliseSpellingDiagnostic(subject) {
   const spelling = getSubjectSpellingState(subject);
   spelling.diagnostic.completed = true;
-  spelling.focusSummary = buildSpellingFocusSummaryFromResponses(spelling.diagnostic.responses);
-  spelling.followUpWordIds = buildSpellingFollowUpWordIdsFromResponses(spelling.diagnostic.responses);
+  spelling.focusSummary = buildSpellingFocusSummaryFromResponses(spelling.diagnostic.responses, spelling);
+  spelling.followUpWordIds = buildSpellingFollowUpWordIdsFromResponses(spelling.diagnostic.responses, spelling);
   spelling.looksRight.checked = false;
   spelling.looksRight.completed = false;
   spelling.flashcards = {
@@ -4387,6 +4555,22 @@ function finaliseSpellingDiagnostic(subject) {
       ? `Diagnostic complete. The strongest follow-up needs are ${topFocuses.join(" and ").toLowerCase()}.`
       : "Diagnostic complete. The follow-up stages are ready."
   );
+}
+
+function recordCompletedSpellingAttempt(subject) {
+  const spelling = getSubjectSpellingState(subject);
+  if ((spelling.completedAttempts || []).some((entry) => entry.attemptId === spelling.currentAttemptId)) {
+    return;
+  }
+  spelling.completedAttempts = [
+    ...(spelling.completedAttempts || []),
+    {
+      attemptId: spelling.currentAttemptId,
+      weekKey: currentWeekKey(),
+      completedAt: new Date().toISOString(),
+      wordIds: [...spelling.followUpWordIds].slice(0, SPELLING_UNIT_SEED.followUpWordCount)
+    }
+  ].slice(-16);
 }
 
 function resetSpellingActivity(subject, activityId) {
@@ -4416,8 +4600,15 @@ function resetSpellingActivity(subject, activityId) {
       completed: false
     };
     spelling.focusSummary = [];
-    spelling.followUpWordIds = [];
-    spelling.coachMessage = "Start with the spoken diagnostic so the follow-up work is built from real errors.";
+    spelling.followUpWordIds = buildSpellingAttemptWordIds();
+    spelling.currentAttemptId = createId();
+    spelling.challenge.active = false;
+    spelling.challenge.currentIndex = 0;
+    spelling.challenge.items = [];
+    spelling.challenge.checked = false;
+    spelling.challenge.completed = false;
+    spelling.challenge.inputValue = "";
+    spelling.coachMessage = "Start with the spoken diagnostic so the follow-up work is built from the same ten words across this attempt.";
   } else if (activityId === "looks-right") {
     spelling.looksRight = {
       answers: {},
@@ -4498,6 +4689,7 @@ function speakSpellingDiagnosticWord(wordEntry) {
 function submitSpellingDiagnosticWord(subject, attemptOverride = null) {
   const spelling = getSubjectSpellingState(subject);
   const wordEntry = getSpellingDiagnosticCurrentWord(spelling);
+  const diagnosticWordCount = getSpellingDiagnosticWordCount(spelling);
   if (!wordEntry) {
     return;
   }
@@ -4518,12 +4710,12 @@ function submitSpellingDiagnosticWord(subject, attemptOverride = null) {
   spelling.diagnostic.currentInput = "";
   spelling.diagnostic.currentIndex += 1;
 
-  if (spelling.diagnostic.currentIndex >= SPELLING_DIAGNOSTIC_WORDS.length) {
+  if (spelling.diagnostic.currentIndex >= diagnosticWordCount) {
     finaliseSpellingDiagnostic(subject);
   } else {
     const nextWord = getSpellingDiagnosticCurrentWord(spelling);
     spelling.coachMessage = nextWord
-      ? `Saved. Word ${spelling.diagnostic.currentIndex + 1} of ${SPELLING_DIAGNOSTIC_WORDS.length} is ready.`
+      ? `Saved. Word ${spelling.diagnostic.currentIndex + 1} of ${diagnosticWordCount} is ready.`
       : spelling.coachMessage;
   }
 
@@ -4754,10 +4946,124 @@ function submitSpellingFamilyRecall(subject, wordId, typedValueOverride = null) 
   spelling.tenseTransfer.currentWordId = nextWord?.id || "";
   spelling.tenseTransfer.completed = isSpellingTenseTransferComplete(spelling);
   if (spelling.tenseTransfer.completed) {
+    recordCompletedSpellingAttempt(subject);
     celebrateSpellingStage(subject, "tense-transfer", "Final stage complete. The family sentences held and the key words were recalled from memory.");
     return;
   }
   spelling.coachMessage = `${entry.word} is secure. The next keyword is ready.`;
+  persistSubjects();
+}
+
+function getSpellingChallengeCurrentItem(spelling) {
+  return spelling.challenge.items[spelling.challenge.currentIndex] || null;
+}
+
+function getSpellingChallengeItemEntry(item) {
+  return item ? SPELLING_INTERVENTION_LIBRARY[item.wordId] || null : null;
+}
+
+function getSpellingChallengeLooksRightOptions(entry) {
+  const sentence = getSpellingLooksRightSentence(entry);
+  return [
+    {
+      value: entry.word,
+      markup: buildSpellingLooksRightChoiceSentence(sentence, entry.word, entry.lookRightChoiceCorrect || entry.articulation)
+    },
+    {
+      value: entry.lookRightWrong,
+      markup: buildSpellingLooksRightChoiceSentence(sentence, entry.word, entry.lookRightChoiceWrong || entry.lookRightWrong)
+    }
+  ];
+}
+
+function buildSpellingChallengeMissingLetterPrompt(entry, missingIndex) {
+  const index = Math.max(0, Math.min(entry.word.length - 1, missingIndex));
+  return `${escapeHtml(entry.word.slice(0, index))}<span class="spelling-inline-target">_</span>${escapeHtml(entry.word.slice(index + 1))}`;
+}
+
+function speakSpellingChallengeWord(item, entry) {
+  if (!item || !entry) {
+    return;
+  }
+  void speakTextWithOpenAi(`Spell the word ${entry.word}. ${getSpellingLooksRightSentence(entry)}`, {
+    context: `spelling:challenge:${item.id}`,
+    statusMessages: {
+      preparing: "Preparing spelling audio...",
+      playing: "Reading spelling word...",
+      error: "Spelling audio failed."
+    }
+  })
+    .then(() => {
+      render();
+    })
+    .catch((error) => {
+      console.error("Spelling challenge audio failed.", error);
+      render();
+    });
+}
+
+function advanceSpellingChallenge(spelling, successMessage) {
+  spelling.challenge.currentIndex += 1;
+  spelling.challenge.checked = false;
+  spelling.challenge.inputValue = "";
+  if (spelling.challenge.currentIndex >= spelling.challenge.items.length) {
+    spelling.challenge.completed = true;
+    spelling.challenge.active = false;
+    spelling.challenge.lastCompletedWeekKey = spelling.challenge.weekKey;
+    spelling.coachMessage = "Weekly spelling challenge complete.";
+    return;
+  }
+  spelling.coachMessage = successMessage;
+}
+
+function submitSpellingChallengeInput(subject) {
+  const spelling = getSubjectSpellingState(subject);
+  const item = getSpellingChallengeCurrentItem(spelling);
+  const entry = getSpellingChallengeItemEntry(item);
+  if (!item || !entry) {
+    return;
+  }
+  const typedValue = String(spelling.challenge.inputValue || "").trim();
+  spelling.challenge.checked = true;
+  if (!typedValue) {
+    spelling.coachMessage = "Type an answer before continuing.";
+    persistSubjects();
+    return;
+  }
+
+  let isCorrect = false;
+  if (item.mode === "dictation") {
+    isCorrect = normalizeSpellingAttempt(typedValue) === normalizeSpellingAttempt(entry.word);
+  } else if (item.mode === "root-word") {
+    isCorrect = normalizeSpellingAttempt(typedValue) === normalizeSpellingAttempt(entry.word);
+  } else if (item.mode === "missing-letter") {
+    isCorrect = typedValue.trim().toLowerCase() === entry.word[item.missingIndex].toLowerCase();
+  }
+
+  if (!isCorrect) {
+    spelling.coachMessage = `Retry ${entry.word}.`;
+    persistSubjects();
+    return;
+  }
+
+  advanceSpellingChallenge(spelling, `${entry.word} is correct. Next challenge word ready.`);
+  persistSubjects();
+}
+
+function selectSpellingChallengeLooksRight(subject, value) {
+  const spelling = getSubjectSpellingState(subject);
+  const item = getSpellingChallengeCurrentItem(spelling);
+  const entry = getSpellingChallengeItemEntry(item);
+  if (!item || !entry) {
+    return;
+  }
+  spelling.challenge.checked = true;
+  if (value !== entry.word) {
+    spelling.coachMessage = `Look again at ${entry.word}.`;
+    persistSubjects();
+    return;
+  }
+  advanceSpellingChallenge(spelling, `${entry.word} is correct. Next challenge word ready.`);
   persistSubjects();
 }
 
@@ -6243,6 +6549,15 @@ async function speakTextWithOpenAi(text, { context = "document", documentId = nu
 function currentDateKey() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+function currentWeekKey(date = new Date()) {
+  const weekDate = new Date(date);
+  const day = weekDate.getDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  weekDate.setHours(0, 0, 0, 0);
+  weekDate.setDate(weekDate.getDate() + mondayOffset);
+  return `${weekDate.getFullYear()}-${String(weekDate.getMonth() + 1).padStart(2, "0")}-${String(weekDate.getDate()).padStart(2, "0")}`;
 }
 
 function formatHeroDate(date = new Date()) {
@@ -9637,6 +9952,7 @@ function renderSpelling() {
   }
 
   const spelling = getSubjectSpellingState(subject);
+  ensureSpellingSessionState(subject);
   if (!spelling.enabled) {
     host.innerHTML = `
       <section class="spelling-shell spelling-shell--empty">
@@ -9661,6 +9977,123 @@ function renderSpelling() {
   const diagnosticWord = getSpellingDiagnosticCurrentWord(spelling);
   const focusSummary = getSpellingTopFocuses(spelling, 3);
   const followUpWords = getSpellingFollowUpWords(spelling);
+  const attemptWords = getSpellingAttemptWords(spelling);
+
+  if (spelling.challenge.active || (spelling.challenge.completed && spelling.challenge.lastCompletedWeekKey === currentWeekKey())) {
+    const currentChallengeItem = getSpellingChallengeCurrentItem(spelling);
+    const currentChallengeEntry = getSpellingChallengeItemEntry(currentChallengeItem);
+    const challengeProgress = `${Math.min(spelling.challenge.currentIndex + 1, spelling.challenge.items.length)} of ${spelling.challenge.items.length}`;
+    host.innerHTML = spelling.challenge.completed
+      ? `
+        <section class="spelling-shell" data-spelling-font="${escapeHtml(spelling.preferences.font)}" data-spelling-spacing="${escapeHtml(spelling.preferences.spacing)}" data-spelling-tint="${escapeHtml(spelling.preferences.tint)}">
+          <article class="spelling-stage-card spelling-stage-card--single spelling-stage-card--celebration">
+            <p class="eyebrow">Weekly challenge complete</p>
+            <div class="spelling-ribbon-badge">40 words checked</div>
+            <h4>Challenge finished</h4>
+            <p>The mixed weekly challenge is complete. A new challenge will appear after four more completed spelling attempts in the current week.</p>
+          </article>
+        </section>
+      `
+      : `
+        <section class="spelling-shell" data-spelling-font="${escapeHtml(spelling.preferences.font)}" data-spelling-spacing="${escapeHtml(spelling.preferences.spacing)}" data-spelling-tint="${escapeHtml(spelling.preferences.tint)}">
+          <article class="spelling-stage-card spelling-stage-card--single">
+            <div class="spelling-card__header">
+              <div>
+                <p class="eyebrow">Weekly spelling challenge</p>
+                <h4>40-word mixed check</h4>
+              </div>
+              <span class="spelling-card__status">Challenge live</span>
+            </div>
+            <p>These 40 prompts come from the last four completed 10-word spelling attempts this week.</p>
+            <div class="spelling-stage-meta spelling-stage-meta--single">
+              <span>Question ${escapeHtml(challengeProgress)}</span>
+              <span>${escapeHtml(currentChallengeItem ? currentChallengeItem.mode.replace("-", " ") : "Ready")}</span>
+            </div>
+            ${currentChallengeItem && currentChallengeEntry ? `
+              <article class="spelling-tense-card spelling-tense-card--single">
+                ${
+                  currentChallengeItem.mode === "looks-right"
+                    ? `
+                      <p class="spelling-comparison-card__prompt">Which sentence looks right?</p>
+                      <div class="spelling-choice-row spelling-choice-row--stacked">
+                        ${getSpellingChallengeLooksRightOptions(currentChallengeEntry).map((option) => `
+                          <button type="button" class="spelling-choice spelling-choice--sentence spelling-choice--sentence-large" data-spelling-challenge-looks-right="${escapeHtml(option.value)}">
+                            <span>${option.markup}</span>
+                          </button>
+                        `).join("")}
+                      </div>
+                    `
+                    : currentChallengeItem.mode === "dictation"
+                      ? `
+                        <div class="spelling-audio-panel">
+                          <button type="button" class="primary-button primary-button--dark" data-spelling-challenge-play="true">Play word</button>
+                          <p>Listen to the AI voice, then type the full spelling.</p>
+                        </div>
+                        <input class="reader-editor spelling-inline-input spelling-inline-input--centered" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" value="${escapeHtml(spelling.challenge.inputValue || "")}" placeholder="Type the word you hear" data-spelling-challenge-input="true" />
+                        <div class="spelling-stage-actions spelling-stage-actions--compact">
+                          <button type="button" class="primary-button primary-button--dark" data-spelling-challenge-submit="true">Check answer</button>
+                        </div>
+                      `
+                      : currentChallengeItem.mode === "root-word"
+                        ? `
+                          <p class="spelling-comparison-card__prompt">What is the root word?</p>
+                          <div class="spelling-family-sentence-card">
+                            <p><span class="spelling-inline-target">${escapeHtml(currentChallengeItem.familyWord)}</span></p>
+                          </div>
+                          <input class="reader-editor spelling-inline-input spelling-inline-input--centered" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" value="${escapeHtml(spelling.challenge.inputValue || "")}" placeholder="Type the root word" data-spelling-challenge-input="true" />
+                          <div class="spelling-stage-actions spelling-stage-actions--compact">
+                            <button type="button" class="primary-button primary-button--dark" data-spelling-challenge-submit="true">Check answer</button>
+                          </div>
+                        `
+                        : `
+                          <p class="spelling-comparison-card__prompt">Type the missing letter</p>
+                          <div class="spelling-family-sentence-card">
+                            <p>${buildSpellingChallengeMissingLetterPrompt(currentChallengeEntry, currentChallengeItem.missingIndex)}</p>
+                          </div>
+                          <input class="reader-editor spelling-inline-input spelling-inline-input--centered" type="text" maxlength="1" autocomplete="off" autocapitalize="off" spellcheck="false" value="${escapeHtml(spelling.challenge.inputValue || "")}" placeholder="Type the missing letter" data-spelling-challenge-input="true" />
+                          <div class="spelling-stage-actions spelling-stage-actions--compact">
+                            <button type="button" class="primary-button primary-button--dark" data-spelling-challenge-submit="true">Check answer</button>
+                          </div>
+                        `
+                }
+              </article>
+            ` : ""}
+          </article>
+        </section>
+      `;
+
+    if (!spelling.challenge.completed) {
+      host.querySelector("[data-spelling-challenge-play]")?.addEventListener("click", () => {
+        speakSpellingChallengeWord(currentChallengeItem, currentChallengeEntry);
+      });
+      host.querySelector("[data-spelling-challenge-input]")?.addEventListener("input", (event) => {
+        spelling.challenge.inputValue = event.target.value;
+        spelling.challenge.checked = false;
+        persistSubjects();
+      });
+      host.querySelector("[data-spelling-challenge-input]")?.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          spelling.challenge.inputValue = event.currentTarget.value;
+          submitSpellingChallengeInput(subject);
+          render();
+        }
+      });
+      host.querySelector("[data-spelling-challenge-submit]")?.addEventListener("click", () => {
+        const input = host.querySelector("[data-spelling-challenge-input]");
+        spelling.challenge.inputValue = input?.value || spelling.challenge.inputValue;
+        submitSpellingChallengeInput(subject);
+        render();
+      });
+      host.querySelectorAll("[data-spelling-challenge-looks-right]").forEach((button) => {
+        button.addEventListener("click", () => {
+          selectSpellingChallengeLooksRight(subject, button.dataset.spellingChallengeLooksRight);
+          render();
+        });
+      });
+    }
+    return;
+  }
 
   if (stageId === "diagnostic" && !spelling.diagnostic.completed && !showingCelebration) {
     host.innerHTML = `
@@ -9668,9 +10101,9 @@ function renderSpelling() {
         <article class="spelling-stage-card spelling-stage-card--diagnostic">
           <p class="eyebrow">Spelling Diagnostic</p>
           <h3>Spoken baseline</h3>
-          <p>Listen to each word, type it once, and move on. This stage uses 10 Year 5 words and 10 Year 7 words to map the patterns that need the most work.</p>
+          <p>Listen to each word, type it once, and move on. These same 10 words will carry through every stage in this attempt.</p>
           <div class="spelling-stage-meta">
-            <span>Word ${escapeHtml(String(Math.min(spelling.diagnostic.currentIndex + 1, SPELLING_DIAGNOSTIC_WORDS.length)))} of ${escapeHtml(String(SPELLING_DIAGNOSTIC_WORDS.length))}</span>
+            <span>Word ${escapeHtml(String(Math.min(spelling.diagnostic.currentIndex + 1, attemptWords.length)))} of ${escapeHtml(String(attemptWords.length))}</span>
             <span>${escapeHtml(`${getSpellingDiagnosticCorrectCount(spelling)} correct so far`)}</span>
           </div>
           <div class="spelling-audio-panel">
@@ -9690,7 +10123,7 @@ function renderSpelling() {
           />
           <div class="spelling-stage-actions">
             <button type="button" class="primary-button primary-button--dark" data-spelling-submit-diagnostic="true">
-              ${spelling.diagnostic.currentIndex >= SPELLING_DIAGNOSTIC_WORDS.length - 1 ? "Finish diagnostic" : "Submit and next"}
+              ${spelling.diagnostic.currentIndex >= attemptWords.length - 1 ? "Finish diagnostic" : "Submit and next"}
             </button>
           </div>
           <p class="spelling-stage-note">This screen stays minimal on purpose so the diagnostic is the only task in view.</p>
@@ -9754,7 +10187,7 @@ function renderSpelling() {
         </div>
         <p>The baseline is complete. Review the diagnostic result before moving back through earlier stages.</p>
         <div class="spelling-stage-meta spelling-stage-meta--single">
-          <span>${escapeHtml(`${getSpellingDiagnosticCorrectCount(spelling)} of ${SPELLING_DIAGNOSTIC_WORDS.length} correct`)}</span>
+          <span>${escapeHtml(`${getSpellingDiagnosticCorrectCount(spelling)} of ${attemptWords.length} correct`)}</span>
           <span>${escapeHtml(`${focusSummary.length} focus area${focusSummary.length === 1 ? "" : "s"} identified`)}</span>
         </div>
         <div class="spelling-review-summary">
