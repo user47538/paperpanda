@@ -4174,6 +4174,10 @@ function createDefaultSpellingState(subjectId = "") {
     },
     looksRight: {
       answers: {},
+      currentWordId: "",
+      awaitingAdvanceWordId: "",
+      feedbackKind: "",
+      feedbackMessage: "",
       checked: false,
       completed: false
     },
@@ -4278,6 +4282,10 @@ function normaliseSpellingState(spelling, subjectId = "") {
             Object.entries(looksRight.answers).map(([wordId, value]) => [wordId, String(value || "")])
           )
         : {},
+      currentWordId: String(looksRight.currentWordId || ""),
+      awaitingAdvanceWordId: String(looksRight.awaitingAdvanceWordId || ""),
+      feedbackKind: ["correct", "incorrect"].includes(String(looksRight.feedbackKind || "")) ? String(looksRight.feedbackKind) : "",
+      feedbackMessage: String(looksRight.feedbackMessage || ""),
       checked: Boolean(looksRight.checked),
       completed: Boolean(looksRight.completed)
     },
@@ -4576,6 +4584,10 @@ function resetSpellingProgressForNewAttempt(spelling) {
   };
   spelling.looksRight = {
     answers: {},
+    currentWordId: "",
+    awaitingAdvanceWordId: "",
+    feedbackKind: "",
+    feedbackMessage: "",
     checked: false,
     completed: false
   };
@@ -4901,7 +4913,15 @@ function buildSpellingLooksRightChoiceSentence(sentence, originalWord, replaceme
 
 function getSpellingLooksRightCurrentWord(spelling) {
   const followUpWords = getSpellingFollowUpWords(spelling);
-  return followUpWords.find((entry) => !spelling.looksRight.answers[entry.id]) || followUpWords[0] || null;
+  if (spelling.looksRight.currentWordId) {
+    const activeWord = followUpWords.find((entry) => entry.id === spelling.looksRight.currentWordId);
+    if (activeWord && !spelling.looksRight.completed) {
+      return activeWord;
+    }
+  }
+  const nextWord = followUpWords.find((entry) => !spelling.looksRight.answers[entry.id]) || followUpWords[0] || null;
+  spelling.looksRight.currentWordId = nextWord?.id || "";
+  return nextWord;
 }
 
 function shouldSpellingLooksRightShowCorrectFirst(wordId) {
@@ -4994,6 +5014,10 @@ function resetSpellingActivity(subject, activityId) {
     };
     spelling.looksRight = {
       answers: {},
+      currentWordId: "",
+      awaitingAdvanceWordId: "",
+      feedbackKind: "",
+      feedbackMessage: "",
       checked: false,
       completed: false
     };
@@ -5021,6 +5045,10 @@ function resetSpellingActivity(subject, activityId) {
   } else if (activityId === "looks-right") {
     spelling.looksRight = {
       answers: {},
+      currentWordId: "",
+      awaitingAdvanceWordId: "",
+      feedbackKind: "",
+      feedbackMessage: "",
       checked: false,
       completed: false
     };
@@ -5159,18 +5187,44 @@ function checkSpellingLooksRight(subject) {
 
 function selectSpellingLooksRightAnswer(subject, wordId, value) {
   const spelling = getSubjectSpellingState(subject);
-  const followUpWords = getSpellingFollowUpWords(spelling);
+  const entry = SPELLING_INTERVENTION_LIBRARY[wordId];
+  if (!entry) {
+    return;
+  }
   spelling.looksRight.answers[wordId] = value;
   spelling.looksRight.checked = false;
   spelling.looksRight.completed = false;
+  spelling.looksRight.currentWordId = wordId;
+  spelling.looksRight.awaitingAdvanceWordId = wordId;
+  spelling.looksRight.feedbackKind = value === entry.word ? "correct" : "incorrect";
+  spelling.looksRight.feedbackMessage = value === entry.word
+    ? `Correct. ${entry.word} is the settled spelling.`
+    : `Incorrect. The correct spelling is ${entry.word}.`;
+  spelling.coachMessage = spelling.looksRight.feedbackMessage;
+  persistSubjects();
+}
 
-  if (followUpWords.every((entry) => Boolean(spelling.looksRight.answers[entry.id]))) {
+function advanceSpellingLooksRightWord(subject) {
+  const spelling = getSubjectSpellingState(subject);
+  const currentWordId = String(spelling.looksRight.awaitingAdvanceWordId || spelling.looksRight.currentWordId || "");
+  if (!currentWordId) {
+    return;
+  }
+  const followUpWords = getSpellingFollowUpWords(spelling);
+  const allAnswered = followUpWords.every((entry) => Boolean(spelling.looksRight.answers[entry.id]));
+  spelling.looksRight.awaitingAdvanceWordId = "";
+  spelling.looksRight.feedbackKind = "";
+  spelling.looksRight.feedbackMessage = "";
+  spelling.looksRight.currentWordId = "";
+  if (allAnswered) {
     checkSpellingLooksRight(subject);
     return;
   }
-
+  const nextWord = getSpellingLooksRightCurrentWord(spelling);
   const answeredCount = followUpWords.filter((entry) => Boolean(spelling.looksRight.answers[entry.id])).length;
-  spelling.coachMessage = `Answer saved. Sentence ${Math.min(answeredCount + 1, followUpWords.length)} of ${followUpWords.length} is ready.`;
+  spelling.coachMessage = nextWord
+    ? `Sentence ${Math.min(answeredCount + 1, followUpWords.length)} of ${followUpWords.length} is ready.`
+    : spelling.coachMessage;
   persistSubjects();
 }
 
@@ -5218,16 +5272,11 @@ function buildSpellingRecallFeedback(entry, typedValue, isCorrect) {
 function getSpellingWordFamilyReferenceMarkup(entry) {
   return `
     <div class="spelling-family-reference">
-      <div class="spelling-family-reference__header">
-        <span class="eyebrow">Root word</span>
-        <strong class="spelling-family-reference__root">${escapeHtml(entry.word)}</strong>
-      </div>
       <div class="spelling-family-reference__chips">
         ${[entry.word, ...(entry.familyWords || [])]
           .map((word, index) => `<span class="spelling-skill${index === 0 ? " is-strong" : ""}">${escapeHtml(word)}</span>`)
           .join("")}
       </div>
-      <p class="spelling-stage-note">${escapeHtml(entry.familyNote)}</p>
     </div>
   `;
 }
@@ -10875,7 +10924,7 @@ function renderSpelling() {
             </div>
             <span class="spelling-card__status">Ribbon available</span>
           </div>
-          <p>Read the sentence, then click the version that looks right. The target word is written inside each sentence with the sound splits visible.</p>
+          <p>Read the sentence and choose the spelling that looks right.</p>
           <div class="spelling-stage-meta spelling-stage-meta--single">
             <span>Sentence ${escapeHtml(String(Math.min(answeredLookCount + 1, followUpWords.length)))} of ${escapeHtml(String(followUpWords.length))}</span>
             <span>${escapeHtml(`${answeredLookCount} answered`)}</span>
@@ -10884,7 +10933,7 @@ function renderSpelling() {
             <article class="spelling-comparison-card spelling-comparison-card--single">
               <div class="spelling-comparison-card__top">
                 <strong>Sentence check</strong>
-                <span>${escapeHtml((currentLookWord.focuses || []).map((focusId) => SPELLING_FOCUS_LABELS[focusId] || focusId).join(" · "))}</span>
+                <span>${escapeHtml(currentLookWord.articulation || currentLookWord.word)}</span>
               </div>
               <p class="spelling-comparison-card__prompt">Which sentence looks right?</p>
               <div class="spelling-choice-row spelling-choice-row--stacked">
@@ -10903,6 +10952,12 @@ function renderSpelling() {
                   )
                   .join("")}
               </div>
+              ${spelling.looksRight.awaitingAdvanceWordId === currentLookWord.id ? `
+                <p class="spelling-choice-feedback${spelling.looksRight.feedbackKind === "correct" ? " is-correct" : " is-incorrect"}">${escapeHtml(spelling.looksRight.feedbackMessage || "")}</p>
+                <div class="spelling-stage-actions spelling-stage-actions--compact">
+                  <button type="button" class="ghost-button ghost-button--small" data-spelling-looks-right-advance="${currentLookWord.id}">${escapeHtml(followUpWords.every((entry) => Boolean(spelling.looksRight.answers[entry.id])) ? "Finish stage" : "Continue to next word")}</button>
+                </div>
+              ` : ""}
             </article>
           ` : ""}
           <div class="spelling-stage-actions">
@@ -10952,11 +11007,11 @@ function renderSpelling() {
           <div class="spelling-card__header">
             <div>
               <p class="eyebrow">Stage 3</p>
-              <h4>Word family sentence loop</h4>
+              <h4>Word families</h4>
             </div>
             <span class="spelling-card__status">Ribbon available</span>
           </div>
-          <p>Start with the key word, open one family sentence at a time, then type the key word from memory after the third sentence.</p>
+          <p>Press the spelling word button to hear how it can be changed to suit different situations.</p>
           ${currentFlashcardWord ? `
             <div class="spelling-stage-meta spelling-stage-meta--single">
               <span>Word ${escapeHtml(String(flashcardWords.filter((entry) => ensureSpellingFlashcardCard(spelling, entry.id).completed).length + 1))} of ${escapeHtml(String(flashcardWords.length))}</span>
@@ -11271,7 +11326,17 @@ function renderSpelling() {
 
   host.querySelectorAll("[data-spelling-looks-right-word]").forEach((button) => {
     button.addEventListener("click", () => {
+      if (spelling.looksRight.awaitingAdvanceWordId) {
+        return;
+      }
       selectSpellingLooksRightAnswer(subject, button.dataset.spellingLooksRightWord, button.dataset.spellingLooksRightValue);
+      render();
+    });
+  });
+
+  host.querySelectorAll("[data-spelling-looks-right-advance]").forEach((button) => {
+    button.addEventListener("click", () => {
+      advanceSpellingLooksRightWord(subject);
       render();
     });
   });
