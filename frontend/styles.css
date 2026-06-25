@@ -6158,10 +6158,30 @@ input[type="date"] {
   color: var(--spelling-ink);
 }
 
+.spelling-review-summary__primary {
+  display: grid;
+  gap: 4px;
+}
+
 .spelling-review-summary__row span {
   color: var(--spelling-muted);
   font-size: 14px;
   font-weight: 700;
+}
+
+.spelling-review-summary__mark {
+  min-width: 28px;
+  text-align: center;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.spelling-review-summary__row.is-correct .spelling-review-summary__mark {
+  color: var(--spelling-green);
+}
+
+.spelling-review-summary__row.is-incorrect .spelling-review-summary__mark {
+  color: var(--spelling-coral);
 }
 
 .spelling-review-summary__row.is-correct {

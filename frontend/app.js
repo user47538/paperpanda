@@ -10734,17 +10734,55 @@ function renderSpelling() {
 
   if (showingCelebration) {
     const celebrationCopy = getSpellingCelebrationCopy(stageId);
-    stageBody = `
-      <article class="spelling-stage-card spelling-stage-card--single spelling-stage-card--celebration">
-        <p class="eyebrow">${escapeHtml(celebrationCopy.eyebrow)}</p>
-        <div class="spelling-ribbon-badge">Ribbon unlocked</div>
-        <h4>${escapeHtml(celebrationCopy.title)}</h4>
-        <p>${escapeHtml(celebrationCopy.body)}</p>
-        <div class="spelling-stage-actions spelling-stage-actions--centered">
-          <button type="button" class="primary-button primary-button--dark" data-spelling-continue-stage="true">${escapeHtml(celebrationCopy.action)}</button>
-        </div>
-      </article>
-    `;
+    stageBody = stageId === "diagnostic"
+      ? `
+        <article class="spelling-stage-card spelling-stage-card--single">
+          <div class="spelling-card__header">
+            <div>
+              <p class="eyebrow">${escapeHtml(celebrationCopy.eyebrow)}</p>
+              <h4>${escapeHtml(celebrationCopy.title)}</h4>
+            </div>
+            <span class="spelling-card__status is-complete">Ribbon unlocked</span>
+          </div>
+          <p>${escapeHtml(celebrationCopy.body)}</p>
+          <div class="spelling-stage-meta spelling-stage-meta--single">
+            <span>${escapeHtml(`${getSpellingDiagnosticCorrectCount(spelling)} of ${attemptWords.length} correct`)}</span>
+            <span>${escapeHtml(`${getSpellingStageScorePercent(spelling, "diagnostic")}% score`)}</span>
+          </div>
+          <div class="spelling-review-summary">
+            ${attemptWords
+              .map((wordEntry) => {
+                const response = spelling.diagnostic.responses[wordEntry.id] || {};
+                const attempt = String(response.attempt || "");
+                const isCorrect = Boolean(response.correct);
+                return `
+                  <article class="spelling-review-summary__row${isCorrect ? " is-correct" : " is-incorrect"}">
+                    <div class="spelling-review-summary__primary">
+                      <strong>${escapeHtml(wordEntry.word)}</strong>
+                      <span>${escapeHtml(attempt || "No answer typed")}</span>
+                    </div>
+                    <span class="spelling-review-summary__mark" aria-label="${isCorrect ? "Correct" : "Incorrect"}">${isCorrect ? "✓" : "✕"}</span>
+                  </article>
+                `;
+              })
+              .join("")}
+          </div>
+          <div class="spelling-stage-actions spelling-stage-actions--centered">
+            <button type="button" class="primary-button primary-button--dark" data-spelling-continue-stage="true">${escapeHtml(celebrationCopy.action)}</button>
+          </div>
+        </article>
+      `
+      : `
+        <article class="spelling-stage-card spelling-stage-card--single spelling-stage-card--celebration">
+          <p class="eyebrow">${escapeHtml(celebrationCopy.eyebrow)}</p>
+          <div class="spelling-ribbon-badge">Ribbon unlocked</div>
+          <h4>${escapeHtml(celebrationCopy.title)}</h4>
+          <p>${escapeHtml(celebrationCopy.body)}</p>
+          <div class="spelling-stage-actions spelling-stage-actions--centered">
+            <button type="button" class="primary-button primary-button--dark" data-spelling-continue-stage="true">${escapeHtml(celebrationCopy.action)}</button>
+          </div>
+        </article>
+      `;
   } else if (stageId === "diagnostic") {
     stageBody = `
       <article class="spelling-stage-card spelling-stage-card--single">
