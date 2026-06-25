@@ -4,7 +4,7 @@ const authTokenStorageKey = "paperpanda-session-token";
 const subjectsStorageKey = "paperpanda-subjects-by-account";
 const settingsStorageKey = "studylift-settings";
 const uiVersionStorageKey = "paperpanda-ui-version";
-const currentUiVersion = "2026-06-25-spelling-paddock-finish";
+const currentUiVersion = "2026-06-25-spelling-final-summary";
 const previewDatabaseName = "paperpanda-assets";
 const previewStoreName = "document-previews";
 const settingsAssetStoreName = "settings-assets";
@@ -11073,7 +11073,42 @@ function renderSpelling() {
       present: "Today",
       future: "Tomorrow"
     };
-    stageBody = spelling.tenseTransfer.completed
+    stageBody = spelling.sessionCompletionReady
+      ? `
+        <article class="spelling-stage-card spelling-stage-card--single">
+          <div class="spelling-card__header">
+            <div>
+              <p class="eyebrow">Session complete</p>
+              <h4>Four-stage summary</h4>
+            </div>
+            <span class="spelling-card__status is-complete">Program complete</span>
+          </div>
+          <p>${escapeHtml(`Overall score: ${overallScorePercent}%. ${overallScorePercent > 50 ? `${earnedHorseMeta?.label || "A new horse"} earned for the paddock.` : "No horse earned this time."}`)}</p>
+          ${overallScorePercent > 50 && earnedHorseMeta ? `
+            <article class="spelling-horse-card">
+              <img class="spelling-horse-card__image" src="${escapeHtml(earnedHorseMeta.image)}" alt="${escapeHtml(earnedHorseMeta.label)}" />
+              <div class="spelling-horse-card__copy">
+                <strong>Horse earned</strong>
+                <span>${escapeHtml(earnedHorseMeta.label)}</span>
+              </div>
+            </article>
+          ` : ""}
+          <div class="spelling-review-summary">
+            ${Object.entries(stageScoreSummary)
+              .map(([stageKey, stageScore]) => `
+                <article class="spelling-review-summary__row${getSpellingStageScorePercent(spelling, stageKey) >= 50 ? " is-correct" : " is-incorrect"}">
+                  <strong>${escapeHtml(stageScore.label)}</strong>
+                  <span>${escapeHtml(`${stageScore.correct}/${stageScore.total} · ${getSpellingStageScorePercent(spelling, stageKey)}%`)}</span>
+                </article>
+              `)
+              .join("")}
+          </div>
+          <div class="spelling-stage-actions spelling-stage-actions--centered">
+            <button type="button" class="primary-button primary-button--dark" data-spelling-finish-session="true">Continue</button>
+          </div>
+        </article>
+      `
+      : spelling.tenseTransfer.completed
       ? `
         <article class="spelling-stage-card spelling-stage-card--single">
           <div class="spelling-card__header">
@@ -11121,7 +11156,6 @@ function renderSpelling() {
             </div>
           </article>
           <div class="spelling-stage-actions">
-            ${spelling.sessionCompletionReady ? '<button type="button" class="primary-button primary-button--dark" data-spelling-finish-session="true">Continue</button>' : ""}
             <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="tense-transfer">Reset stage</button>
           </div>
         </article>
