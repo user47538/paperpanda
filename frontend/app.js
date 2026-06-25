@@ -4,7 +4,7 @@ const authTokenStorageKey = "paperpanda-session-token";
 const subjectsStorageKey = "paperpanda-subjects-by-account";
 const settingsStorageKey = "studylift-settings";
 const uiVersionStorageKey = "paperpanda-ui-version";
-const currentUiVersion = "2026-06-25-spelling-random-attempts";
+const currentUiVersion = "2026-06-25-spelling-paddock-finish";
 const previewDatabaseName = "paperpanda-assets";
 const previewStoreName = "document-previews";
 const settingsAssetStoreName = "settings-assets";
@@ -472,7 +472,7 @@ const FOCUS_AREAS = [
 ];
 
 const SPELLING_STAGE_ORDER = ["diagnostic", "looks-right", "word-families", "tense-transfer"];
-const SPELLING_FLASHCARDS_VERSION = 4;
+const SPELLING_FLASHCARDS_VERSION = 5;
 const SPELLING_TENSE_TRANSFER_VERSION = 4;
 const SPELLING_CHALLENGE_VERSION = 2;
 const SPELLING_STAGE_LABELS = {
@@ -497,15 +497,18 @@ const SPELLING_UNIT_SEED = {
   reviewDays: ["Day 1", "Day 3", "Day 7", "Day 14", "Day 30"]
 };
 const SPELLING_PADDOCK_HORSES = [
-  "Dusty",
-  "Willow",
-  "Comet",
-  "Maple",
-  "Juniper",
-  "Ash",
-  "Sable",
-  "Copper"
+  { id: "arabian", label: "Arabian", image: "/horses/Arabian.png" },
+  { id: "appaloosa", label: "Appaloosa", image: "/horses/Appaloosa.png" },
+  { id: "mustang", label: "Mustang", image: "/horses/Mustang.png" },
+  { id: "quarter-horse", label: "Quarter Horse", image: "/horses/Quarter Horse.png" },
+  { id: "thoroughbred", label: "Thoroughbred", image: "/horses/Thoroughbred.png" },
+  { id: "welsh-pony", label: "Welsh Pony", image: "/horses/Welsh Pony.png" },
+  { id: "paint-horse", label: "Paint Horse", image: "/horses/Paint Horse.png" },
+  { id: "irish-sport-horse", label: "Irish Sport Horse", image: "/horses/Irish Sport Horse.png" }
 ];
+const SPELLING_PADDOCK_HORSE_BY_ID = Object.fromEntries(
+  SPELLING_PADDOCK_HORSES.map((horse) => [horse.id, horse])
+);
 const SPELLING_CHALLENGE_MODE_ORDER = ["looks-right", "dictation", "root-word", "missing-letter"];
 const SPELLING_INTERVENTION_LIBRARY = {
   believe: {
@@ -4188,6 +4191,7 @@ function createDefaultSpellingState(subjectId = "") {
     },
     selectedStageId: "",
     celebrationStageId: "",
+    sessionCompletionReady: false,
     currentAttemptId: createId(),
     sessionPreparedKey: "",
     completedAttempts: [],
@@ -4286,17 +4290,14 @@ function normaliseSpellingState(spelling, subjectId = "") {
             Object.entries(flashcards.cards).map(([wordId, entry]) => [
               wordId,
               {
-                placements: {
-                  past: String(entry?.placements?.past || ""),
-                  present: String(entry?.placements?.present || ""),
-                  future: String(entry?.placements?.future || "")
-                },
+                exposureIndex: Math.max(0, Math.min(3, Number(entry?.exposureIndex || 0) || 0)),
+                isShowingSentence: Boolean(entry?.isShowingSentence),
+                typedValue: String(entry?.typedValue || ""),
                 checked: Boolean(entry?.checked),
                 completed: Boolean(entry?.completed),
                 awaitingAdvance: Boolean(entry?.awaitingAdvance),
                 feedbackKind: ["correct", "incorrect"].includes(String(entry?.feedbackKind || "")) ? String(entry.feedbackKind) : "",
-                feedbackMessage: String(entry?.feedbackMessage || ""),
-                lastCheckedAt: String(entry?.lastCheckedAt || "")
+                feedbackMessage: String(entry?.feedbackMessage || "")
               }
             ])
           )
@@ -4334,6 +4335,7 @@ function normaliseSpellingState(spelling, subjectId = "") {
     },
     selectedStageId: SPELLING_STAGE_ORDER.includes(String(next.selectedStageId || "")) ? String(next.selectedStageId || "") : "",
     celebrationStageId: SPELLING_STAGE_ORDER.includes(String(next.celebrationStageId || "")) ? String(next.celebrationStageId || "") : "",
+    sessionCompletionReady: Boolean(next.sessionCompletionReady),
     currentAttemptId: String(next.currentAttemptId || base.currentAttemptId || createId()),
     sessionPreparedKey: String(next.sessionPreparedKey || ""),
     completedAttempts: Array.isArray(next.completedAttempts)
@@ -4480,8 +4482,12 @@ function unlockSpellingPaddockHorse(spelling) {
   if (!nextHorse) {
     return "";
   }
-  spelling.paddockHorses = [...(spelling.paddockHorses || []), nextHorse];
-  return nextHorse;
+  spelling.paddockHorses = [...(spelling.paddockHorses || []), nextHorse.id];
+  return nextHorse.id;
+}
+
+function getSpellingPaddockHorseMeta(horseId = "") {
+  return SPELLING_PADDOCK_HORSE_BY_ID[String(horseId || "")] || null;
 }
 
 function getSpellingStageId(subject) {
@@ -4587,6 +4593,7 @@ function resetSpellingProgressForNewAttempt(spelling) {
   };
   spelling.selectedStageId = "";
   spelling.celebrationStageId = "";
+  spelling.sessionCompletionReady = false;
   spelling.currentAttemptId = createId();
   spelling.challenge.active = false;
   spelling.challenge.version = SPELLING_CHALLENGE_VERSION;
@@ -4666,6 +4673,7 @@ function celebrateSpellingStage(subject, stageId, coachMessage) {
   const spelling = getSubjectSpellingState(subject);
   spelling.selectedStageId = stageId;
   spelling.celebrationStageId = stageId;
+  spelling.sessionCompletionReady = false;
   if (coachMessage) {
     spelling.coachMessage = coachMessage;
   }
@@ -4677,8 +4685,9 @@ function continueSpellingStage(subject) {
   const celebrationStageId = String(spelling.celebrationStageId || "");
   const celebrationStageIndex = SPELLING_STAGE_ORDER.indexOf(celebrationStageId);
   if (celebrationStageId === "tense-transfer" && SPELLING_STAGE_ORDER.every((stageId) => getSpellingStageCompletionMap(subject)[stageId])) {
-    resetSpellingProgressForNewAttempt(spelling);
-    spelling.sessionPreparedKey = currentSpellingSessionKey;
+    spelling.celebrationStageId = "";
+    spelling.selectedStageId = "tense-transfer";
+    spelling.sessionCompletionReady = true;
     persistSubjects();
     return;
   }
@@ -4687,7 +4696,15 @@ function continueSpellingStage(subject) {
       ? SPELLING_STAGE_ORDER[celebrationStageIndex + 1]
       : SPELLING_STAGE_ORDER[SPELLING_STAGE_ORDER.length - 1];
   spelling.celebrationStageId = "";
+  spelling.sessionCompletionReady = false;
   spelling.selectedStageId = nextStageId;
+  persistSubjects();
+}
+
+function finishSpellingSession(subject) {
+  const spelling = getSubjectSpellingState(subject);
+  resetSpellingProgressForNewAttempt(spelling);
+  spelling.sessionPreparedKey = currentSpellingSessionKey;
   persistSubjects();
 }
 
@@ -4808,7 +4825,17 @@ function ensureSpellingFlashcardCard(spelling, wordId) {
       feedbackMessage: ""
     };
   }
-  return spelling.flashcards.cards[wordId];
+  const card = spelling.flashcards.cards[wordId];
+  if (typeof card.exposureIndex !== "number" || Number.isNaN(card.exposureIndex)) {
+    card.exposureIndex = 0;
+  }
+  if (typeof card.isShowingSentence !== "boolean") {
+    card.isShowingSentence = false;
+  }
+  if (typeof card.typedValue !== "string") {
+    card.typedValue = "";
+  }
+  return card;
 }
 
 function getSpellingFlashcardCurrentWord(spelling) {
@@ -5037,6 +5064,7 @@ function resetSpellingActivity(subject, activityId) {
   }
   spelling.selectedStageId = "";
   spelling.celebrationStageId = "";
+  spelling.sessionCompletionReady = false;
   persistSubjects();
 }
 
@@ -10946,6 +10974,7 @@ function renderSpelling() {
   } else {
     const currentFamilyWord = getSpellingTenseCurrentWord(spelling);
     const currentFamilyAnswer = currentFamilyWord ? ensureSpellingTenseAnswer(spelling, currentFamilyWord.id) : null;
+    const earnedHorseMeta = getSpellingPaddockHorseMeta(spelling.paddockHorses[spelling.paddockHorses.length - 1]);
     const tenseLabels = {
       past: "Yesterday",
       present: "Today",
@@ -10977,7 +11006,16 @@ function renderSpelling() {
           <article class="spelling-complete-card">
             <p class="eyebrow">Complete</p>
             <h4>All four ribbons earned</h4>
-            <p>${escapeHtml(`Overall score: ${overallScorePercent}%. ${overallScorePercent > 50 ? `${spelling.paddockHorses[spelling.paddockHorses.length - 1] || "A new horse"} has been added to the paddock.` : "Keep practising to earn a new horse next time."}`)}</p>
+            <p>${escapeHtml(`Overall score: ${overallScorePercent}%. ${overallScorePercent > 50 ? `${earnedHorseMeta?.label || "A new horse"} has been added to the paddock.` : "Keep practising to earn a new horse next time."}`)}</p>
+            ${overallScorePercent > 50 && earnedHorseMeta ? `
+              <article class="spelling-horse-card">
+                <img class="spelling-horse-card__image" src="${escapeHtml(earnedHorseMeta.image)}" alt="${escapeHtml(earnedHorseMeta.label)}" />
+                <div class="spelling-horse-card__copy">
+                  <strong>New paddock horse unlocked</strong>
+                  <span>${escapeHtml(earnedHorseMeta.label)}</span>
+                </div>
+              </article>
+            ` : ""}
             <div class="spelling-review-summary">
               ${Object.entries(stageScoreSummary)
                 .map(([stageKey, stageScore]) => `
@@ -10990,6 +11028,7 @@ function renderSpelling() {
             </div>
           </article>
           <div class="spelling-stage-actions">
+            ${spelling.sessionCompletionReady ? '<button type="button" class="primary-button primary-button--dark" data-spelling-finish-session="true">Continue</button>' : ""}
             <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="tense-transfer">Reset stage</button>
           </div>
         </article>
@@ -11167,6 +11206,11 @@ function renderSpelling() {
 
   host.querySelector("[data-spelling-continue-stage]")?.addEventListener("click", () => {
     continueSpellingStage(subject);
+    render();
+  });
+
+  host.querySelector("[data-spelling-finish-session]")?.addEventListener("click", () => {
+    finishSpellingSession(subject);
     render();
   });
 
