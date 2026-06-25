@@ -4,7 +4,7 @@ const authTokenStorageKey = "paperpanda-session-token";
 const subjectsStorageKey = "paperpanda-subjects-by-account";
 const settingsStorageKey = "studylift-settings";
 const uiVersionStorageKey = "paperpanda-ui-version";
-const currentUiVersion = "2026-06-25-spelling-rotating-attempts";
+const currentUiVersion = "2026-06-25-spelling-random-attempts";
 const previewDatabaseName = "paperpanda-assets";
 const previewStoreName = "document-previews";
 const settingsAssetStoreName = "settings-assets";
@@ -4149,7 +4149,6 @@ function hydrateStoredSubject(subject, index) {
 
 function createDefaultSpellingState(subjectId = "") {
   const enabled = subjectId === "spelling";
-  const initialAttemptPoolOffset = 0;
   return {
     enabled,
     activeUnitId: SPELLING_UNIT_SEED.id,
@@ -4162,8 +4161,8 @@ function createDefaultSpellingState(subjectId = "") {
       tint: "cream"
     },
     focusSummary: [],
-    attemptPoolOffset: initialAttemptPoolOffset,
-    followUpWordIds: buildSpellingAttemptWordIds(initialAttemptPoolOffset),
+    attemptPoolOffset: 0,
+    followUpWordIds: buildSpellingAttemptWordIds(),
     diagnostic: {
       currentIndex: 0,
       currentInput: "",
@@ -4219,7 +4218,6 @@ function normaliseSpellingState(spelling, subjectId = "") {
   const isCurrentFlashcardsVersion = Number(flashcards.version || 0) === SPELLING_FLASHCARDS_VERSION;
   const isCurrentTenseTransferVersion = Number(tenseTransfer.version || 0) === SPELLING_TENSE_TRANSFER_VERSION;
   const isCurrentChallengeVersion = Number(challenge.version || 0) === SPELLING_CHALLENGE_VERSION;
-  const attemptPoolOffset = normalizeSpellingAttemptPoolOffset(next.attemptPoolOffset);
   const followUpWordIds = Array.isArray(next.followUpWordIds)
     ? next.followUpWordIds
         .map((value) => String(value || ""))
@@ -4245,8 +4243,8 @@ function normaliseSpellingState(spelling, subjectId = "") {
           }))
           .filter((entry) => entry.id && SPELLING_FOCUS_LABELS[entry.id] && entry.count > 0)
       : [],
-    attemptPoolOffset,
-    followUpWordIds: followUpWordIds.length ? followUpWordIds : buildSpellingAttemptWordIds(attemptPoolOffset),
+    attemptPoolOffset: 0,
+    followUpWordIds: followUpWordIds.length ? followUpWordIds : buildSpellingAttemptWordIds(),
     diagnostic: {
       ...base.diagnostic,
       ...diagnostic,
@@ -4495,33 +4493,33 @@ function getSpellingDiagnosticWordCount(spelling) {
   return getSpellingAttemptWords(spelling).length || SPELLING_UNIT_SEED.diagnosticTargetCount;
 }
 
-function normalizeSpellingAttemptPoolOffset(value) {
-  const poolSize = SPELLING_DEFAULT_FOLLOW_UP_WORD_IDS.length;
-  if (!poolSize) {
-    return 0;
+function shuffleSpellingWordIds(wordIds = []) {
+  const shuffled = [...wordIds];
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
   }
-  const numericValue = Math.max(0, Number(value || 0) || 0);
-  return numericValue % poolSize;
+  return shuffled;
 }
 
-function buildSpellingAttemptWordIds(offset = 0) {
+function buildSpellingAttemptWordIds(previousWordIds = []) {
   const wordIds = [...SPELLING_DEFAULT_FOLLOW_UP_WORD_IDS];
   if (!wordIds.length) {
     return [];
   }
-  const startIndex = normalizeSpellingAttemptPoolOffset(offset);
-  const attemptWordCount = Math.min(SPELLING_UNIT_SEED.followUpWordCount, wordIds.length);
-  return Array.from({ length: attemptWordCount }, (_, index) => wordIds[(startIndex + index) % wordIds.length]);
+  const previousSet = new Set(
+    (Array.isArray(previousWordIds) ? previousWordIds : [])
+      .map((value) => String(value || ""))
+      .filter((value) => SPELLING_INTERVENTION_LIBRARY[value])
+  );
+  const preferredPool = shuffleSpellingWordIds(wordIds.filter((wordId) => !previousSet.has(wordId)));
+  const fallbackPool = shuffleSpellingWordIds(wordIds.filter((wordId) => previousSet.has(wordId)));
+  return [...preferredPool, ...fallbackPool].slice(0, Math.min(SPELLING_UNIT_SEED.followUpWordCount, wordIds.length));
 }
 
-function setSpellingAttemptWordIds(spelling, offset) {
-  const nextOffset = normalizeSpellingAttemptPoolOffset(offset);
-  spelling.attemptPoolOffset = nextOffset;
-  spelling.followUpWordIds = buildSpellingAttemptWordIds(nextOffset);
-}
-
-function advanceSpellingAttemptWordIds(spelling) {
-  setSpellingAttemptWordIds(spelling, normalizeSpellingAttemptPoolOffset(spelling.attemptPoolOffset) + SPELLING_UNIT_SEED.followUpWordCount);
+function assignRandomSpellingAttemptWordIds(spelling, previousWordIds = []) {
+  spelling.attemptPoolOffset = 0;
+  spelling.followUpWordIds = buildSpellingAttemptWordIds(previousWordIds);
 }
 
 function getSpellingAttemptWords(spelling) {
@@ -4562,7 +4560,7 @@ function buildSpellingChallengeItemsFromAttempts(completedAttempts = []) {
 }
 
 function resetSpellingProgressForNewAttempt(spelling) {
-  advanceSpellingAttemptWordIds(spelling);
+  assignRandomSpellingAttemptWordIds(spelling, spelling.followUpWordIds);
   spelling.focusSummary = [];
   spelling.diagnostic = {
     currentIndex: 0,
@@ -4960,7 +4958,7 @@ function recordCompletedSpellingAttempt(subject) {
 function resetSpellingActivity(subject, activityId) {
   const spelling = getSubjectSpellingState(subject);
   if (activityId === "diagnostic") {
-    advanceSpellingAttemptWordIds(spelling);
+    assignRandomSpellingAttemptWordIds(spelling, spelling.followUpWordIds);
     spelling.diagnostic = {
       currentIndex: 0,
       currentInput: "",
