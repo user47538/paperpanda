@@ -4,7 +4,7 @@ const authTokenStorageKey = "paperpanda-session-token";
 const subjectsStorageKey = "paperpanda-subjects-by-account";
 const settingsStorageKey = "studylift-settings";
 const uiVersionStorageKey = "paperpanda-ui-version";
-const currentUiVersion = "2026-06-25-spelling-tense-fallback";
+const currentUiVersion = "2026-06-25-spelling-score-summary";
 const previewDatabaseName = "paperpanda-assets";
 const previewStoreName = "document-previews";
 const settingsAssetStoreName = "settings-assets";
@@ -496,6 +496,16 @@ const SPELLING_UNIT_SEED = {
   followUpWordCount: 10,
   reviewDays: ["Day 1", "Day 3", "Day 7", "Day 14", "Day 30"]
 };
+const SPELLING_PADDOCK_HORSES = [
+  "Dusty",
+  "Willow",
+  "Comet",
+  "Maple",
+  "Juniper",
+  "Ash",
+  "Sable",
+  "Copper"
+];
 const SPELLING_CHALLENGE_MODE_ORDER = ["looks-right", "dictation", "root-word", "missing-letter"];
 const SPELLING_INTERVENTION_LIBRARY = {
   believe: {
@@ -3940,7 +3950,9 @@ function createDefaultSpellingState(subjectId = "") {
       completed: false,
       inputValue: "",
       lastCompletedWeekKey: ""
-    }
+    },
+    paddockHorses: [],
+    lastOverallScorePercent: 0
   };
 }
 
@@ -4105,7 +4117,11 @@ function normaliseSpellingState(spelling, subjectId = "") {
       completed: isCurrentChallengeVersion ? Boolean(challenge.completed) : false,
       inputValue: isCurrentChallengeVersion ? String(challenge.inputValue || "") : "",
       lastCompletedWeekKey: isCurrentChallengeVersion ? String(challenge.lastCompletedWeekKey || "") : ""
-    }
+    },
+    paddockHorses: Array.isArray(next.paddockHorses)
+      ? next.paddockHorses.map((horse) => String(horse || "").trim()).filter(Boolean).slice(0, SPELLING_PADDOCK_HORSES.length)
+      : [],
+    lastOverallScorePercent: Math.max(0, Math.min(100, Number(next.lastOverallScorePercent || 0) || 0))
   };
 }
 
@@ -4154,6 +4170,65 @@ function getSpellingPendingActivityCount(subject) {
 function getSpellingMasteryRatio(subject) {
   const total = getSpellingTotalActivityCount(subject);
   return total ? getSpellingCompletedActivityCount(subject) / total : 0;
+}
+
+function getSpellingStageScoreSummary(spelling) {
+  const diagnosticWords = getSpellingAttemptWords(spelling);
+  const followUpWords = getSpellingFollowUpWords(spelling);
+  const flashcardWords = getSpellingFlashcardWords(spelling);
+
+  const diagnosticCorrect = diagnosticWords.filter((wordEntry) => spelling.diagnostic.responses[wordEntry.id]?.correct).length;
+  const looksRightCorrect = followUpWords.filter((entry) => spelling.looksRight.answers[entry.id] === entry.word).length;
+  const flashcardCorrect = flashcardWords.filter((entry) => ensureSpellingFlashcardCard(spelling, entry.id).feedbackKind === "correct").length;
+  const tenseCorrect = followUpWords.filter((entry) => ensureSpellingTenseAnswer(spelling, entry.id).feedbackKind === "correct").length;
+
+  return {
+    diagnostic: {
+      label: "Stage 1",
+      correct: diagnosticCorrect,
+      total: diagnosticWords.length
+    },
+    "looks-right": {
+      label: "Stage 2",
+      correct: looksRightCorrect,
+      total: followUpWords.length
+    },
+    "word-families": {
+      label: "Stage 3",
+      correct: flashcardCorrect,
+      total: flashcardWords.length
+    },
+    "tense-transfer": {
+      label: "Stage 4",
+      correct: tenseCorrect,
+      total: followUpWords.length
+    }
+  };
+}
+
+function getSpellingStageScorePercent(spelling, stageId) {
+  const summary = getSpellingStageScoreSummary(spelling)[stageId];
+  if (!summary || !summary.total) {
+    return 0;
+  }
+  return Math.round((summary.correct / summary.total) * 100);
+}
+
+function getSpellingOverallScorePercent(spelling) {
+  const summaries = Object.values(getSpellingStageScoreSummary(spelling));
+  const totalCorrect = summaries.reduce((sum, stage) => sum + stage.correct, 0);
+  const totalItems = summaries.reduce((sum, stage) => sum + stage.total, 0);
+  return totalItems ? Math.round((totalCorrect / totalItems) * 100) : 0;
+}
+
+function unlockSpellingPaddockHorse(spelling) {
+  const earnedHorseCount = Array.isArray(spelling.paddockHorses) ? spelling.paddockHorses.length : 0;
+  const nextHorse = SPELLING_PADDOCK_HORSES[earnedHorseCount];
+  if (!nextHorse) {
+    return "";
+  }
+  spelling.paddockHorses = [...(spelling.paddockHorses || []), nextHorse];
+  return nextHorse;
 }
 
 function getSpellingStageId(subject) {
@@ -5045,7 +5120,8 @@ function checkSpellingTenseTransfer(subject, wordId) {
   answer.feedbackKind = feedback.correct ? "correct" : "incorrect";
   answer.feedbackMessage = feedback.message;
   if (!feedback.correct) {
-    spelling.coachMessage = `Retry ${entry.word}. Check the tense changes across yesterday, today, and tomorrow.`;
+    answer.awaitingAdvance = true;
+    spelling.coachMessage = `Review the correction for ${entry.word}, then continue to the next word.`;
     persistSubjects();
     return;
   }
@@ -5104,8 +5180,17 @@ function advanceSpellingTenseTransfer(subject, wordId) {
   spelling.tenseTransfer.currentWordId = nextWord?.id || "";
   spelling.tenseTransfer.completed = isSpellingTenseTransferComplete(spelling);
   if (spelling.tenseTransfer.completed) {
+    const overallScorePercent = getSpellingOverallScorePercent(spelling);
+    spelling.lastOverallScorePercent = overallScorePercent;
+    const unlockedHorse = overallScorePercent > 50 ? unlockSpellingPaddockHorse(spelling) : "";
     recordCompletedSpellingAttempt(subject);
-    celebrateSpellingStage(subject, "tense-transfer", "Final stage complete. The key words held across yesterday, today, and tomorrow.");
+    celebrateSpellingStage(
+      subject,
+      "tense-transfer",
+      unlockedHorse
+        ? `Final stage complete. Overall score ${overallScorePercent}%. ${unlockedHorse} has been added to the paddock.`
+        : `Final stage complete. Overall score ${overallScorePercent}%.`
+    );
     return;
   }
   spelling.coachMessage = `${entry.word} is secure. The next tense word is ready.`;
@@ -10136,6 +10221,8 @@ function renderSpelling() {
   const focusSummary = getSpellingTopFocuses(spelling, 3);
   const followUpWords = getSpellingFollowUpWords(spelling);
   const attemptWords = getSpellingAttemptWords(spelling);
+  const stageScoreSummary = getSpellingStageScoreSummary(spelling);
+  const overallScorePercent = getSpellingOverallScorePercent(spelling);
 
   if (spelling.challenge.active || (spelling.challenge.completed && spelling.challenge.lastCompletedWeekKey === currentWeekKey())) {
     const currentChallengeItem = getSpellingChallengeCurrentItem(spelling);
@@ -10346,6 +10433,7 @@ function renderSpelling() {
         <p>The baseline is complete. Review the diagnostic result before moving back through earlier stages.</p>
         <div class="spelling-stage-meta spelling-stage-meta--single">
           <span>${escapeHtml(`${getSpellingDiagnosticCorrectCount(spelling)} of ${attemptWords.length} correct`)}</span>
+          <span>${escapeHtml(`${getSpellingStageScorePercent(spelling, "diagnostic")}% score`)}</span>
           <span>${escapeHtml(`${focusSummary.length} focus area${focusSummary.length === 1 ? "" : "s"} identified`)}</span>
         </div>
         <div class="spelling-review-summary">
@@ -10398,6 +10486,10 @@ function renderSpelling() {
             <span class="spelling-card__status is-complete">Ribbon earned</span>
           </div>
           <p>These are the sentence choices you worked through in this stage.</p>
+          <div class="spelling-stage-meta spelling-stage-meta--single">
+            <span>${escapeHtml(`${stageScoreSummary["looks-right"].correct}/${stageScoreSummary["looks-right"].total} correct`)}</span>
+            <span>${escapeHtml(`${getSpellingStageScorePercent(spelling, "looks-right")}% score`)}</span>
+          </div>
           <div class="spelling-review-summary">
             ${followUpWords.map((entry) => `
               <article class="spelling-review-summary__row${spelling.looksRight.answers[entry.id] === entry.word ? " is-correct" : " is-incorrect"}">
@@ -10475,6 +10567,10 @@ function renderSpelling() {
             <span class="spelling-card__status is-complete">Ribbon earned</span>
           </div>
           <p>These are the key words you completed in the word-family sentence loop.</p>
+          <div class="spelling-stage-meta spelling-stage-meta--single">
+            <span>${escapeHtml(`${stageScoreSummary["word-families"].correct}/${stageScoreSummary["word-families"].total} correct`)}</span>
+            <span>${escapeHtml(`${getSpellingStageScorePercent(spelling, "word-families")}% score`)}</span>
+          </div>
           <div class="spelling-review-summary">
             ${flashcardWords.map((entry) => `
               <article class="spelling-review-summary__row is-correct">
@@ -10569,6 +10665,10 @@ function renderSpelling() {
             <span class="spelling-card__status is-complete">Ribbon earned</span>
           </div>
           <p>The final tense-sorting stage is complete.</p>
+          <div class="spelling-stage-meta spelling-stage-meta--single">
+            <span>${escapeHtml(`${stageScoreSummary["tense-transfer"].correct}/${stageScoreSummary["tense-transfer"].total} correct`)}</span>
+            <span>${escapeHtml(`${getSpellingStageScorePercent(spelling, "tense-transfer")}% score`)}</span>
+          </div>
           <div class="spelling-review-summary">
             ${followUpWords.map((entry) => `
               <article class="spelling-review-summary__row is-correct">
@@ -10580,7 +10680,17 @@ function renderSpelling() {
           <article class="spelling-complete-card">
             <p class="eyebrow">Complete</p>
             <h4>All four ribbons earned</h4>
-            <p>The diagnostic, visual check, word family work, and tense transfer stage are all complete. Keep the same words in review on ${escapeHtml(SPELLING_UNIT_SEED.reviewDays.join(", "))}.</p>
+            <p>${escapeHtml(`Overall score: ${overallScorePercent}%. ${overallScorePercent > 50 ? `${spelling.paddockHorses[spelling.paddockHorses.length - 1] || "A new horse"} has been added to the paddock.` : "Keep practising to earn a new horse next time."}`)}</p>
+            <div class="spelling-review-summary">
+              ${Object.entries(stageScoreSummary)
+                .map(([stageKey, stageScore]) => `
+                  <article class="spelling-review-summary__row${getSpellingStageScorePercent(spelling, stageKey) >= 50 ? " is-correct" : " is-incorrect"}">
+                    <strong>${escapeHtml(stageScore.label)}</strong>
+                    <span>${escapeHtml(`${stageScore.correct}/${stageScore.total} · ${getSpellingStageScorePercent(spelling, stageKey)}%`)}</span>
+                  </article>
+                `)
+                .join("")}
+            </div>
           </article>
           <div class="spelling-stage-actions">
             <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="tense-transfer">Reset stage</button>
