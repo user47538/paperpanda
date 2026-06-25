@@ -4,7 +4,7 @@ const authTokenStorageKey = "paperpanda-session-token";
 const subjectsStorageKey = "paperpanda-subjects-by-account";
 const settingsStorageKey = "studylift-settings";
 const uiVersionStorageKey = "paperpanda-ui-version";
-const currentUiVersion = "2026-06-25-spelling-tense-drag";
+const currentUiVersion = "2026-06-25-spelling-recall-feedback";
 const previewDatabaseName = "paperpanda-assets";
 const previewStoreName = "document-previews";
 const settingsAssetStoreName = "settings-assets";
@@ -4915,14 +4915,10 @@ function submitSpellingFlashcardRecall(subject, wordId, typedValueOverride = nul
   const isCorrect = normalizeSpellingAttempt(typedValue) === normalizeSpellingAttempt(entry.word);
   card.feedbackKind = isCorrect ? "correct" : "incorrect";
   card.feedbackMessage = buildSpellingRecallFeedback(entry, typedValue, isCorrect);
-  if (!isCorrect) {
-    spelling.coachMessage = `Retry ${entry.word}. Use the family sentences to rebuild the spelling pattern.`;
-    persistSubjects();
-    return;
-  }
-
   card.awaitingAdvance = true;
-  spelling.coachMessage = `${entry.word} is correct. Review the family pattern, then continue.`;
+  spelling.coachMessage = isCorrect
+    ? `${entry.word} is correct. Review the feedback, then continue.`
+    : `Review the correction for ${entry.word}, then continue to the next word.`;
   persistSubjects();
 }
 
@@ -10468,7 +10464,7 @@ function renderSpelling() {
               <span>Word ${escapeHtml(String(flashcardWords.filter((entry) => ensureSpellingFlashcardCard(spelling, entry.id).completed).length + 1))} of ${escapeHtml(String(flashcardWords.length))}</span>
               <span>${escapeHtml(`${currentFlashcardCard?.exposureIndex || 0} of 3 sentences heard`)}</span>
             </div>
-            ${getSpellingWordFamilyReferenceMarkup(currentFlashcardWord)}
+            ${currentFlashcardCard?.exposureIndex < 3 ? getSpellingWordFamilyReferenceMarkup(currentFlashcardWord) : ""}
             <article class="spelling-tense-card spelling-tense-card--single${currentFlashcardCard?.checked ? (currentFlashcardCard?.feedbackKind === "correct" ? " is-correct" : " is-incorrect") : ""}">
               ${currentFlashcardCard?.exposureIndex < 3 ? `
                 ${currentFlashcardCard?.isShowingSentence ? `
