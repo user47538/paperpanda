@@ -6121,6 +6121,11 @@ input[type="date"] {
   width: 100%;
 }
 
+.spelling-inline-target {
+  font-weight: 800;
+  color: #1f3d7a;
+}
+
 .spelling-choice__hint,
 .spelling-comparison-card__prompt {
   color: var(--spelling-muted);
@@ -6166,6 +6171,62 @@ input[type="date"] {
 .spelling-flashcard-visual.is-revealed {
   color: var(--spelling-ink);
   background: #fffdf8;
+}
+
+.spelling-family-sentence-card {
+  padding: 26px 28px;
+  border-radius: 34px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(72, 54, 24, 0.12);
+}
+
+.spelling-family-sentence-card p {
+  margin: 0;
+  text-align: center;
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.55;
+  color: var(--spelling-ink);
+}
+
+.spelling-keyword-button {
+  width: 100%;
+  min-height: 148px;
+  padding: 26px 28px;
+  border-radius: 38px;
+  border: 1px solid rgba(72, 54, 24, 0.12);
+  background: rgba(255, 255, 255, 0.9);
+  color: #1f3d7a;
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
+}
+
+.spelling-keyword-button:hover,
+.spelling-keyword-button:focus-visible {
+  border-color: rgba(31, 61, 122, 0.24);
+  box-shadow: 0 18px 36px rgba(31, 61, 122, 0.08);
+  transform: translateY(-1px);
+}
+
+.spelling-keyword-button--static,
+.spelling-keyword-button:disabled {
+  cursor: default;
+  box-shadow: none;
+  transform: none;
+}
+
+.spelling-family-recall {
+  display: grid;
+  gap: 18px;
+}
+
+.spelling-inline-input--centered {
+  text-align: center;
+  font-size: 22px;
+  font-weight: 700;
 }
 
 .spelling-tense-grid {
