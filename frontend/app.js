@@ -9934,7 +9934,6 @@ function renderSpelling() {
                 `}
               ` : `
                 <div class="spelling-family-recall">
-                  <button type="button" class="spelling-keyword-button spelling-keyword-button--static" disabled>${escapeHtml(currentFlashcardWord.word)}</button>
                   <input
                     class="reader-editor spelling-inline-input spelling-inline-input--centered"
                     type="text"
@@ -10032,7 +10031,6 @@ function renderSpelling() {
                 `}
               ` : `
                 <div class="spelling-family-recall">
-                  <button type="button" class="spelling-keyword-button spelling-keyword-button--static" disabled>${escapeHtml(currentFamilyWord.word)}</button>
                   <input
                     class="reader-editor spelling-inline-input spelling-inline-input--centered"
                     type="text"
@@ -10220,7 +10218,8 @@ function renderSpelling() {
 
   host.querySelectorAll("[data-spelling-flashcard-submit]").forEach((button) => {
     button.addEventListener("click", () => {
-      submitSpellingFlashcardRecall(subject, button.dataset.spellingFlashcardSubmit);
+      const input = host.querySelector(`[data-spelling-flashcard-input="${button.dataset.spellingFlashcardSubmit}"]`);
+      submitSpellingFlashcardRecall(subject, button.dataset.spellingFlashcardSubmit, input?.value || "");
       render();
     });
   });
@@ -10252,7 +10251,8 @@ function renderSpelling() {
 
   host.querySelectorAll("[data-spelling-family-submit]").forEach((button) => {
     button.addEventListener("click", () => {
-      submitSpellingFamilyRecall(subject, button.dataset.spellingFamilySubmit);
+      const input = host.querySelector(`[data-spelling-family-input="${button.dataset.spellingFamilySubmit}"]`);
+      submitSpellingFamilyRecall(subject, button.dataset.spellingFamilySubmit, input?.value || "");
       render();
     });
   });
