@@ -4464,6 +4464,7 @@ function playSpellingFamilySentence(subject, entry, answer) {
         ? `Now type ${entry.word} from memory.`
         : `Sentence ${freshAnswer.exposureIndex + 1} of 3 is ready for ${entry.word}.`;
       persistSubjects();
+      render();
     }
   })
     .then(() => {
@@ -9675,24 +9676,24 @@ function renderSpelling() {
             <span>${escapeHtml(`${currentFamilyAnswer?.exposureIndex || 0} of 3 sentences heard`)}</span>
           </div>
           <article class="spelling-tense-card spelling-tense-card--single${currentFamilyAnswer?.checked ? (currentFamilyAnswer.completed ? " is-correct" : " is-incorrect") : ""}">
-            <div class="spelling-tense-card__top">
-              <strong>${escapeHtml(currentFamilyWord.word)}</strong>
-              <span>${escapeHtml(currentFamilyWord.articulation)}</span>
-            </div>
             ${currentFamilyAnswer?.exposureIndex < 3 ? `
               ${currentFamilyAnswer?.isShowingSentence ? `
-                <div class="spelling-family-sentence-card">
+                <div class="spelling-family-sentence-card spelling-family-sentence-card--active">
+                  <p class="spelling-family-sentence-label">Sentence ${escapeHtml(String((currentFamilyAnswer?.exposureIndex || 0) + 1))} of 3</p>
                   <p>${buildSpellingFamilySentenceMarkup(currentFamilySentence, currentFamilySentenceWord)}</p>
                 </div>
               ` : `
-                <button
-                  type="button"
-                  class="spelling-keyword-button"
-                  data-spelling-family-reveal="${currentFamilyWord.id}"
-                  ${currentFamilyAnswer?.isShowingSentence ? "disabled" : ""}
-                >
-                  ${escapeHtml(currentFamilyWord.word)}
-                </button>
+                <div class="spelling-family-keyword-panel">
+                  <button
+                    type="button"
+                    class="spelling-keyword-button"
+                    data-spelling-family-reveal="${currentFamilyWord.id}"
+                    ${currentFamilyAnswer?.isShowingSentence ? "disabled" : ""}
+                  >
+                    ${escapeHtml(currentFamilyWord.word)}
+                  </button>
+                  <p class="spelling-stage-note spelling-stage-note--centered">Click the key word to open the next sentence.</p>
+                </div>
               `}
             ` : `
               <div class="spelling-family-recall">

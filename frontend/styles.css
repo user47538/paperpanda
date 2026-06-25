@@ -5991,6 +5991,10 @@ input[type="date"] {
   color: var(--spelling-muted);
 }
 
+.spelling-stage-note--centered {
+  text-align: center;
+}
+
 .spelling-stage-rail {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
@@ -6180,6 +6184,23 @@ input[type="date"] {
   border: 1px solid rgba(72, 54, 24, 0.12);
 }
 
+.spelling-family-sentence-card--active {
+  min-height: 220px;
+  display: grid;
+  align-content: center;
+  gap: 12px;
+}
+
+.spelling-family-sentence-card .spelling-family-sentence-label {
+  margin: 0;
+  text-align: center;
+  color: var(--spelling-muted);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .spelling-family-sentence-card p {
   margin: 0;
   text-align: center;
@@ -6187,6 +6208,11 @@ input[type="date"] {
   font-weight: 700;
   line-height: 1.55;
   color: var(--spelling-ink);
+}
+
+.spelling-family-keyword-panel {
+  display: grid;
+  gap: 10px;
 }
 
 .spelling-keyword-button {
