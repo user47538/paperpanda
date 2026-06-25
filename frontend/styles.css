@@ -6201,6 +6201,77 @@ input[type="date"] {
   gap: 10px;
 }
 
+.spelling-tense-board {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.spelling-tense-slot {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  min-height: 150px;
+  padding: 18px;
+  border-radius: 22px;
+  border: 1px dashed rgba(72, 54, 24, 0.2);
+  background: rgba(248, 245, 238, 0.8);
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.spelling-tense-slot.is-drag-over {
+  border-color: rgba(31, 61, 122, 0.4);
+  background: #eef3ff;
+  transform: translateY(-2px);
+}
+
+.spelling-tense-slot__label {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--spelling-muted);
+}
+
+.spelling-tense-slot__placeholder {
+  color: var(--spelling-muted);
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.spelling-tense-slot__token,
+.spelling-option-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(72, 54, 24, 0.12);
+  background: #fff;
+  color: var(--spelling-ink);
+  font: inherit;
+  font-weight: 800;
+  cursor: grab;
+}
+
+.spelling-tense-slot__token {
+  justify-self: start;
+  cursor: pointer;
+}
+
+.spelling-option-bank {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.spelling-option-chip.is-used {
+  background: #edf7f0;
+  border-color: rgba(37, 107, 74, 0.2);
+  color: var(--spelling-green);
+}
+
 .spelling-choice-row--stacked {
   display: grid;
   grid-template-columns: 1fr;
@@ -6388,6 +6459,10 @@ input[type="date"] {
 @media (max-width: 1080px) {
   .spelling-stage-header,
   .spelling-stage-rail {
+    grid-template-columns: 1fr;
+  }
+
+  .spelling-tense-board {
     grid-template-columns: 1fr;
   }
 }
