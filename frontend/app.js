@@ -472,8 +472,8 @@ const FOCUS_AREAS = [
 ];
 
 const SPELLING_STAGE_ORDER = ["diagnostic", "looks-right", "word-families", "tense-transfer"];
-const SPELLING_FLASHCARDS_VERSION = 3;
-const SPELLING_TENSE_TRANSFER_VERSION = 2;
+const SPELLING_FLASHCARDS_VERSION = 4;
+const SPELLING_TENSE_TRANSFER_VERSION = 3;
 const SPELLING_CHALLENGE_VERSION = 2;
 const SPELLING_STAGE_LABELS = {
   diagnostic: "Diagnostic",
@@ -4025,7 +4025,10 @@ function normaliseSpellingState(spelling, subjectId = "") {
                 isShowingSentence: Boolean(entry?.isShowingSentence),
                 typedValue: String(entry?.typedValue || ""),
                 checked: Boolean(entry?.checked),
-                completed: Boolean(entry?.completed)
+                completed: Boolean(entry?.completed),
+                awaitingAdvance: Boolean(entry?.awaitingAdvance),
+                feedbackKind: ["correct", "incorrect"].includes(String(entry?.feedbackKind || "")) ? String(entry.feedbackKind) : "",
+                feedbackMessage: String(entry?.feedbackMessage || "")
               }
             ])
           )
@@ -4046,7 +4049,10 @@ function normaliseSpellingState(spelling, subjectId = "") {
                 isShowingSentence: Boolean(entry?.isShowingSentence),
                 typedValue: String(entry?.typedValue || ""),
                 checked: Boolean(entry?.checked),
-                completed: Boolean(entry?.completed)
+                completed: Boolean(entry?.completed),
+                awaitingAdvance: Boolean(entry?.awaitingAdvance),
+                feedbackKind: ["correct", "incorrect"].includes(String(entry?.feedbackKind || "")) ? String(entry.feedbackKind) : "",
+                feedbackMessage: String(entry?.feedbackMessage || "")
               }
             ])
           )
@@ -4430,7 +4436,10 @@ function ensureSpellingFlashcardCard(spelling, wordId) {
       isShowingSentence: false,
       typedValue: "",
       checked: false,
-      completed: false
+      completed: false,
+      awaitingAdvance: false,
+      feedbackKind: "",
+      feedbackMessage: ""
     };
   }
   return spelling.flashcards.cards[wordId];
@@ -4461,7 +4470,10 @@ function ensureSpellingTenseAnswer(spelling, wordId) {
       isShowingSentence: false,
       typedValue: "",
       checked: false,
-      completed: false
+      completed: false,
+      awaitingAdvance: false,
+      feedbackKind: "",
+      feedbackMessage: ""
     };
   }
   return spelling.tenseTransfer.answers[wordId];
@@ -4775,6 +4787,53 @@ function buildSpellingFamilySentenceMarkup(sentence, highlightWord) {
   return `${escapeHtml(before)}<span class="spelling-inline-target">${escapeHtml(match[0])}</span>${escapeHtml(after)}`;
 }
 
+function buildSpellingMismatchExplanation(expectedWord, typedValue) {
+  const expected = normalizeSpellingAttempt(expectedWord);
+  const attempt = normalizeSpellingAttempt(typedValue);
+  if (!attempt) {
+    return "No letters were entered yet.";
+  }
+
+  const mismatchIndex = [...expected].findIndex((character, index) => attempt[index] !== character);
+  if (mismatchIndex === -1) {
+    if (attempt.length < expected.length) {
+      return `The ending is incomplete. The missing finish is ${expectedWord.slice(attempt.length)}.`;
+    }
+    if (attempt.length > expected.length) {
+      return `Extra letters were added after ${expectedWord}.`;
+    }
+    return "The spelling matches.";
+  }
+
+  const expectedLetter = expected[mismatchIndex] || "";
+  const actualLetter = attempt[mismatchIndex] || "nothing";
+  return `The mismatch starts at letter ${mismatchIndex + 1}: expected ${expectedLetter} but got ${actualLetter}.`;
+}
+
+function buildSpellingRecallFeedback(entry, typedValue, isCorrect) {
+  if (isCorrect) {
+    return `Correct. ${entry.familyNote}`;
+  }
+  return `Incorrect. You typed ${typedValue || "nothing"}. The correct spelling is ${entry.word}. ${buildSpellingMismatchExplanation(entry.word, typedValue)} ${entry.familyNote}`;
+}
+
+function getSpellingWordFamilyReferenceMarkup(entry) {
+  return `
+    <div class="spelling-family-reference">
+      <div class="spelling-family-reference__header">
+        <span class="eyebrow">Root word</span>
+        <strong class="spelling-family-reference__root">${escapeHtml(entry.word)}</strong>
+      </div>
+      <div class="spelling-family-reference__chips">
+        ${[entry.word, ...(entry.familyWords || [])]
+          .map((word, index) => `<span class="spelling-skill${index === 0 ? " is-strong" : ""}">${escapeHtml(word)}</span>`)
+          .join("")}
+      </div>
+      <p class="spelling-stage-note">${escapeHtml(entry.familyNote)}</p>
+    </div>
+  `;
+}
+
 function playSpellingFlashcardSentence(subject, entry, card) {
   const sentenceIndex = Math.min(card.exposureIndex, (entry.familySentences || []).length - 1);
   const familyWord = entry.familyWords[sentenceIndex];
@@ -4845,13 +4904,34 @@ function submitSpellingFlashcardRecall(subject, wordId, typedValueOverride = nul
   ).trim();
   card.checked = true;
   card.typedValue = typedValue;
-  card.completed = normalizeSpellingAttempt(typedValue) === normalizeSpellingAttempt(entry.word);
-  if (!card.completed) {
+  card.completed = false;
+  card.awaitingAdvance = false;
+  const isCorrect = normalizeSpellingAttempt(typedValue) === normalizeSpellingAttempt(entry.word);
+  card.feedbackKind = isCorrect ? "correct" : "incorrect";
+  card.feedbackMessage = buildSpellingRecallFeedback(entry, typedValue, isCorrect);
+  if (!isCorrect) {
     spelling.coachMessage = `Retry ${entry.word}. Use the family sentences to rebuild the spelling pattern.`;
     persistSubjects();
     return;
   }
 
+  card.awaitingAdvance = true;
+  spelling.coachMessage = `${entry.word} is correct. Review the family pattern, then continue.`;
+  persistSubjects();
+}
+
+function advanceSpellingFlashcardWord(subject, wordId) {
+  const spelling = getSubjectSpellingState(subject);
+  const entry = SPELLING_INTERVENTION_LIBRARY[wordId];
+  if (!entry) {
+    return;
+  }
+  const card = ensureSpellingFlashcardCard(spelling, wordId);
+  if (!card.awaitingAdvance) {
+    return;
+  }
+  card.completed = true;
+  card.awaitingAdvance = false;
   const flashcardWords = getSpellingFlashcardWords(spelling);
   const nextWord = flashcardWords.find((item) => !ensureSpellingFlashcardCard(spelling, item.id).completed);
   spelling.flashcards.currentWordId = nextWord?.id || "";
@@ -4934,13 +5014,34 @@ function submitSpellingFamilyRecall(subject, wordId, typedValueOverride = null) 
   ).trim();
   answer.checked = true;
   answer.typedValue = typedValue;
-  answer.completed = normalizeSpellingAttempt(typedValue) === normalizeSpellingAttempt(entry.word);
-  if (!answer.completed) {
+  answer.completed = false;
+  answer.awaitingAdvance = false;
+  const isCorrect = normalizeSpellingAttempt(typedValue) === normalizeSpellingAttempt(entry.word);
+  answer.feedbackKind = isCorrect ? "correct" : "incorrect";
+  answer.feedbackMessage = buildSpellingRecallFeedback(entry, typedValue, isCorrect);
+  if (!isCorrect) {
     spelling.coachMessage = `Retry ${entry.word}. Use the family sentences to rebuild the spelling pattern.`;
     persistSubjects();
     return;
   }
 
+  answer.awaitingAdvance = true;
+  spelling.coachMessage = `${entry.word} is correct. Review the family pattern, then continue.`;
+  persistSubjects();
+}
+
+function advanceSpellingFamilyRecall(subject, wordId) {
+  const spelling = getSubjectSpellingState(subject);
+  const entry = SPELLING_INTERVENTION_LIBRARY[wordId];
+  if (!entry) {
+    return;
+  }
+  const answer = ensureSpellingTenseAnswer(spelling, wordId);
+  if (!answer.awaitingAdvance) {
+    return;
+  }
+  answer.completed = true;
+  answer.awaitingAdvance = false;
   const followUpWords = getSpellingFollowUpWords(spelling);
   const nextWord = followUpWords.find((item) => !ensureSpellingTenseAnswer(spelling, item.id).completed);
   spelling.tenseTransfer.currentWordId = nextWord?.id || "";
@@ -10345,7 +10446,8 @@ function renderSpelling() {
               <span>Word ${escapeHtml(String(flashcardWords.filter((entry) => ensureSpellingFlashcardCard(spelling, entry.id).completed).length + 1))} of ${escapeHtml(String(flashcardWords.length))}</span>
               <span>${escapeHtml(`${currentFlashcardCard?.exposureIndex || 0} of 3 sentences heard`)}</span>
             </div>
-            <article class="spelling-tense-card spelling-tense-card--single${currentFlashcardCard?.checked ? (currentFlashcardCard.completed ? " is-correct" : " is-incorrect") : ""}">
+            ${getSpellingWordFamilyReferenceMarkup(currentFlashcardWord)}
+            <article class="spelling-tense-card spelling-tense-card--single${currentFlashcardCard?.checked ? (currentFlashcardCard?.feedbackKind === "correct" ? " is-correct" : " is-incorrect") : ""}">
               ${currentFlashcardCard?.exposureIndex < 3 ? `
                 ${currentFlashcardCard?.isShowingSentence ? `
                   <div class="spelling-family-sentence-card spelling-family-sentence-card--active">
@@ -10379,8 +10481,9 @@ function renderSpelling() {
                   />
                   <div class="spelling-stage-actions spelling-stage-actions--compact">
                     <button type="button" class="primary-button primary-button--dark" data-spelling-flashcard-submit="${currentFlashcardWord.id}">Check word</button>
+                    ${currentFlashcardCard?.awaitingAdvance ? `<button type="button" class="ghost-button ghost-button--small" data-spelling-flashcard-advance="${currentFlashcardWord.id}">${escapeHtml(spelling.flashcards.completed ? "Finish stage" : "Continue to next word")}</button>` : ""}
                   </div>
-                  ${currentFlashcardCard?.checked ? `<p class="spelling-choice-feedback${currentFlashcardCard.completed ? " is-correct" : " is-incorrect"}">${escapeHtml(currentFlashcardCard.completed ? "Correct. The key word held after the sentence clues." : `Retry ${currentFlashcardWord.word}.`)}</p>` : ""}
+                  ${currentFlashcardCard?.checked ? `<p class="spelling-choice-feedback${currentFlashcardCard?.feedbackKind === "correct" ? " is-correct" : " is-incorrect"}">${escapeHtml(currentFlashcardCard?.feedbackMessage || "")}</p>` : ""}
                 </div>
               `}
             </article>
@@ -10442,7 +10545,8 @@ function renderSpelling() {
               <span>Word ${escapeHtml(String(followUpWords.filter((entry) => ensureSpellingTenseAnswer(spelling, entry.id).completed).length + 1))} of ${escapeHtml(String(followUpWords.length))}</span>
               <span>${escapeHtml(`${currentFamilyAnswer?.exposureIndex || 0} of 3 sentences heard`)}</span>
             </div>
-            <article class="spelling-tense-card spelling-tense-card--single${currentFamilyAnswer?.checked ? (currentFamilyAnswer.completed ? " is-correct" : " is-incorrect") : ""}">
+            ${getSpellingWordFamilyReferenceMarkup(currentFamilyWord)}
+            <article class="spelling-tense-card spelling-tense-card--single${currentFamilyAnswer?.checked ? (currentFamilyAnswer?.feedbackKind === "correct" ? " is-correct" : " is-incorrect") : ""}">
               ${currentFamilyAnswer?.exposureIndex < 3 ? `
                 ${currentFamilyAnswer?.isShowingSentence ? `
                   <div class="spelling-family-sentence-card spelling-family-sentence-card--active">
@@ -10476,8 +10580,9 @@ function renderSpelling() {
                   />
                   <div class="spelling-stage-actions spelling-stage-actions--compact">
                     <button type="button" class="primary-button primary-button--dark" data-spelling-family-submit="${currentFamilyWord.id}">Check word</button>
+                    ${currentFamilyAnswer?.awaitingAdvance ? `<button type="button" class="ghost-button ghost-button--small" data-spelling-family-advance="${currentFamilyWord.id}">${escapeHtml(spelling.tenseTransfer.completed ? "Finish stage" : "Continue to next word")}</button>` : ""}
                   </div>
-                  ${currentFamilyAnswer?.checked ? `<p class="spelling-choice-feedback${currentFamilyAnswer.completed ? " is-correct" : " is-incorrect"}">${escapeHtml(currentFamilyAnswer.completed ? "Correct. The key word held after the sentence clues." : `Retry ${currentFamilyWord.word}.`)}</p>` : ""}
+                  ${currentFamilyAnswer?.checked ? `<p class="spelling-choice-feedback${currentFamilyAnswer?.feedbackKind === "correct" ? " is-correct" : " is-incorrect"}">${escapeHtml(currentFamilyAnswer?.feedbackMessage || "")}</p>` : ""}
                 </div>
               `}
             </article>
@@ -10635,6 +10740,9 @@ function renderSpelling() {
       const card = ensureSpellingFlashcardCard(spelling, input.dataset.spellingFlashcardInput);
       card.typedValue = event.target.value;
       card.checked = false;
+      card.awaitingAdvance = false;
+      card.feedbackKind = "";
+      card.feedbackMessage = "";
       persistSubjects();
     });
     input.addEventListener("keydown", (event) => {
@@ -10657,6 +10765,13 @@ function renderSpelling() {
     });
   });
 
+  host.querySelectorAll("[data-spelling-flashcard-advance]").forEach((button) => {
+    button.addEventListener("click", () => {
+      advanceSpellingFlashcardWord(subject, button.dataset.spellingFlashcardAdvance);
+      render();
+    });
+  });
+
   host.querySelectorAll("[data-spelling-family-reveal]").forEach((button) => {
     button.addEventListener("click", () => {
       revealSpellingFamilySentence(subject, button.dataset.spellingFamilyReveal);
@@ -10668,6 +10783,9 @@ function renderSpelling() {
       const answer = ensureSpellingTenseAnswer(spelling, input.dataset.spellingFamilyInput);
       answer.typedValue = event.target.value;
       answer.checked = false;
+      answer.awaitingAdvance = false;
+      answer.feedbackKind = "";
+      answer.feedbackMessage = "";
       persistSubjects();
     });
     input.addEventListener("keydown", (event) => {
@@ -10686,6 +10804,13 @@ function renderSpelling() {
     button.addEventListener("click", () => {
       const input = host.querySelector(`[data-spelling-family-input="${button.dataset.spellingFamilySubmit}"]`);
       submitSpellingFamilyRecall(subject, button.dataset.spellingFamilySubmit, input?.value || "");
+      render();
+    });
+  });
+
+  host.querySelectorAll("[data-spelling-family-advance]").forEach((button) => {
+    button.addEventListener("click", () => {
+      advanceSpellingFamilyRecall(subject, button.dataset.spellingFamilyAdvance);
       render();
     });
   });

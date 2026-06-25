@@ -6174,6 +6174,33 @@ input[type="date"] {
   background: #fff4f1;
 }
 
+.spelling-family-reference {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+  padding: 18px 20px;
+  border-radius: 22px;
+  border: 1px solid rgba(72, 54, 24, 0.12);
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.spelling-family-reference__header {
+  display: grid;
+  gap: 4px;
+}
+
+.spelling-family-reference__root {
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--spelling-ink);
+}
+
+.spelling-family-reference__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .spelling-choice-row--stacked {
   display: grid;
   grid-template-columns: 1fr;
