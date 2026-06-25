@@ -472,6 +472,7 @@ const FOCUS_AREAS = [
 ];
 
 const SPELLING_STAGE_ORDER = ["diagnostic", "looks-right", "word-families", "tense-transfer"];
+const SPELLING_FLASHCARDS_VERSION = 2;
 const SPELLING_TENSE_TRANSFER_VERSION = 2;
 const SPELLING_STAGE_LABELS = {
   diagnostic: "Diagnostic",
@@ -3910,7 +3911,9 @@ function createDefaultSpellingState(subjectId = "") {
       completed: false
     },
     flashcards: {
+      version: SPELLING_FLASHCARDS_VERSION,
       cards: {},
+      currentWordId: "",
       completed: false
     },
     tenseTransfer: {
@@ -3918,7 +3921,9 @@ function createDefaultSpellingState(subjectId = "") {
       answers: {},
       currentWordId: "",
       completed: false
-    }
+    },
+    selectedStageId: "",
+    celebrationStageId: ""
   };
 }
 
@@ -3929,6 +3934,7 @@ function normaliseSpellingState(spelling, subjectId = "") {
   const looksRight = next.looksRight && typeof next.looksRight === "object" ? next.looksRight : {};
   const flashcards = next.flashcards && typeof next.flashcards === "object" ? next.flashcards : {};
   const tenseTransfer = next.tenseTransfer && typeof next.tenseTransfer === "object" ? next.tenseTransfer : {};
+  const isCurrentFlashcardsVersion = Number(flashcards.version || 0) === SPELLING_FLASHCARDS_VERSION;
   const isCurrentTenseTransferVersion = Number(tenseTransfer.version || 0) === SPELLING_TENSE_TRANSFER_VERSION;
 
   return {
@@ -3989,21 +3995,24 @@ function normaliseSpellingState(spelling, subjectId = "") {
     },
     flashcards: {
       ...base.flashcards,
-      ...flashcards,
-      cards: flashcards.cards && typeof flashcards.cards === "object" && !Array.isArray(flashcards.cards)
+      ...(isCurrentFlashcardsVersion ? flashcards : {}),
+      version: SPELLING_FLASHCARDS_VERSION,
+      cards: isCurrentFlashcardsVersion && flashcards.cards && typeof flashcards.cards === "object" && !Array.isArray(flashcards.cards)
         ? Object.fromEntries(
             Object.entries(flashcards.cards).map(([wordId, entry]) => [
               wordId,
               {
-                revealed: Boolean(entry?.revealed),
-                attempt: String(entry?.attempt || ""),
+                exposureIndex: Math.max(0, Math.min(3, Number(entry?.exposureIndex || 0))),
+                isShowingSentence: Boolean(entry?.isShowingSentence),
+                typedValue: String(entry?.typedValue || ""),
                 checked: Boolean(entry?.checked),
                 completed: Boolean(entry?.completed)
               }
             ])
           )
         : {},
-      completed: Boolean(flashcards.completed)
+      currentWordId: isCurrentFlashcardsVersion ? String(flashcards.currentWordId || "") : "",
+      completed: isCurrentFlashcardsVersion ? Boolean(flashcards.completed) : false
     },
     tenseTransfer: {
       ...base.tenseTransfer,
@@ -4025,7 +4034,9 @@ function normaliseSpellingState(spelling, subjectId = "") {
         : {},
       currentWordId: isCurrentTenseTransferVersion ? String(tenseTransfer.currentWordId || "") : "",
       completed: isCurrentTenseTransferVersion ? Boolean(tenseTransfer.completed) : false
-    }
+    },
+    selectedStageId: SPELLING_STAGE_ORDER.includes(String(next.selectedStageId || "")) ? String(next.selectedStageId || "") : "",
+    celebrationStageId: SPELLING_STAGE_ORDER.includes(String(next.celebrationStageId || "")) ? String(next.celebrationStageId || "") : ""
   };
 }
 
@@ -4079,6 +4090,88 @@ function getSpellingMasteryRatio(subject) {
 function getSpellingStageId(subject) {
   const completionMap = getSpellingStageCompletionMap(subject);
   return SPELLING_STAGE_ORDER.find((stageId) => !completionMap[stageId]) || SPELLING_STAGE_ORDER[SPELLING_STAGE_ORDER.length - 1];
+}
+
+function getSpellingVisibleStageId(subject) {
+  const spelling = getSubjectSpellingState(subject);
+  const unlockedStageIndex = Math.min(getSpellingCompletedActivityCount(subject), SPELLING_STAGE_ORDER.length - 1);
+  const selectedStageId = String(spelling.selectedStageId || "");
+  const selectedStageIndex = SPELLING_STAGE_ORDER.indexOf(selectedStageId);
+  if (selectedStageIndex >= 0 && selectedStageIndex <= unlockedStageIndex) {
+    return selectedStageId;
+  }
+  return getSpellingStageId(subject);
+}
+
+function setSpellingSelectedStage(subject, stageId) {
+  const spelling = getSubjectSpellingState(subject);
+  if (!SPELLING_STAGE_ORDER.includes(stageId)) {
+    return;
+  }
+  const unlockedStageIndex = Math.min(getSpellingCompletedActivityCount(subject), SPELLING_STAGE_ORDER.length - 1);
+  const nextStageIndex = SPELLING_STAGE_ORDER.indexOf(stageId);
+  if (nextStageIndex > unlockedStageIndex) {
+    return;
+  }
+  spelling.selectedStageId = stageId;
+  spelling.celebrationStageId = "";
+  persistSubjects();
+}
+
+function celebrateSpellingStage(subject, stageId, coachMessage) {
+  const spelling = getSubjectSpellingState(subject);
+  spelling.selectedStageId = stageId;
+  spelling.celebrationStageId = stageId;
+  if (coachMessage) {
+    spelling.coachMessage = coachMessage;
+  }
+  persistSubjects();
+}
+
+function continueSpellingStage(subject) {
+  const spelling = getSubjectSpellingState(subject);
+  const celebrationStageId = String(spelling.celebrationStageId || "");
+  const celebrationStageIndex = SPELLING_STAGE_ORDER.indexOf(celebrationStageId);
+  const nextStageId =
+    celebrationStageIndex >= 0 && celebrationStageIndex < SPELLING_STAGE_ORDER.length - 1
+      ? SPELLING_STAGE_ORDER[celebrationStageIndex + 1]
+      : SPELLING_STAGE_ORDER[SPELLING_STAGE_ORDER.length - 1];
+  spelling.celebrationStageId = "";
+  spelling.selectedStageId = nextStageId;
+  persistSubjects();
+}
+
+function getSpellingCelebrationCopy(stageId) {
+  if (stageId === "diagnostic") {
+    return {
+      eyebrow: "Ribbon earned",
+      title: "Diagnostic complete",
+      body: "The spelling profile is ready. Continue to the sentence check so the follow-up words can be narrowed to the patterns that still look uncertain.",
+      action: "Continue to stage 2"
+    };
+  }
+  if (stageId === "looks-right") {
+    return {
+      eyebrow: "Ribbon earned",
+      title: "Sentence check complete",
+      body: "The words that still look unstable have been identified. Continue to the next stage to rehearse them one at a time through word-family sentences.",
+      action: "Continue to stage 3"
+    };
+  }
+  if (stageId === "word-families") {
+    return {
+      eyebrow: "Ribbon earned",
+      title: "Word family stage complete",
+      body: "Those family clues held. Continue to the final stage for another sentence-based recall pass before the program closes.",
+      action: "Continue to stage 4"
+    };
+  }
+  return {
+    eyebrow: "Final ribbon",
+    title: "Program complete",
+    body: "All four stages are complete. You can now review earlier stages and keep these words in spaced practice.",
+    action: "Finish"
+  };
 }
 
 function getSpellingStageLabel(subject) {
@@ -4165,13 +4258,32 @@ function getSpellingFlashcardWords(spelling) {
 function ensureSpellingFlashcardCard(spelling, wordId) {
   if (!spelling.flashcards.cards[wordId]) {
     spelling.flashcards.cards[wordId] = {
-      revealed: false,
-      attempt: "",
+      exposureIndex: 0,
+      isShowingSentence: false,
+      typedValue: "",
       checked: false,
       completed: false
     };
   }
   return spelling.flashcards.cards[wordId];
+}
+
+function getSpellingFlashcardCurrentWord(spelling) {
+  const flashcardWords = getSpellingFlashcardWords(spelling);
+  if (!flashcardWords.length) {
+    return null;
+  }
+
+  if (spelling.flashcards.currentWordId) {
+    const activeWord = flashcardWords.find((entry) => entry.id === spelling.flashcards.currentWordId);
+    if (activeWord && !ensureSpellingFlashcardCard(spelling, activeWord.id).completed) {
+      return activeWord;
+    }
+  }
+
+  const nextWord = flashcardWords.find((entry) => !ensureSpellingFlashcardCard(spelling, entry.id).completed) || null;
+  spelling.flashcards.currentWordId = nextWord?.id || "";
+  return nextWord;
 }
 
 function ensureSpellingTenseAnswer(spelling, wordId) {
@@ -4255,7 +4367,12 @@ function finaliseSpellingDiagnostic(subject) {
   spelling.followUpWordIds = buildSpellingFollowUpWordIdsFromResponses(spelling.diagnostic.responses);
   spelling.looksRight.checked = false;
   spelling.looksRight.completed = false;
-  spelling.flashcards.completed = false;
+  spelling.flashcards = {
+    version: SPELLING_FLASHCARDS_VERSION,
+    cards: {},
+    currentWordId: "",
+    completed: false
+  };
   spelling.tenseTransfer = {
     version: SPELLING_TENSE_TRANSFER_VERSION,
     answers: {},
@@ -4263,9 +4380,13 @@ function finaliseSpellingDiagnostic(subject) {
     completed: false
   };
   const topFocuses = getSpellingTopFocuses(spelling, 2).map((entry) => SPELLING_FOCUS_LABELS[entry.id] || entry.id);
-  spelling.coachMessage = topFocuses.length
-    ? `Diagnostic complete. The strongest follow-up needs are ${topFocuses.join(" and ").toLowerCase()}.`
-    : "Diagnostic complete. The follow-up stages are ready.";
+  celebrateSpellingStage(
+    subject,
+    "diagnostic",
+    topFocuses.length
+      ? `Diagnostic complete. The strongest follow-up needs are ${topFocuses.join(" and ").toLowerCase()}.`
+      : "Diagnostic complete. The follow-up stages are ready."
+  );
 }
 
 function resetSpellingActivity(subject, activityId) {
@@ -4283,7 +4404,9 @@ function resetSpellingActivity(subject, activityId) {
       completed: false
     };
     spelling.flashcards = {
+      version: SPELLING_FLASHCARDS_VERSION,
       cards: {},
+      currentWordId: "",
       completed: false
     };
     spelling.tenseTransfer = {
@@ -4302,7 +4425,9 @@ function resetSpellingActivity(subject, activityId) {
       completed: false
     };
     spelling.flashcards = {
+      version: SPELLING_FLASHCARDS_VERSION,
       cards: {},
+      currentWordId: "",
       completed: false
     };
     spelling.tenseTransfer = {
@@ -4314,7 +4439,9 @@ function resetSpellingActivity(subject, activityId) {
     spelling.coachMessage = "Use the visual check to decide which spelling pattern looks settled on the page.";
   } else if (activityId === "word-families") {
     spelling.flashcards = {
+      version: SPELLING_FLASHCARDS_VERSION,
       cards: {},
+      currentWordId: "",
       completed: false
     };
     spelling.tenseTransfer = {
@@ -4335,6 +4462,8 @@ function resetSpellingActivity(subject, activityId) {
   } else {
     subject.spelling = createDefaultSpellingState(subject.id);
   }
+  spelling.selectedStageId = "";
+  spelling.celebrationStageId = "";
   persistSubjects();
 }
 
@@ -4408,15 +4537,21 @@ function checkSpellingLooksRight(subject) {
   spelling.looksRight.completed = isSpellingLooksRightComplete(spelling);
   const incorrectWords = followUpWords.filter((entry) => spelling.looksRight.answers[entry.id] !== entry.word);
   const unansweredWords = followUpWords.filter((entry) => !spelling.looksRight.answers[entry.id]);
-  spelling.coachMessage = spelling.looksRight.completed
-    ? incorrectWords.length
-      ? `Visual check complete. Stage 3 will start with ${incorrectWords[0].word} because it still needs stabilising.`
-      : "Visual check complete. You are ready to stabilise the same words across their families."
-    : incorrectWords.length
-      ? `Recheck ${incorrectWords[0].word}. Ask whether the spelling looks settled before you submit again.`
-      : unansweredWords.length
-        ? "Choose an answer for each sentence before checking this stage."
-        : "Visual check complete. Continue to the next stage.";
+  if (spelling.looksRight.completed) {
+    celebrateSpellingStage(
+      subject,
+      "looks-right",
+      incorrectWords.length
+        ? `Visual check complete. Stage 3 will start with ${incorrectWords[0].word} because it still needs stabilising.`
+        : "Visual check complete. You are ready to stabilise the same words across their families."
+    );
+    return;
+  }
+  spelling.coachMessage = incorrectWords.length
+    ? `Recheck ${incorrectWords[0].word}. Ask whether the spelling looks settled before you submit again.`
+    : unansweredWords.length
+      ? "Choose an answer for each sentence before checking this stage."
+      : "Visual check complete. Continue to the next stage.";
   persistSubjects();
 }
 
@@ -4446,6 +4581,95 @@ function buildSpellingFamilySentenceMarkup(sentence, highlightWord) {
   const before = sentence.slice(0, match.index);
   const after = sentence.slice(match.index + match[0].length);
   return `${escapeHtml(before)}<span class="spelling-inline-target">${escapeHtml(match[0])}</span>${escapeHtml(after)}`;
+}
+
+function playSpellingFlashcardSentence(subject, entry, card) {
+  const sentenceIndex = Math.min(card.exposureIndex, (entry.familySentences || []).length - 1);
+  const familyWord = entry.familyWords[sentenceIndex];
+  const sentence = entry.familySentences[sentenceIndex];
+  if (!sentence || !familyWord) {
+    return;
+  }
+
+  card.isShowingSentence = true;
+  persistSubjects();
+  render();
+
+  void speakTextWithOpenAi(sentence, {
+    context: `spelling:flashcard:${entry.id}:${sentenceIndex}`,
+    statusMessages: {
+      preparing: "Preparing spelling sentence...",
+      playing: "Reading family sentence...",
+      error: "Spelling sentence audio failed."
+    },
+    onFinished: () => {
+      const freshSpelling = getSubjectSpellingState(subject);
+      const freshCard = ensureSpellingFlashcardCard(freshSpelling, entry.id);
+      freshCard.isShowingSentence = false;
+      freshCard.exposureIndex = Math.min(3, freshCard.exposureIndex + 1);
+      freshSpelling.coachMessage = freshCard.exposureIndex >= 3
+        ? `Now type ${entry.word} from memory.`
+        : `Sentence ${freshCard.exposureIndex + 1} of 3 is ready for ${entry.word}.`;
+      persistSubjects();
+      render();
+    }
+  })
+    .then(() => {
+      render();
+    })
+    .catch((error) => {
+      console.error("Spelling flashcard sentence failed.", error);
+      const freshSpelling = getSubjectSpellingState(subject);
+      const freshCard = ensureSpellingFlashcardCard(freshSpelling, entry.id);
+      freshCard.isShowingSentence = false;
+      persistSubjects();
+      render();
+    });
+}
+
+function revealSpellingFlashcardSentence(subject, wordId) {
+  const spelling = getSubjectSpellingState(subject);
+  const entry = SPELLING_INTERVENTION_LIBRARY[wordId];
+  if (!entry) {
+    return;
+  }
+  const card = ensureSpellingFlashcardCard(spelling, wordId);
+  if (card.completed || card.isShowingSentence || card.exposureIndex >= 3) {
+    return;
+  }
+  spelling.flashcards.currentWordId = wordId;
+  playSpellingFlashcardSentence(subject, entry, card);
+}
+
+function submitSpellingFlashcardRecall(subject, wordId, typedValueOverride = null) {
+  const spelling = getSubjectSpellingState(subject);
+  const entry = SPELLING_INTERVENTION_LIBRARY[wordId];
+  if (!entry) {
+    return;
+  }
+  const card = ensureSpellingFlashcardCard(spelling, wordId);
+  const typedValue = String(
+    typedValueOverride !== null && typedValueOverride !== undefined ? typedValueOverride : card.typedValue || ""
+  ).trim();
+  card.checked = true;
+  card.typedValue = typedValue;
+  card.completed = normalizeSpellingAttempt(typedValue) === normalizeSpellingAttempt(entry.word);
+  if (!card.completed) {
+    spelling.coachMessage = `Retry ${entry.word}. Use the family sentences to rebuild the spelling pattern.`;
+    persistSubjects();
+    return;
+  }
+
+  const flashcardWords = getSpellingFlashcardWords(spelling);
+  const nextWord = flashcardWords.find((item) => !ensureSpellingFlashcardCard(spelling, item.id).completed);
+  spelling.flashcards.currentWordId = nextWord?.id || "";
+  spelling.flashcards.completed = isSpellingFlashcardsComplete(spelling);
+  if (spelling.flashcards.completed) {
+    celebrateSpellingStage(subject, "word-families", "Stage 3 complete. The word-family sentence loop is secure.");
+    return;
+  }
+  spelling.coachMessage = `${entry.word} is secure. The next keyword is ready.`;
+  persistSubjects();
 }
 
 function playSpellingFamilySentence(subject, entry, answer) {
@@ -4529,46 +4753,11 @@ function submitSpellingFamilyRecall(subject, wordId, typedValueOverride = null) 
   const nextWord = followUpWords.find((item) => !ensureSpellingTenseAnswer(spelling, item.id).completed);
   spelling.tenseTransfer.currentWordId = nextWord?.id || "";
   spelling.tenseTransfer.completed = isSpellingTenseTransferComplete(spelling);
-  spelling.coachMessage = spelling.tenseTransfer.completed
-    ? "Final stage complete. The family sentences held and the key words were recalled from memory."
-    : `${entry.word} is secure. The next keyword is ready.`;
-  persistSubjects();
-}
-
-function checkSpellingFlashcardWord(subject, wordId) {
-  const spelling = getSubjectSpellingState(subject);
-  const entry = SPELLING_INTERVENTION_LIBRARY[wordId];
-  if (!entry) {
+  if (spelling.tenseTransfer.completed) {
+    celebrateSpellingStage(subject, "tense-transfer", "Final stage complete. The family sentences held and the key words were recalled from memory.");
     return;
   }
-  const card = ensureSpellingFlashcardCard(spelling, wordId);
-  card.checked = true;
-  card.completed = normalizeSpellingAttempt(card.attempt) === normalizeSpellingAttempt(entry.word);
-  spelling.flashcards.completed = isSpellingFlashcardsComplete(spelling);
-  spelling.coachMessage = card.completed
-    ? `${entry.word} is secure. Move to the next family word.`
-    : `${entry.articulation} can help here. Reveal the word map again, hide it, then retry ${entry.word}.`;
-  persistSubjects();
-}
-
-function checkSpellingTenseTransfer(subject) {
-  const spelling = getSubjectSpellingState(subject);
-  const followUpWords = getSpellingFollowUpWords(spelling);
-  spelling.tenseTransfer.checked = true;
-  spelling.tenseTransfer.completed = isSpellingTenseTransferComplete(spelling);
-  const firstIncorrect = followUpWords.find((entry) => {
-    const answer = ensureSpellingTenseAnswer(spelling, entry.id);
-    return (
-      answer.present !== entry.tense.present ||
-      answer.past !== entry.tense.past ||
-      answer.future !== entry.tense.future
-    );
-  });
-  spelling.coachMessage = spelling.tenseTransfer.completed
-    ? "Final stage complete. The words now hold steady across spelling, family, and tense changes."
-    : firstIncorrect
-      ? `Check the tense pattern for ${firstIncorrect.word}. The spelling should stay stable as the grammar changes.`
-      : "Choose a present, past, and future form for each word before checking this stage.";
+  spelling.coachMessage = `${entry.word} is secure. The next keyword is ready.`;
   persistSubjects();
 }
 
@@ -9464,13 +9653,16 @@ function renderSpelling() {
   const completedCount = getSpellingCompletedActivityCount(subject);
   const totalCount = getSpellingTotalActivityCount(subject);
   const masteryPercent = Math.round(getSpellingMasteryRatio(subject) * 100);
-  const stageId = getSpellingStageId(subject);
+  const currentStageId = getSpellingStageId(subject);
+  const stageId = getSpellingVisibleStageId(subject);
   const stageIndex = SPELLING_STAGE_ORDER.indexOf(stageId);
+  const unlockedStageIndex = Math.min(completedCount, SPELLING_STAGE_ORDER.length - 1);
+  const showingCelebration = spelling.celebrationStageId === stageId;
   const diagnosticWord = getSpellingDiagnosticCurrentWord(spelling);
   const focusSummary = getSpellingTopFocuses(spelling, 3);
   const followUpWords = getSpellingFollowUpWords(spelling);
 
-  if (stageId === "diagnostic" && !spelling.diagnostic.completed) {
+  if (stageId === "diagnostic" && !spelling.diagnostic.completed && !showingCelebration) {
     host.innerHTML = `
       <section class="spelling-shell spelling-shell--diagnostic-only" data-spelling-font="${escapeHtml(spelling.preferences.font)}" data-spelling-spacing="${escapeHtml(spelling.preferences.spacing)}" data-spelling-tint="${escapeHtml(spelling.preferences.tint)}">
         <article class="spelling-stage-card spelling-stage-card--diagnostic">
@@ -9537,7 +9729,48 @@ function renderSpelling() {
 
   let stageBody = "";
 
-  if (stageId === "looks-right") {
+  if (showingCelebration) {
+    const celebrationCopy = getSpellingCelebrationCopy(stageId);
+    stageBody = `
+      <article class="spelling-stage-card spelling-stage-card--single spelling-stage-card--celebration">
+        <p class="eyebrow">${escapeHtml(celebrationCopy.eyebrow)}</p>
+        <div class="spelling-ribbon-badge">Ribbon unlocked</div>
+        <h4>${escapeHtml(celebrationCopy.title)}</h4>
+        <p>${escapeHtml(celebrationCopy.body)}</p>
+        <div class="spelling-stage-actions spelling-stage-actions--centered">
+          <button type="button" class="primary-button primary-button--dark" data-spelling-continue-stage="true">${escapeHtml(celebrationCopy.action)}</button>
+        </div>
+      </article>
+    `;
+  } else if (stageId === "diagnostic") {
+    stageBody = `
+      <article class="spelling-stage-card spelling-stage-card--single">
+        <div class="spelling-card__header">
+          <div>
+            <p class="eyebrow">Stage 1</p>
+            <h4>Diagnostic review</h4>
+          </div>
+          <span class="spelling-card__status is-complete">Ribbon earned</span>
+        </div>
+        <p>The baseline is complete. Review the diagnostic result before moving back through earlier stages.</p>
+        <div class="spelling-stage-meta spelling-stage-meta--single">
+          <span>${escapeHtml(`${getSpellingDiagnosticCorrectCount(spelling)} of ${SPELLING_DIAGNOSTIC_WORDS.length} correct`)}</span>
+          <span>${escapeHtml(`${focusSummary.length} focus area${focusSummary.length === 1 ? "" : "s"} identified`)}</span>
+        </div>
+        <div class="spelling-review-summary">
+          ${focusSummary.map((entry) => `
+            <article class="spelling-review-summary__row">
+              <strong>${escapeHtml(SPELLING_FOCUS_LABELS[entry.id] || entry.id)}</strong>
+              <span>${escapeHtml(`${entry.count} miss${entry.count === 1 ? "" : "es"}`)}</span>
+            </article>
+          `).join("")}
+        </div>
+        <div class="spelling-stage-actions">
+          <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="diagnostic">Reset stage</button>
+        </div>
+      </article>
+    `;
+  } else if (stageId === "looks-right") {
     const currentLookWord = getSpellingLooksRightCurrentWord(spelling);
     const answeredLookCount = followUpWords.filter((entry) => Boolean(spelling.looksRight.answers[entry.id])).length;
     const currentLookOptions = currentLookWord
@@ -9563,107 +9796,168 @@ function renderSpelling() {
           return shouldSpellingLooksRightShowCorrectFirst(currentLookWord.id) ? options : [options[1], options[0]];
         })()
       : [];
-    stageBody = `
-      <article class="spelling-stage-card spelling-stage-card--single">
-        <div class="spelling-card__header">
-          <div>
-            <p class="eyebrow">Stage 2</p>
-            <h4>Which word looks right?</h4>
+    stageBody = spelling.looksRight.completed
+      ? `
+        <article class="spelling-stage-card spelling-stage-card--single">
+          <div class="spelling-card__header">
+            <div>
+              <p class="eyebrow">Stage 2</p>
+              <h4>Sentence check review</h4>
+            </div>
+            <span class="spelling-card__status is-complete">Ribbon earned</span>
           </div>
-          <span class="spelling-card__status${spelling.looksRight.completed ? " is-complete" : ""}">${spelling.looksRight.completed ? "Ribbon earned" : "Ribbon available"}</span>
-        </div>
-        <p>Read the sentence, then click the version that looks right. The target word is written inside each sentence with the sound splits visible.</p>
-        <div class="spelling-stage-meta spelling-stage-meta--single">
-          <span>Sentence ${escapeHtml(String(Math.min(answeredLookCount + 1, followUpWords.length)))} of ${escapeHtml(String(followUpWords.length))}</span>
-          <span>${escapeHtml(`${answeredLookCount} answered`)}</span>
-        </div>
-        ${currentLookWord ? `
-          <article class="spelling-comparison-card spelling-comparison-card--single">
-            <div class="spelling-comparison-card__top">
-              <strong>Sentence check</strong>
-              <span>${escapeHtml((currentLookWord.focuses || []).map((focusId) => SPELLING_FOCUS_LABELS[focusId] || focusId).join(" · "))}</span>
+          <p>These are the sentence choices you worked through in this stage.</p>
+          <div class="spelling-review-summary">
+            ${followUpWords.map((entry) => `
+              <article class="spelling-review-summary__row${spelling.looksRight.answers[entry.id] === entry.word ? " is-correct" : " is-incorrect"}">
+                <strong>${escapeHtml(entry.word)}</strong>
+                <span>${escapeHtml(spelling.looksRight.answers[entry.id] || "No answer saved")}</span>
+              </article>
+            `).join("")}
+          </div>
+          <div class="spelling-stage-actions">
+            <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="looks-right">Reset stage</button>
+          </div>
+        </article>
+      `
+      : `
+        <article class="spelling-stage-card spelling-stage-card--single">
+          <div class="spelling-card__header">
+            <div>
+              <p class="eyebrow">Stage 2</p>
+              <h4>Which word looks right?</h4>
             </div>
-            <p class="spelling-comparison-card__prompt">Which sentence looks right?</p>
-            <div class="spelling-choice-row spelling-choice-row--stacked">
-              ${currentLookOptions
-                .map(
-                  ([value, sentenceChoice]) => `
-                    <button
-                      type="button"
-                      class="spelling-choice spelling-choice--sentence spelling-choice--sentence-large"
-                      data-spelling-looks-right-word="${currentLookWord.id}"
-                      data-spelling-looks-right-value="${value}"
-                    >
-                      <span>${sentenceChoice}</span>
-                    </button>
-                  `
-                )
-                .join("")}
-            </div>
-          </article>
-        ` : ""}
-        <div class="spelling-stage-actions">
-          <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="looks-right">Reset stage</button>
-        </div>
-      </article>
-    `;
+            <span class="spelling-card__status">Ribbon available</span>
+          </div>
+          <p>Read the sentence, then click the version that looks right. The target word is written inside each sentence with the sound splits visible.</p>
+          <div class="spelling-stage-meta spelling-stage-meta--single">
+            <span>Sentence ${escapeHtml(String(Math.min(answeredLookCount + 1, followUpWords.length)))} of ${escapeHtml(String(followUpWords.length))}</span>
+            <span>${escapeHtml(`${answeredLookCount} answered`)}</span>
+          </div>
+          ${currentLookWord ? `
+            <article class="spelling-comparison-card spelling-comparison-card--single">
+              <div class="spelling-comparison-card__top">
+                <strong>Sentence check</strong>
+                <span>${escapeHtml((currentLookWord.focuses || []).map((focusId) => SPELLING_FOCUS_LABELS[focusId] || focusId).join(" · "))}</span>
+              </div>
+              <p class="spelling-comparison-card__prompt">Which sentence looks right?</p>
+              <div class="spelling-choice-row spelling-choice-row--stacked">
+                ${currentLookOptions
+                  .map(
+                    ([value, sentenceChoice]) => `
+                      <button
+                        type="button"
+                        class="spelling-choice spelling-choice--sentence spelling-choice--sentence-large"
+                        data-spelling-looks-right-word="${currentLookWord.id}"
+                        data-spelling-looks-right-value="${value}"
+                      >
+                        <span>${sentenceChoice}</span>
+                      </button>
+                    `
+                  )
+                  .join("")}
+              </div>
+            </article>
+          ` : ""}
+          <div class="spelling-stage-actions">
+            <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="looks-right">Reset stage</button>
+          </div>
+        </article>
+      `;
   } else if (stageId === "word-families") {
     const flashcardWords = getSpellingFlashcardWords(spelling);
-    stageBody = `
-      <article class="spelling-stage-card">
-        <div class="spelling-card__header">
-          <div>
-            <p class="eyebrow">Stage 3</p>
-            <h4>Word family flashcards</h4>
+    const currentFlashcardWord = getSpellingFlashcardCurrentWord(spelling);
+    const currentFlashcardCard = currentFlashcardWord ? ensureSpellingFlashcardCard(spelling, currentFlashcardWord.id) : null;
+    const currentFlashcardSentenceIndex = currentFlashcardCard
+      ? Math.max(0, Math.min(currentFlashcardCard.exposureIndex, (currentFlashcardWord?.familySentences || []).length - 1))
+      : 0;
+    const currentFlashcardSentence = currentFlashcardWord?.familySentences?.[currentFlashcardSentenceIndex] || "";
+    const currentFlashcardSentenceWord = currentFlashcardWord?.familyWords?.[currentFlashcardSentenceIndex] || "";
+    stageBody = spelling.flashcards.completed
+      ? `
+        <article class="spelling-stage-card spelling-stage-card--single">
+          <div class="spelling-card__header">
+            <div>
+              <p class="eyebrow">Stage 3</p>
+              <h4>Word family review</h4>
+            </div>
+            <span class="spelling-card__status is-complete">Ribbon earned</span>
           </div>
-          <span class="spelling-card__status${spelling.flashcards.completed ? " is-complete" : ""}">${spelling.flashcards.completed ? "Ribbon earned" : "Ribbon available"}</span>
-        </div>
-        <p>Reveal the word map, hide it, then type the target word from memory. The family words below show how the base pattern stays stable.</p>
-        <div class="spelling-comparison-grid">
-          ${flashcardWords
-            .map((entry) => {
-              const card = ensureSpellingFlashcardCard(spelling, entry.id);
-              return `
-                <article class="spelling-flashcard-card${card.completed ? " is-complete" : ""}">
-                  <div class="spelling-flashcard-card__top">
-                    <strong>${escapeHtml(entry.word)}</strong>
-                    <span>${escapeHtml(entry.familyNote)}</span>
+          <p>These are the key words you completed in the word-family sentence loop.</p>
+          <div class="spelling-review-summary">
+            ${flashcardWords.map((entry) => `
+              <article class="spelling-review-summary__row is-correct">
+                <strong>${escapeHtml(entry.word)}</strong>
+                <span>3 family sentences heard · key word recalled</span>
+              </article>
+            `).join("")}
+          </div>
+          <div class="spelling-stage-actions">
+            <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="word-families">Reset stage</button>
+          </div>
+        </article>
+      `
+      : `
+        <article class="spelling-stage-card spelling-stage-card--single">
+          <div class="spelling-card__header">
+            <div>
+              <p class="eyebrow">Stage 3</p>
+              <h4>Word family sentence loop</h4>
+            </div>
+            <span class="spelling-card__status">Ribbon available</span>
+          </div>
+          <p>Start with the key word, open one family sentence at a time, then type the key word from memory after the third sentence.</p>
+          ${currentFlashcardWord ? `
+            <div class="spelling-stage-meta spelling-stage-meta--single">
+              <span>Word ${escapeHtml(String(flashcardWords.filter((entry) => ensureSpellingFlashcardCard(spelling, entry.id).completed).length + 1))} of ${escapeHtml(String(flashcardWords.length))}</span>
+              <span>${escapeHtml(`${currentFlashcardCard?.exposureIndex || 0} of 3 sentences heard`)}</span>
+            </div>
+            <article class="spelling-tense-card spelling-tense-card--single${currentFlashcardCard?.checked ? (currentFlashcardCard.completed ? " is-correct" : " is-incorrect") : ""}">
+              ${currentFlashcardCard?.exposureIndex < 3 ? `
+                ${currentFlashcardCard?.isShowingSentence ? `
+                  <div class="spelling-family-sentence-card spelling-family-sentence-card--active">
+                    <p class="spelling-family-sentence-label">Sentence ${escapeHtml(String((currentFlashcardCard?.exposureIndex || 0) + 1))} of 3</p>
+                    <p>${buildSpellingFamilySentenceMarkup(currentFlashcardSentence, currentFlashcardSentenceWord)}</p>
                   </div>
-                  <div class="spelling-hero__chips">
-                    ${entry.familyWords.map((word) => `<span class="spelling-chip spelling-chip--static">${escapeHtml(word)}</span>`).join("")}
-                  </div>
-                  <div class="spelling-flashcard-visual${card.revealed ? " is-revealed" : ""}">
-                    ${card.revealed ? escapeHtml(entry.flashcardBreak) : "Word map hidden"}
-                  </div>
-                  <div class="spelling-stage-actions spelling-stage-actions--compact">
-                    <button type="button" class="ghost-button ghost-button--small" data-spelling-toggle-flashcard="${entry.id}">
-                      ${card.revealed ? "Hide word map" : "Reveal word map"}
+                ` : `
+                  <div class="spelling-family-keyword-panel">
+                    <button
+                      type="button"
+                      class="spelling-keyword-button"
+                      data-spelling-flashcard-reveal="${currentFlashcardWord.id}"
+                      ${currentFlashcardCard?.isShowingSentence ? "disabled" : ""}
+                    >
+                      ${escapeHtml(currentFlashcardWord.word)}
                     </button>
+                    <p class="spelling-stage-note spelling-stage-note--centered">Click the key word to open the next sentence.</p>
                   </div>
+                `}
+              ` : `
+                <div class="spelling-family-recall">
+                  <button type="button" class="spelling-keyword-button spelling-keyword-button--static" disabled>${escapeHtml(currentFlashcardWord.word)}</button>
                   <input
-                    class="reader-editor spelling-inline-input"
+                    class="reader-editor spelling-inline-input spelling-inline-input--centered"
                     type="text"
                     autocomplete="off"
                     autocapitalize="off"
                     spellcheck="false"
-                    value="${escapeHtml(card.attempt)}"
-                    placeholder="Type the target word from memory"
-                    data-spelling-flashcard-input="${entry.id}"
+                    value="${escapeHtml(currentFlashcardCard?.typedValue || "")}"
+                    placeholder="Type the key word from memory"
+                    data-spelling-flashcard-input="${currentFlashcardWord.id}"
                   />
                   <div class="spelling-stage-actions spelling-stage-actions--compact">
-                    <button type="button" class="primary-button primary-button--dark" data-spelling-check-flashcard="${entry.id}">Check word</button>
+                    <button type="button" class="primary-button primary-button--dark" data-spelling-flashcard-submit="${currentFlashcardWord.id}">Check word</button>
                   </div>
-                  ${card.checked ? `<p class="spelling-choice-feedback${card.completed ? " is-correct" : " is-incorrect"}">${escapeHtml(card.completed ? "Correct. The spelling held after the word map disappeared." : `Retry ${entry.word} using ${entry.articulation}.`)}</p>` : ""}
-                </article>
-              `;
-            })
-            .join("")}
-        </div>
-        <div class="spelling-stage-actions">
-          <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="word-families">Reset stage</button>
-        </div>
-      </article>
-    `;
+                  ${currentFlashcardCard?.checked ? `<p class="spelling-choice-feedback${currentFlashcardCard.completed ? " is-correct" : " is-incorrect"}">${escapeHtml(currentFlashcardCard.completed ? "Correct. The key word held after the sentence clues." : `Retry ${currentFlashcardWord.word}.`)}</p>` : ""}
+                </div>
+              `}
+            </article>
+          ` : ""}
+          <div class="spelling-stage-actions">
+            <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="word-families">Reset stage</button>
+          </div>
+        </article>
+      `;
   } else {
     const currentFamilyWord = getSpellingTenseCurrentWord(spelling);
     const currentFamilyAnswer = currentFamilyWord ? ensureSpellingTenseAnswer(spelling, currentFamilyWord.id) : null;
@@ -9672,74 +9966,96 @@ function renderSpelling() {
       : 0;
     const currentFamilySentence = currentFamilyWord?.familySentences?.[currentFamilySentenceIndex] || "";
     const currentFamilySentenceWord = currentFamilyWord?.familyWords?.[currentFamilySentenceIndex] || "";
-    stageBody = `
-      <article class="spelling-stage-card spelling-stage-card--single">
-        <div class="spelling-card__header">
-          <div>
-            <p class="eyebrow">Stage 4</p>
-            <h4>Family sentence recall</h4>
+    stageBody = spelling.tenseTransfer.completed
+      ? `
+        <article class="spelling-stage-card spelling-stage-card--single">
+          <div class="spelling-card__header">
+            <div>
+              <p class="eyebrow">Stage 4</p>
+              <h4>Final review</h4>
+            </div>
+            <span class="spelling-card__status is-complete">Ribbon earned</span>
           </div>
-          <span class="spelling-card__status${spelling.tenseTransfer.completed ? " is-complete" : ""}">${spelling.tenseTransfer.completed ? "Ribbon earned" : "Final ribbon"}</span>
-        </div>
-        <p>Open the keyword, hear three family sentences one at a time, then type the keyword from memory.</p>
-        ${currentFamilyWord ? `
-          <div class="spelling-stage-meta spelling-stage-meta--single">
-            <span>Word ${escapeHtml(String(followUpWords.filter((entry) => ensureSpellingTenseAnswer(spelling, entry.id).completed).length + 1))} of ${escapeHtml(String(followUpWords.length))}</span>
-            <span>${escapeHtml(`${currentFamilyAnswer?.exposureIndex || 0} of 3 sentences heard`)}</span>
+          <p>The final sentence recall stage is complete.</p>
+          <div class="spelling-review-summary">
+            ${followUpWords.map((entry) => `
+              <article class="spelling-review-summary__row is-correct">
+                <strong>${escapeHtml(entry.word)}</strong>
+                <span>3 family sentences heard · key word recalled</span>
+              </article>
+            `).join("")}
           </div>
-          <article class="spelling-tense-card spelling-tense-card--single${currentFamilyAnswer?.checked ? (currentFamilyAnswer.completed ? " is-correct" : " is-incorrect") : ""}">
-            ${currentFamilyAnswer?.exposureIndex < 3 ? `
-              ${currentFamilyAnswer?.isShowingSentence ? `
-                <div class="spelling-family-sentence-card spelling-family-sentence-card--active">
-                  <p class="spelling-family-sentence-label">Sentence ${escapeHtml(String((currentFamilyAnswer?.exposureIndex || 0) + 1))} of 3</p>
-                  <p>${buildSpellingFamilySentenceMarkup(currentFamilySentence, currentFamilySentenceWord)}</p>
-                </div>
-              ` : `
-                <div class="spelling-family-keyword-panel">
-                  <button
-                    type="button"
-                    class="spelling-keyword-button"
-                    data-spelling-family-reveal="${currentFamilyWord.id}"
-                    ${currentFamilyAnswer?.isShowingSentence ? "disabled" : ""}
-                  >
-                    ${escapeHtml(currentFamilyWord.word)}
-                  </button>
-                  <p class="spelling-stage-note spelling-stage-note--centered">Click the key word to open the next sentence.</p>
-                </div>
-              `}
-            ` : `
-              <div class="spelling-family-recall">
-                <button type="button" class="spelling-keyword-button spelling-keyword-button--static" disabled>${escapeHtml(currentFamilyWord.word)}</button>
-                <input
-                  class="reader-editor spelling-inline-input spelling-inline-input--centered"
-                  type="text"
-                  autocomplete="off"
-                  autocapitalize="off"
-                  spellcheck="false"
-                  value="${escapeHtml(currentFamilyAnswer?.typedValue || "")}"
-                  placeholder="Type the key word from memory"
-                  data-spelling-family-input="${currentFamilyWord.id}"
-                />
-                <div class="spelling-stage-actions spelling-stage-actions--compact">
-                  <button type="button" class="primary-button primary-button--dark" data-spelling-family-submit="${currentFamilyWord.id}">Check word</button>
-                </div>
-                ${currentFamilyAnswer?.checked ? `<p class="spelling-choice-feedback${currentFamilyAnswer.completed ? " is-correct" : " is-incorrect"}">${escapeHtml(currentFamilyAnswer.completed ? "Correct. The key word held after the sentence clues." : `Retry ${currentFamilyWord.word}.`)}</p>` : ""}
-              </div>
-            `}
-          </article>
-        ` : ""}
-        <div class="spelling-stage-actions">
-          <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="tense-transfer">Reset stage</button>
-        </div>
-        ${spelling.tenseTransfer.completed ? `
           <article class="spelling-complete-card">
             <p class="eyebrow">Complete</p>
             <h4>All four ribbons earned</h4>
             <p>The diagnostic, visual check, word family work, and family sentence recall are all complete. Keep the same words in review on ${escapeHtml(SPELLING_UNIT_SEED.reviewDays.join(", "))}.</p>
           </article>
-        ` : ""}
-      </article>
-    `;
+          <div class="spelling-stage-actions">
+            <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="tense-transfer">Reset stage</button>
+          </div>
+        </article>
+      `
+      : `
+        <article class="spelling-stage-card spelling-stage-card--single">
+          <div class="spelling-card__header">
+            <div>
+              <p class="eyebrow">Stage 4</p>
+              <h4>Family sentence recall</h4>
+            </div>
+            <span class="spelling-card__status">Final ribbon</span>
+          </div>
+          <p>Open the keyword, hear three family sentences one at a time, then type the keyword from memory.</p>
+          ${currentFamilyWord ? `
+            <div class="spelling-stage-meta spelling-stage-meta--single">
+              <span>Word ${escapeHtml(String(followUpWords.filter((entry) => ensureSpellingTenseAnswer(spelling, entry.id).completed).length + 1))} of ${escapeHtml(String(followUpWords.length))}</span>
+              <span>${escapeHtml(`${currentFamilyAnswer?.exposureIndex || 0} of 3 sentences heard`)}</span>
+            </div>
+            <article class="spelling-tense-card spelling-tense-card--single${currentFamilyAnswer?.checked ? (currentFamilyAnswer.completed ? " is-correct" : " is-incorrect") : ""}">
+              ${currentFamilyAnswer?.exposureIndex < 3 ? `
+                ${currentFamilyAnswer?.isShowingSentence ? `
+                  <div class="spelling-family-sentence-card spelling-family-sentence-card--active">
+                    <p class="spelling-family-sentence-label">Sentence ${escapeHtml(String((currentFamilyAnswer?.exposureIndex || 0) + 1))} of 3</p>
+                    <p>${buildSpellingFamilySentenceMarkup(currentFamilySentence, currentFamilySentenceWord)}</p>
+                  </div>
+                ` : `
+                  <div class="spelling-family-keyword-panel">
+                    <button
+                      type="button"
+                      class="spelling-keyword-button"
+                      data-spelling-family-reveal="${currentFamilyWord.id}"
+                      ${currentFamilyAnswer?.isShowingSentence ? "disabled" : ""}
+                    >
+                      ${escapeHtml(currentFamilyWord.word)}
+                    </button>
+                    <p class="spelling-stage-note spelling-stage-note--centered">Click the key word to open the next sentence.</p>
+                  </div>
+                `}
+              ` : `
+                <div class="spelling-family-recall">
+                  <button type="button" class="spelling-keyword-button spelling-keyword-button--static" disabled>${escapeHtml(currentFamilyWord.word)}</button>
+                  <input
+                    class="reader-editor spelling-inline-input spelling-inline-input--centered"
+                    type="text"
+                    autocomplete="off"
+                    autocapitalize="off"
+                    spellcheck="false"
+                    value="${escapeHtml(currentFamilyAnswer?.typedValue || "")}"
+                    placeholder="Type the key word from memory"
+                    data-spelling-family-input="${currentFamilyWord.id}"
+                  />
+                  <div class="spelling-stage-actions spelling-stage-actions--compact">
+                    <button type="button" class="primary-button primary-button--dark" data-spelling-family-submit="${currentFamilyWord.id}">Check word</button>
+                  </div>
+                  ${currentFamilyAnswer?.checked ? `<p class="spelling-choice-feedback${currentFamilyAnswer.completed ? " is-correct" : " is-incorrect"}">${escapeHtml(currentFamilyAnswer.completed ? "Correct. The key word held after the sentence clues." : `Retry ${currentFamilyWord.word}.`)}</p>` : ""}
+                </div>
+              `}
+            </article>
+          ` : ""}
+          <div class="spelling-stage-actions">
+            <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="tense-transfer">Reset stage</button>
+          </div>
+        </article>
+      `;
   }
 
   host.innerHTML = `
@@ -9762,14 +10078,35 @@ function renderSpelling() {
         </div>
       </article>
 
+      <section class="spelling-stage-nav">
+        <button
+          type="button"
+          class="ghost-button ghost-button--small"
+          data-spelling-open-stage="${stageIndex > 0 ? SPELLING_STAGE_ORDER[stageIndex - 1] : ""}"
+          ${stageIndex > 0 ? "" : "disabled"}
+        >
+          Previous stage
+        </button>
+        ${stageId !== currentStageId ? `
+          <button type="button" class="ghost-button ghost-button--small" data-spelling-open-stage="${currentStageId}">
+            Return to current stage
+          </button>
+        ` : ""}
+      </section>
+
       <section class="spelling-stage-rail" aria-label="Spelling stages">
         ${SPELLING_STAGE_ORDER
           .map(
             (levelId, index) => `
-              <article class="spelling-stage-pill${index < completedCount ? " is-complete" : ""}${levelId === stageId ? " is-current" : ""}">
+              <button
+                type="button"
+                class="spelling-stage-pill${index < completedCount ? " is-complete" : ""}${levelId === stageId ? " is-current" : ""}"
+                data-spelling-open-stage="${levelId}"
+                ${index <= unlockedStageIndex ? "" : "disabled"}
+              >
                 <span>${index + 1}</span>
                 <strong>${escapeHtml(SPELLING_STAGE_LABELS[levelId])}</strong>
-              </article>
+              </button>
             `
           )
           .join("")}
@@ -9827,6 +10164,21 @@ function renderSpelling() {
     render();
   });
 
+  host.querySelector("[data-spelling-continue-stage]")?.addEventListener("click", () => {
+    continueSpellingStage(subject);
+    render();
+  });
+
+  host.querySelectorAll("[data-spelling-open-stage]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!button.dataset.spellingOpenStage) {
+        return;
+      }
+      setSpellingSelectedStage(subject, button.dataset.spellingOpenStage);
+      render();
+    });
+  });
+
   host.querySelectorAll("[data-spelling-reset-activity]").forEach((button) => {
     button.addEventListener("click", () => {
       resetSpellingActivity(subject, button.dataset.spellingResetActivity);
@@ -9841,30 +10193,34 @@ function renderSpelling() {
     });
   });
 
-  host.querySelectorAll("[data-spelling-toggle-flashcard]").forEach((button) => {
+  host.querySelectorAll("[data-spelling-flashcard-reveal]").forEach((button) => {
     button.addEventListener("click", () => {
-      const card = ensureSpellingFlashcardCard(spelling, button.dataset.spellingToggleFlashcard);
-      card.revealed = !card.revealed;
-      persistSubjects();
-      render();
+      revealSpellingFlashcardSentence(subject, button.dataset.spellingFlashcardReveal);
     });
   });
 
   host.querySelectorAll("[data-spelling-flashcard-input]").forEach((input) => {
     input.addEventListener("input", (event) => {
       const card = ensureSpellingFlashcardCard(spelling, input.dataset.spellingFlashcardInput);
-      card.attempt = event.target.value;
+      card.typedValue = event.target.value;
       card.checked = false;
-      card.completed = false;
+      persistSubjects();
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        submitSpellingFlashcardRecall(subject, input.dataset.spellingFlashcardInput, event.target.value);
+        render();
+      }
     });
     input.addEventListener("blur", () => {
       persistSubjects();
     });
   });
 
-  host.querySelectorAll("[data-spelling-check-flashcard]").forEach((button) => {
+  host.querySelectorAll("[data-spelling-flashcard-submit]").forEach((button) => {
     button.addEventListener("click", () => {
-      checkSpellingFlashcardWord(subject, button.dataset.spellingCheckFlashcard);
+      submitSpellingFlashcardRecall(subject, button.dataset.spellingFlashcardSubmit);
       render();
     });
   });

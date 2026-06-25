@@ -5982,6 +5982,10 @@ input[type="date"] {
   margin-top: 18px;
 }
 
+.spelling-stage-actions--centered {
+  justify-content: center;
+}
+
 .spelling-stage-actions--compact {
   margin-top: 12px;
 }
@@ -5993,6 +5997,14 @@ input[type="date"] {
 
 .spelling-stage-note--centered {
   text-align: center;
+}
+
+.spelling-stage-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 18px;
 }
 
 .spelling-stage-rail {
@@ -6007,6 +6019,9 @@ input[type="date"] {
   border: 1px solid rgba(72, 54, 24, 0.12);
   background: rgba(255, 255, 255, 0.62);
   color: var(--spelling-muted);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
 }
 
 .spelling-stage-pill span {
@@ -6034,6 +6049,11 @@ input[type="date"] {
 .spelling-stage-pill.is-complete {
   border-color: rgba(37, 107, 74, 0.2);
   background: #dff1e6;
+}
+
+.spelling-stage-pill:disabled {
+  cursor: default;
+  opacity: 0.5;
 }
 
 .spelling-focus-summary {
@@ -6096,6 +6116,62 @@ input[type="date"] {
 .spelling-tense-card__top span {
   color: var(--spelling-muted);
   font-size: 14px;
+}
+
+.spelling-stage-card--celebration {
+  text-align: center;
+}
+
+.spelling-ribbon-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 54px;
+  padding: 0 22px;
+  border-radius: 999px;
+  background: #f3e3b7;
+  color: #9f6b17;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.spelling-review-summary {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.spelling-review-summary__row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(72, 54, 24, 0.12);
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.spelling-review-summary__row strong {
+  color: var(--spelling-ink);
+}
+
+.spelling-review-summary__row span {
+  color: var(--spelling-muted);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.spelling-review-summary__row.is-correct {
+  border-color: rgba(37, 107, 74, 0.2);
+  background: #edf7f0;
+}
+
+.spelling-review-summary__row.is-incorrect {
+  border-color: rgba(213, 107, 88, 0.2);
+  background: #fff4f1;
 }
 
 .spelling-choice-row--stacked {
