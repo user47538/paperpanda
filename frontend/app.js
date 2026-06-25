@@ -472,6 +472,7 @@ const FOCUS_AREAS = [
 ];
 
 const SPELLING_STAGE_ORDER = ["diagnostic", "looks-right", "word-families", "tense-transfer"];
+const SPELLING_TENSE_TRANSFER_VERSION = 2;
 const SPELLING_STAGE_LABELS = {
   diagnostic: "Diagnostic",
   "looks-right": "Looks Right",
@@ -3913,6 +3914,7 @@ function createDefaultSpellingState(subjectId = "") {
       completed: false
     },
     tenseTransfer: {
+      version: SPELLING_TENSE_TRANSFER_VERSION,
       answers: {},
       currentWordId: "",
       completed: false
@@ -3927,6 +3929,7 @@ function normaliseSpellingState(spelling, subjectId = "") {
   const looksRight = next.looksRight && typeof next.looksRight === "object" ? next.looksRight : {};
   const flashcards = next.flashcards && typeof next.flashcards === "object" ? next.flashcards : {};
   const tenseTransfer = next.tenseTransfer && typeof next.tenseTransfer === "object" ? next.tenseTransfer : {};
+  const isCurrentTenseTransferVersion = Number(tenseTransfer.version || 0) === SPELLING_TENSE_TRANSFER_VERSION;
 
   return {
     ...base,
@@ -4004,8 +4007,9 @@ function normaliseSpellingState(spelling, subjectId = "") {
     },
     tenseTransfer: {
       ...base.tenseTransfer,
-      ...tenseTransfer,
-      answers: tenseTransfer.answers && typeof tenseTransfer.answers === "object" && !Array.isArray(tenseTransfer.answers)
+      ...(isCurrentTenseTransferVersion ? tenseTransfer : {}),
+      version: SPELLING_TENSE_TRANSFER_VERSION,
+      answers: isCurrentTenseTransferVersion && tenseTransfer.answers && typeof tenseTransfer.answers === "object" && !Array.isArray(tenseTransfer.answers)
         ? Object.fromEntries(
             Object.entries(tenseTransfer.answers).map(([wordId, entry]) => [
               wordId,
@@ -4019,8 +4023,8 @@ function normaliseSpellingState(spelling, subjectId = "") {
             ])
           )
         : {},
-      currentWordId: String(tenseTransfer.currentWordId || ""),
-      completed: Boolean(tenseTransfer.completed)
+      currentWordId: isCurrentTenseTransferVersion ? String(tenseTransfer.currentWordId || "") : "",
+      completed: isCurrentTenseTransferVersion ? Boolean(tenseTransfer.completed) : false
     }
   };
 }
@@ -4252,8 +4256,12 @@ function finaliseSpellingDiagnostic(subject) {
   spelling.looksRight.checked = false;
   spelling.looksRight.completed = false;
   spelling.flashcards.completed = false;
-  spelling.tenseTransfer.currentWordId = "";
-  spelling.tenseTransfer.completed = false;
+  spelling.tenseTransfer = {
+    version: SPELLING_TENSE_TRANSFER_VERSION,
+    answers: {},
+    currentWordId: "",
+    completed: false
+  };
   const topFocuses = getSpellingTopFocuses(spelling, 2).map((entry) => SPELLING_FOCUS_LABELS[entry.id] || entry.id);
   spelling.coachMessage = topFocuses.length
     ? `Diagnostic complete. The strongest follow-up needs are ${topFocuses.join(" and ").toLowerCase()}.`
@@ -4279,6 +4287,7 @@ function resetSpellingActivity(subject, activityId) {
       completed: false
     };
     spelling.tenseTransfer = {
+      version: SPELLING_TENSE_TRANSFER_VERSION,
       answers: {},
       currentWordId: "",
       completed: false
@@ -4297,6 +4306,7 @@ function resetSpellingActivity(subject, activityId) {
       completed: false
     };
     spelling.tenseTransfer = {
+      version: SPELLING_TENSE_TRANSFER_VERSION,
       answers: {},
       currentWordId: "",
       completed: false
@@ -4308,6 +4318,7 @@ function resetSpellingActivity(subject, activityId) {
       completed: false
     };
     spelling.tenseTransfer = {
+      version: SPELLING_TENSE_TRANSFER_VERSION,
       answers: {},
       currentWordId: "",
       completed: false
@@ -4315,6 +4326,7 @@ function resetSpellingActivity(subject, activityId) {
     spelling.coachMessage = "Reveal the word map, hide it, then write the word from memory.";
   } else if (activityId === "tense-transfer") {
     spelling.tenseTransfer = {
+      version: SPELLING_TENSE_TRANSFER_VERSION,
       answers: {},
       currentWordId: "",
       completed: false
