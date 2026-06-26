@@ -4,7 +4,7 @@ const authTokenStorageKey = "paperpanda-session-token";
 const subjectsStorageKey = "paperpanda-subjects-by-account";
 const settingsStorageKey = "studylift-settings";
 const uiVersionStorageKey = "paperpanda-ui-version";
-const currentUiVersion = "2026-06-26-spelling-heather-visual-pass";
+const currentUiVersion = "2026-06-26-spelling-heather-full-ui";
 const previewDatabaseName = "paperpanda-assets";
 const previewStoreName = "document-previews";
 const settingsAssetStoreName = "settings-assets";
@@ -5150,6 +5150,14 @@ function buildSpellingLooksRightChoiceSentence(sentence, originalWord, replaceme
   return `${escapeHtml(sentence)} <span class="spelling-inline-target">(${escapeHtml(replacementWord)})</span>`;
 }
 
+function buildSpellingSessionDotRow(total, currentIndex, completedCount = 0) {
+  return Array.from({ length: Math.max(0, total) }, (_, index) => {
+    const isComplete = index < completedCount;
+    const isCurrent = index === currentIndex;
+    return `<span class="ss-dot${isComplete ? " is-complete" : ""}${isCurrent ? " is-current" : ""}"></span>`;
+  }).join("");
+}
+
 function getSpellingLooksRightCurrentWord(spelling) {
   const followUpWords = getSpellingFollowUpWords(spelling);
   if (spelling.looksRight.currentWordId) {
@@ -5567,7 +5575,7 @@ function buildSpellingLooksRightOptions(spelling, entry) {
   }
 
   const seededRank = (value) =>
-    String(`${entry.id}:${value}`)
+    String(`${spelling.currentAttemptId || "attempt"}:${entry.id}:${value}`)
       .split("")
       .reduce((total, character, index) => total + character.charCodeAt(0) * (index + 1), 0);
 
@@ -5616,10 +5624,11 @@ function buildSpellingPaddockMarkup(spelling) {
 
   return `
     <section class="ss-stable-card">
+      <div class="ss-stable-banner" aria-hidden="true"></div>
       <div class="ss-section-head">
         <div>
-          <p class="eyebrow">Your stable</p>
-          <h4>${escapeHtml(ownedHorses.length ? `${ownedHorses.length} horses in the stable` : "The stable is waiting")}</h4>
+          <p class="eyebrow">Paddock and stables</p>
+          <h4>${escapeHtml(ownedHorses.length ? `${ownedHorses.length} horses earned` : "Earn a horse to open the stable" )}</h4>
         </div>
         <span class="ss-rank-pill">${escapeHtml(getSpellingHorseRankLabel(ownedHorses.length))}</span>
       </div>
@@ -5627,7 +5636,7 @@ function buildSpellingPaddockMarkup(spelling) {
         <div class="ss-paddock-stage" data-spelling-paddock-stage="true">
           <div class="ss-paddock-copy">
             <strong>Paddock</strong>
-            <span>Tap a horse to send it out. Drag roaming horses to move them. Tap again to return them.</span>
+            <span>Tap a horse to send it out. Drag it to move around the paddock, then tap again to return it.</span>
           </div>
           ${roamingMarkup}
         </div>
@@ -5869,10 +5878,10 @@ function selectSpellingTenseOption(subject, wordId, optionValue) {
   persistSubjects();
 }
 
-function getSpellingTenseOptionOrder(entry) {
+function getSpellingTenseOptionOrder(spelling, entry) {
   const options = [...(entry?.tense?.options || [])];
   const seededRank = (value) =>
-    String(`${entry?.id || ""}:${value}`)
+    String(`${spelling?.currentAttemptId || "attempt"}:${entry?.id || ""}:${value}`)
       .split("")
       .reduce((total, character, index) => total + character.charCodeAt(0) * (index + 1), 0);
 
@@ -11202,32 +11211,32 @@ function renderSpelling() {
     const celebrationCopy = getSpellingCelebrationCopy(stageId);
     stageBody = stageId === "diagnostic"
       ? `
-        <article class="spelling-stage-card spelling-stage-card--single">
-          <div class="spelling-card__header">
+        <article class="ss-stage-panel">
+          <div class="ss-stage-panel__head">
             <div>
               <p class="eyebrow">${escapeHtml(celebrationCopy.eyebrow)}</p>
               <h4>${escapeHtml(celebrationCopy.title)}</h4>
             </div>
-            <span class="spelling-card__status is-complete">Ribbon unlocked</span>
+            <span class="ss-stage-badge is-complete">Ribbon unlocked</span>
           </div>
-          <p>${escapeHtml(celebrationCopy.body)}</p>
-          <div class="spelling-stage-meta spelling-stage-meta--single">
+          <p class="ss-stage-copy">${escapeHtml(celebrationCopy.body)}</p>
+          <div class="ss-stage-progress">
             <span>${escapeHtml(`${getSpellingDiagnosticCorrectCount(spelling)} of ${attemptWords.length} correct`)}</span>
             <span>${escapeHtml(`${getSpellingStageScorePercent(spelling, "diagnostic")}% score`)}</span>
           </div>
-          <div class="spelling-review-summary">
+          <div class="ss-review-list">
             ${attemptWords
               .map((wordEntry) => {
                 const response = spelling.diagnostic.responses[wordEntry.id] || {};
                 const attempt = String(response.attempt || "");
                 const isCorrect = Boolean(response.correct);
                 return `
-                  <article class="spelling-review-summary__row${isCorrect ? " is-correct" : " is-incorrect"}">
-                    <div class="spelling-review-summary__primary">
+                  <article class="ss-review-row${isCorrect ? " is-correct" : " is-incorrect"}">
+                    <div>
                       <strong>${escapeHtml(wordEntry.word)}</strong>
                       <span>${escapeHtml(attempt || "No answer typed")}</span>
                     </div>
-                    <span class="spelling-review-summary__mark" aria-label="${isCorrect ? "Correct" : "Incorrect"}">${isCorrect ? "✓" : "✕"}</span>
+                    <span class="ss-review-mark" aria-label="${isCorrect ? "Correct" : "Incorrect"}">${isCorrect ? "✓" : "✕"}</span>
                   </article>
                 `;
               })
@@ -11239,11 +11248,11 @@ function renderSpelling() {
         </article>
       `
       : `
-        <article class="spelling-stage-card spelling-stage-card--single spelling-stage-card--celebration">
+        <article class="ss-stage-panel">
           <p class="eyebrow">${escapeHtml(celebrationCopy.eyebrow)}</p>
           <div class="spelling-ribbon-badge">Ribbon unlocked</div>
           <h4>${escapeHtml(celebrationCopy.title)}</h4>
-          <p>${escapeHtml(celebrationCopy.body)}</p>
+          <p class="ss-stage-copy">${escapeHtml(celebrationCopy.body)}</p>
           <div class="spelling-stage-actions spelling-stage-actions--centered">
             <button type="button" class="primary-button primary-button--dark" data-spelling-continue-stage="true">${escapeHtml(celebrationCopy.action)}</button>
           </div>
@@ -11251,25 +11260,27 @@ function renderSpelling() {
       `;
   } else if (stageId === "diagnostic") {
     stageBody = `
-      <article class="spelling-stage-card spelling-stage-card--single">
-        <div class="spelling-card__header">
+      <article class="ss-stage-panel">
+        <div class="ss-stage-panel__head">
           <div>
             <p class="eyebrow">Stage 1</p>
             <h4>Diagnostic review</h4>
           </div>
-          <span class="spelling-card__status is-complete">Ribbon earned</span>
+          <span class="ss-stage-badge is-complete">Ribbon earned</span>
         </div>
-        <p>The baseline is complete. Review the diagnostic result before moving back through earlier stages.</p>
-        <div class="spelling-stage-meta spelling-stage-meta--single">
+        <p class="ss-stage-copy">The spelling challenge is complete. Review the words before moving back through earlier stages.</p>
+        <div class="ss-stage-progress">
           <span>${escapeHtml(`${getSpellingDiagnosticCorrectCount(spelling)} of ${attemptWords.length} correct`)}</span>
           <span>${escapeHtml(`${getSpellingStageScorePercent(spelling, "diagnostic")}% score`)}</span>
           <span>${escapeHtml(`${focusSummary.length} focus area${focusSummary.length === 1 ? "" : "s"} identified`)}</span>
         </div>
-        <div class="spelling-review-summary">
+        <div class="ss-review-list">
           ${focusSummary.map((entry) => `
-            <article class="spelling-review-summary__row">
-              <strong>${escapeHtml(SPELLING_FOCUS_LABELS[entry.id] || entry.id)}</strong>
-              <span>${escapeHtml(`${entry.count} miss${entry.count === 1 ? "" : "es"}`)}</span>
+            <article class="ss-review-row">
+              <div>
+                <strong>${escapeHtml(SPELLING_FOCUS_LABELS[entry.id] || entry.id)}</strong>
+                <span>${escapeHtml(`${entry.count} miss${entry.count === 1 ? "" : "es"}`)}</span>
+              </div>
             </article>
           `).join("")}
         </div>
@@ -11282,26 +11293,30 @@ function renderSpelling() {
     const currentLookWord = getSpellingLooksRightCurrentWord(spelling);
     const answeredLookCount = followUpWords.filter((entry) => Boolean(spelling.looksRight.answers[entry.id])).length;
     const currentLookOptions = currentLookWord ? buildSpellingLooksRightOptions(spelling, currentLookWord) : [];
+    const currentLookIndex = currentLookWord ? Math.max(0, followUpWords.findIndex((entry) => entry.id === currentLookWord.id)) : 0;
     stageBody = spelling.looksRight.completed
       ? `
-        <article class="spelling-stage-card spelling-stage-card--single">
-          <div class="spelling-card__header">
+        <article class="ss-stage-panel">
+          <div class="ss-stage-panel__head">
             <div>
               <p class="eyebrow">Stage 2</p>
-              <h4>Sentence check review</h4>
+              <h4>Looks Right</h4>
             </div>
-            <span class="spelling-card__status is-complete">Ribbon earned</span>
+            <span class="ss-stage-badge is-complete">Ribbon earned</span>
           </div>
-          <p>These are the sentence choices you worked through in this stage.</p>
-          <div class="spelling-stage-meta spelling-stage-meta--single">
+          <p class="ss-stage-copy">You have finished the sentence check for this session.</p>
+          <div class="ss-stage-progress">
             <span>${escapeHtml(`${stageScoreSummary["looks-right"].correct}/${stageScoreSummary["looks-right"].total} correct`)}</span>
             <span>${escapeHtml(`${getSpellingStageScorePercent(spelling, "looks-right")}% score`)}</span>
           </div>
-          <div class="spelling-review-summary">
+          <div class="ss-review-list">
             ${followUpWords.map((entry) => `
-              <article class="spelling-review-summary__row${spelling.looksRight.answers[entry.id] === entry.word ? " is-correct" : " is-incorrect"}">
-                <strong>${escapeHtml(entry.word)}</strong>
-                <span>${escapeHtml(spelling.looksRight.answers[entry.id] || "No answer saved")}</span>
+              <article class="ss-review-row${spelling.looksRight.answers[entry.id] === entry.word ? " is-correct" : " is-incorrect"}">
+                <div>
+                  <strong>${escapeHtml(entry.word)}</strong>
+                  <span>${escapeHtml(spelling.looksRight.answers[entry.id] || "No answer saved")}</span>
+                </div>
+                <span class="ss-review-mark">${spelling.looksRight.answers[entry.id] === entry.word ? "✓" : "✕"}</span>
               </article>
             `).join("")}
           </div>
@@ -11311,35 +11326,34 @@ function renderSpelling() {
         </article>
       `
       : `
-        <article class="spelling-stage-card spelling-stage-card--single">
-          <div class="spelling-card__header">
+        <article class="ss-stage-panel">
+          <div class="ss-stage-panel__head">
             <div>
               <p class="eyebrow">Stage 2</p>
-              <h4>Which word looks right?</h4>
+              <h4>Looks Right</h4>
             </div>
-            <span class="spelling-card__status">Ribbon available</span>
+            <span class="ss-stage-badge">Ribbon available</span>
           </div>
-          <p>Choose the spelling that looks settled on the page.</p>
-          <div class="spelling-stage-meta spelling-stage-meta--single">
-            <span>Word ${escapeHtml(String(Math.min(answeredLookCount + 1, followUpWords.length)))} of ${escapeHtml(String(followUpWords.length))}</span>
-            <span>${escapeHtml(`${followUpWords.length} missed word${followUpWords.length === 1 ? "" : "s"} in this set`)}</span>
+          <p class="ss-stage-copy">Choose the sentence that looks right.</p>
+          <div class="ss-stage-progress">
+            <span>${escapeHtml(`Word ${Math.min(answeredLookCount + 1, followUpWords.length)} of ${followUpWords.length}`)}</span>
+            <div class="ss-dot-row" aria-label="Stage 2 progress">
+              ${buildSpellingSessionDotRow(followUpWords.length, currentLookIndex, answeredLookCount)}
+            </div>
           </div>
           ${currentLookWord ? `
-            <article class="spelling-comparison-card spelling-comparison-card--single">
-              <div class="spelling-comparison-card__top">
-                <strong>Looks right</strong>
-                <span>${escapeHtml(currentLookWord.word)}</span>
-              </div>
-              <p class="spelling-comparison-card__prompt">Which sentence looks right?</p>
-              <div class="spelling-choice-row spelling-choice-row--stacked">
+            <section class="ss-looks-card">
+              <p class="ss-looks-card__prompt">Which sentence looks right?</p>
+              <div class="ss-choice-stack">
                 ${currentLookOptions
                   .map(
                     (option) => `
                       <button
                         type="button"
-                        class="spelling-choice spelling-choice--sentence spelling-choice--sentence-large"
+                        class="ss-choice-card"
                         data-spelling-looks-right-word="${currentLookWord.id}"
                         data-spelling-looks-right-value="${escapeHtml(option.value)}"
+                        ${spelling.looksRight.awaitingAdvanceWordId ? "disabled" : ""}
                       >
                         <span>${buildSpellingLooksRightChoiceSentence(
                           getSpellingLooksRightSentence(currentLookWord),
@@ -11353,7 +11367,7 @@ function renderSpelling() {
               </div>
               ${spelling.looksRight.awaitingAdvanceWordId === currentLookWord.id ? `
                 <div class="ss-rule-note${spelling.looksRight.feedbackKind === "correct" ? " is-correct" : " is-incorrect"}">
-                  <strong>${escapeHtml(spelling.looksRight.feedbackKind === "correct" ? "Correct" : "Try this pattern")}</strong>
+                  <strong>${escapeHtml(spelling.looksRight.feedbackKind === "correct" ? "Correct" : "Incorrect")}</strong>
                   <p>${escapeHtml(spelling.looksRight.feedbackMessage || "")}</p>
                   <span>${escapeHtml(currentLookWord.lookRightNote || currentLookWord.familyNote || "")}</span>
                 </div>
@@ -11361,7 +11375,7 @@ function renderSpelling() {
                   <button type="button" class="ghost-button ghost-button--small" data-spelling-looks-right-advance="${currentLookWord.id}">${escapeHtml(followUpWords.every((entry) => Boolean(spelling.looksRight.answers[entry.id])) ? "Finish stage" : "Continue to next word")}</button>
                 </div>
               ` : ""}
-            </article>
+            </section>
           ` : ""}
           <div class="spelling-stage-actions">
             <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="looks-right">Reset stage</button>
@@ -11377,26 +11391,31 @@ function renderSpelling() {
       : 0;
     const currentFlashcardSentence = currentFlashcardWord?.familySentences?.[currentFlashcardSentenceIndex] || "";
     const currentFlashcardSentenceWord = currentFlashcardWord?.familyWords?.[currentFlashcardSentenceIndex] || "";
+    const completedFlashcardCount = flashcardWords.filter((entry) => ensureSpellingFlashcardCard(spelling, entry.id).completed).length;
+    const currentFlashcardIndex = currentFlashcardWord ? Math.max(0, flashcardWords.findIndex((entry) => entry.id === currentFlashcardWord.id)) : 0;
     stageBody = spelling.flashcards.completed
       ? `
-        <article class="spelling-stage-card spelling-stage-card--single">
-          <div class="spelling-card__header">
+        <article class="ss-stage-panel">
+          <div class="ss-stage-panel__head">
             <div>
               <p class="eyebrow">Stage 3</p>
-              <h4>Word family review</h4>
+              <h4>Word families</h4>
             </div>
-            <span class="spelling-card__status is-complete">Ribbon earned</span>
+            <span class="ss-stage-badge is-complete">Ribbon earned</span>
           </div>
-          <p>These are the key words you completed in the word-family sentence loop.</p>
-          <div class="spelling-stage-meta spelling-stage-meta--single">
+          <p class="ss-stage-copy">You have finished the word-family sentence loop for this session.</p>
+          <div class="ss-stage-progress">
             <span>${escapeHtml(`${stageScoreSummary["word-families"].correct}/${stageScoreSummary["word-families"].total} correct`)}</span>
             <span>${escapeHtml(`${getSpellingStageScorePercent(spelling, "word-families")}% score`)}</span>
           </div>
-          <div class="spelling-review-summary">
+          <div class="ss-review-list">
             ${flashcardWords.map((entry) => `
-              <article class="spelling-review-summary__row is-correct">
-                <strong>${escapeHtml(entry.word)}</strong>
-                <span>3 family sentences heard · key word recalled</span>
+              <article class="ss-review-row is-correct">
+                <div>
+                  <strong>${escapeHtml(entry.word)}</strong>
+                  <span>${escapeHtml((entry.familyWords || []).join(" · "))}</span>
+                </div>
+                <span class="ss-review-mark">✓</span>
               </article>
             `).join("")}
           </div>
@@ -11406,43 +11425,49 @@ function renderSpelling() {
         </article>
       `
       : `
-        <article class="spelling-stage-card spelling-stage-card--single">
-          <div class="spelling-card__header">
+        <article class="ss-stage-panel">
+          <div class="ss-stage-panel__head">
             <div>
               <p class="eyebrow">Stage 3</p>
               <h4>Word families</h4>
             </div>
-            <span class="spelling-card__status">Ribbon available</span>
+            <span class="ss-stage-badge">Ribbon available</span>
           </div>
-          <p>Press the spelling word button to hear how it can be changed to suit different situations.</p>
+          <p class="ss-stage-copy">Press the spelling word button to hear how it can be changed to suit different situations.</p>
           ${currentFlashcardWord ? `
-            <div class="spelling-stage-meta spelling-stage-meta--single">
-              <span>Word ${escapeHtml(String(flashcardWords.filter((entry) => ensureSpellingFlashcardCard(spelling, entry.id).completed).length + 1))} of ${escapeHtml(String(flashcardWords.length))}</span>
-              <span>${escapeHtml(`${currentFlashcardCard?.exposureIndex || 0} of 3 sentences heard`)}</span>
+            <div class="ss-stage-progress">
+              <span>${escapeHtml(`Word ${completedFlashcardCount + 1} of ${flashcardWords.length}`)}</span>
+              <div class="ss-dot-row" aria-label="Stage 3 progress">
+                ${buildSpellingSessionDotRow(flashcardWords.length, currentFlashcardIndex, completedFlashcardCount)}
+              </div>
             </div>
-            ${currentFlashcardCard?.exposureIndex < 3 ? getSpellingWordFamilyReferenceMarkup(currentFlashcardWord) : ""}
-            <article class="spelling-tense-card spelling-tense-card--single${currentFlashcardCard?.checked ? (currentFlashcardCard?.feedbackKind === "correct" ? " is-correct" : " is-incorrect") : ""}">
+            ${currentFlashcardCard?.exposureIndex < 3 ? `
+              <div class="ss-family-strip">
+                <span class="ss-family-strip__root">${escapeHtml(currentFlashcardWord.word)}</span>
+                ${(currentFlashcardWord.familyWords || []).map((word) => `<span>${escapeHtml(word)}</span>`).join("")}
+              </div>
+            ` : ""}
+            <section class="ss-family-panel${currentFlashcardCard?.checked ? (currentFlashcardCard?.feedbackKind === "correct" ? " is-correct" : " is-incorrect") : ""}">
               ${currentFlashcardCard?.exposureIndex < 3 ? `
                 ${currentFlashcardCard?.isShowingSentence ? `
-                  <div class="spelling-family-sentence-card spelling-family-sentence-card--active">
-                    <p class="spelling-family-sentence-label">Sentence ${escapeHtml(String((currentFlashcardCard?.exposureIndex || 0) + 1))} of 3</p>
+                  <div class="ss-family-sentence-card is-active">
+                    <p class="ss-family-sentence-label">Sentence ${escapeHtml(String((currentFlashcardCard?.exposureIndex || 0) + 1))} of 3</p>
                     <p>${buildSpellingFamilySentenceMarkup(currentFlashcardSentence, currentFlashcardSentenceWord)}</p>
                   </div>
                 ` : `
-                  <div class="spelling-family-keyword-panel">
+                  <div class="ss-family-keyword-panel">
                     <button
                       type="button"
-                      class="spelling-keyword-button"
+                      class="ss-keyword-button"
                       data-spelling-flashcard-reveal="${currentFlashcardWord.id}"
                       ${currentFlashcardCard?.isShowingSentence ? "disabled" : ""}
                     >
                       ${escapeHtml(currentFlashcardWord.word)}
                     </button>
-                    <p class="spelling-stage-note spelling-stage-note--centered">Click the key word to open the next sentence.</p>
                   </div>
                 `}
               ` : `
-                <div class="spelling-family-recall">
+                <div class="ss-family-recall">
                   <input
                     class="reader-editor spelling-inline-input spelling-inline-input--centered"
                     type="text"
@@ -11457,10 +11482,10 @@ function renderSpelling() {
                     <button type="button" class="primary-button primary-button--dark" data-spelling-flashcard-submit="${currentFlashcardWord.id}">Check word</button>
                     ${currentFlashcardCard?.awaitingAdvance ? `<button type="button" class="ghost-button ghost-button--small" data-spelling-flashcard-advance="${currentFlashcardWord.id}">${escapeHtml(spelling.flashcards.completed ? "Finish stage" : "Continue to next word")}</button>` : ""}
                   </div>
-                  ${currentFlashcardCard?.checked ? `<p class="spelling-choice-feedback${currentFlashcardCard?.feedbackKind === "correct" ? " is-correct" : " is-incorrect"}">${escapeHtml(currentFlashcardCard?.feedbackMessage || "")}</p>` : ""}
+                  ${currentFlashcardCard?.checked ? `<div class="ss-rule-note${currentFlashcardCard?.feedbackKind === "correct" ? " is-correct" : " is-incorrect"}"><strong>${escapeHtml(currentFlashcardCard?.feedbackKind === "correct" ? "Correct" : "Incorrect")}</strong><p>${escapeHtml(currentFlashcardCard?.feedbackMessage || "")}</p></div>` : ""}
                 </div>
               `}
-            </article>
+            </section>
           ` : ""}
           <div class="spelling-stage-actions">
             <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="word-families">Reset stage</button>
@@ -11476,19 +11501,21 @@ function renderSpelling() {
       present: "Today",
       future: "Tomorrow"
     };
+    const completedTenseCount = followUpWords.filter((entry) => ensureSpellingTenseAnswer(spelling, entry.id).completed).length;
+    const currentTenseIndex = currentFamilyWord ? Math.max(0, followUpWords.findIndex((entry) => entry.id === currentFamilyWord.id)) : 0;
     stageBody = spelling.sessionCompletionReady
       ? `
-        <article class="spelling-stage-card spelling-stage-card--single">
-          <div class="spelling-card__header">
+        <article class="ss-stage-panel">
+          <div class="ss-stage-panel__head">
             <div>
               <p class="eyebrow">Session complete</p>
               <h4>Four-stage summary</h4>
             </div>
-            <span class="spelling-card__status is-complete">Program complete</span>
+            <span class="ss-stage-badge is-complete">Program complete</span>
           </div>
-          <p>${escapeHtml(`Overall score: ${overallScorePercent}%. ${overallScorePercent > 50 ? `${earnedHorseMeta?.label || "A new horse"} earned for the paddock.` : "No horse earned this time."}`)}</p>
+          <p class="ss-stage-copy">${escapeHtml(`Overall score: ${overallScorePercent}%. ${overallScorePercent > 50 ? `${earnedHorseMeta?.label || "A new horse"} earned for the paddock.` : "No horse earned this time."}`)}</p>
           ${overallScorePercent > 50 && earnedHorseMeta ? `
-            <article class="spelling-horse-card">
+            <article class="ss-earned-horse-card">
               <img class="spelling-horse-card__image" src="${escapeHtml(earnedHorseMeta.image)}" alt="${escapeHtml(earnedHorseMeta.name)}" />
               <div class="spelling-horse-card__copy">
                 <strong>${escapeHtml(`${earnedHorseMeta.name} · ${earnedHorseMeta.label}`)}</strong>
@@ -11496,12 +11523,15 @@ function renderSpelling() {
               </div>
             </article>
           ` : ""}
-          <div class="spelling-review-summary">
+          <div class="ss-review-list">
             ${Object.entries(stageScoreSummary)
               .map(([stageKey, stageScore]) => `
-                <article class="spelling-review-summary__row${getSpellingStageScorePercent(spelling, stageKey) >= 50 ? " is-correct" : " is-incorrect"}">
-                  <strong>${escapeHtml(stageScore.label)}</strong>
-                  <span>${escapeHtml(`${stageScore.correct}/${stageScore.total} · ${getSpellingStageScorePercent(spelling, stageKey)}%`)}</span>
+                <article class="ss-review-row${getSpellingStageScorePercent(spelling, stageKey) >= 50 ? " is-correct" : " is-incorrect"}">
+                  <div>
+                    <strong>${escapeHtml(stageScore.label)}</strong>
+                    <span>${escapeHtml(`${stageScore.correct}/${stageScore.total} · ${getSpellingStageScorePercent(spelling, stageKey)}%`)}</span>
+                  </div>
+                  <span class="ss-review-mark">${getSpellingStageScorePercent(spelling, stageKey) >= 50 ? "✓" : "✕"}</span>
                 </article>
               `)
               .join("")}
@@ -11516,33 +11546,36 @@ function renderSpelling() {
       `
       : spelling.tenseTransfer.completed
       ? `
-        <article class="spelling-stage-card spelling-stage-card--single">
-          <div class="spelling-card__header">
+        <article class="ss-stage-panel">
+          <div class="ss-stage-panel__head">
             <div>
               <p class="eyebrow">Stage 4</p>
-              <h4>Final review</h4>
+              <h4>Past, Present, Future</h4>
             </div>
-            <span class="spelling-card__status is-complete">Ribbon earned</span>
+            <span class="ss-stage-badge is-complete">Ribbon earned</span>
           </div>
-          <p>The final tense-sorting stage is complete.</p>
-          <div class="spelling-stage-meta spelling-stage-meta--single">
+          <p class="ss-stage-copy">The tense sort is complete for this session.</p>
+          <div class="ss-stage-progress">
             <span>${escapeHtml(`${stageScoreSummary["tense-transfer"].correct}/${stageScoreSummary["tense-transfer"].total} correct`)}</span>
             <span>${escapeHtml(`${getSpellingStageScorePercent(spelling, "tense-transfer")}% score`)}</span>
           </div>
-          <div class="spelling-review-summary">
+          <div class="ss-review-list">
             ${followUpWords.map((entry) => `
-              <article class="spelling-review-summary__row is-correct">
-                <strong>${escapeHtml(entry.word)}</strong>
-                <span>${escapeHtml(`${entry.tense?.past || ""} · ${entry.tense?.present || ""} · ${entry.tense?.future || ""}`)}</span>
+              <article class="ss-review-row is-correct">
+                <div>
+                  <strong>${escapeHtml(entry.word)}</strong>
+                  <span>${escapeHtml(`${entry.tense?.past || ""} · ${entry.tense?.present || ""} · ${entry.tense?.future || ""}`)}</span>
+                </div>
+                <span class="ss-review-mark">✓</span>
               </article>
             `).join("")}
           </div>
-          <article class="spelling-complete-card">
+          <section class="ss-stage-panel ss-stage-panel--nested">
             <p class="eyebrow">Complete</p>
             <h4>All four ribbons earned</h4>
-            <p>${escapeHtml(`Overall score: ${overallScorePercent}%. ${overallScorePercent > 50 ? `${earnedHorseMeta?.label || "A new horse"} has been added to the paddock.` : "Keep practising to earn a new horse next time."}`)}</p>
+            <p class="ss-stage-copy">${escapeHtml(`Overall score: ${overallScorePercent}%. ${overallScorePercent > 50 ? `${earnedHorseMeta?.label || "A new horse"} has been added to the paddock.` : "Keep practising to earn a new horse next time."}`)}</p>
             ${overallScorePercent > 50 && earnedHorseMeta ? `
-              <article class="spelling-horse-card">
+              <article class="ss-earned-horse-card">
                 <img class="spelling-horse-card__image" src="${escapeHtml(earnedHorseMeta.image)}" alt="${escapeHtml(earnedHorseMeta.name)}" />
                 <div class="spelling-horse-card__copy">
                   <strong>${escapeHtml(`${earnedHorseMeta.name} · ${earnedHorseMeta.label}`)}</strong>
@@ -11550,62 +11583,68 @@ function renderSpelling() {
                 </div>
               </article>
             ` : ""}
-            <div class="spelling-review-summary">
+            <div class="ss-review-list">
               ${Object.entries(stageScoreSummary)
                 .map(([stageKey, stageScore]) => `
-                  <article class="spelling-review-summary__row${getSpellingStageScorePercent(spelling, stageKey) >= 50 ? " is-correct" : " is-incorrect"}">
-                    <strong>${escapeHtml(stageScore.label)}</strong>
-                    <span>${escapeHtml(`${stageScore.correct}/${stageScore.total} · ${getSpellingStageScorePercent(spelling, stageKey)}%`)}</span>
+                  <article class="ss-review-row${getSpellingStageScorePercent(spelling, stageKey) >= 50 ? " is-correct" : " is-incorrect"}">
+                    <div>
+                      <strong>${escapeHtml(stageScore.label)}</strong>
+                      <span>${escapeHtml(`${stageScore.correct}/${stageScore.total} · ${getSpellingStageScorePercent(spelling, stageKey)}%`)}</span>
+                    </div>
+                    <span class="ss-review-mark">${getSpellingStageScorePercent(spelling, stageKey) >= 50 ? "✓" : "✕"}</span>
                   </article>
                 `)
                 .join("")}
             </div>
-          </article>
+          </section>
           <div class="spelling-stage-actions">
             <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="tense-transfer">Reset stage</button>
           </div>
         </article>
       `
       : `
-        <article class="spelling-stage-card spelling-stage-card--single">
-          <div class="spelling-card__header">
+        <article class="ss-stage-panel">
+          <div class="ss-stage-panel__head">
             <div>
               <p class="eyebrow">Stage 4</p>
-              <h4>Past, present, future</h4>
+              <h4>Past, Present, Future</h4>
             </div>
-            <span class="spelling-card__status">Final ribbon</span>
+            <span class="ss-stage-badge">Final ribbon</span>
           </div>
-          <p>One word at a time, drag the correct form onto yesterday, today, and tomorrow.</p>
+          <p class="ss-stage-copy">Drag the correct form onto yesterday, today, and tomorrow.</p>
           ${currentFamilyWord ? `
-            <div class="spelling-stage-meta spelling-stage-meta--single">
-              <span>Word ${escapeHtml(String(followUpWords.filter((entry) => ensureSpellingTenseAnswer(spelling, entry.id).completed).length + 1))} of ${escapeHtml(String(followUpWords.length))}</span>
-              <span>${escapeHtml(currentFamilyWord.word)}</span>
+            <div class="ss-stage-progress">
+              <span>${escapeHtml(`Word ${completedTenseCount + 1} of ${followUpWords.length}`)}</span>
+              <div class="ss-dot-row" aria-label="Stage 4 progress">
+                ${buildSpellingSessionDotRow(followUpWords.length, currentTenseIndex, completedTenseCount)}
+              </div>
             </div>
-            <article class="spelling-tense-card spelling-tense-card--single${currentFamilyAnswer?.checked ? (currentFamilyAnswer?.feedbackKind === "correct" ? " is-correct" : " is-incorrect") : ""}">
-              <div class="spelling-tense-board">
+            <section class="ss-tense-panel${currentFamilyAnswer?.checked ? (currentFamilyAnswer?.feedbackKind === "correct" ? " is-correct" : " is-incorrect") : ""}">
+              <button type="button" class="ss-keyword-button ss-keyword-button--static" disabled>${escapeHtml(currentFamilyWord.word)}</button>
+              <div class="ss-tense-board">
                 ${["past", "present", "future"]
                   .map((slotId) => `
-                    <div class="spelling-tense-slot" data-spelling-tense-slot="${slotId}" data-spelling-tense-word="${currentFamilyWord.id}" role="button" tabindex="0">
-                      <span class="spelling-tense-slot__label">${escapeHtml(tenseLabels[slotId])}</span>
+                    <div class="ss-tense-slot" data-spelling-tense-slot="${slotId}" data-spelling-tense-word="${currentFamilyWord.id}" role="button" tabindex="0">
+                      <span class="ss-tense-slot__label">${escapeHtml(tenseLabels[slotId])}</span>
                       ${
                         currentFamilyAnswer?.placements?.[slotId]
                           ? `
-                            <button type="button" class="spelling-tense-slot__token" data-spelling-tense-clear="${slotId}" data-spelling-tense-word="${currentFamilyWord.id}">
+                            <button type="button" class="ss-tense-token" data-spelling-tense-clear="${slotId}" data-spelling-tense-word="${currentFamilyWord.id}">
                               ${escapeHtml(currentFamilyAnswer.placements[slotId])}
                             </button>
                           `
-                          : '<span class="spelling-tense-slot__placeholder">Drop the correct word here</span>'
+                          : '<span class="ss-tense-slot__placeholder">Drop the correct word here</span>'
                       }
                     </div>
                   `)
                   .join("")}
               </div>
-              <div class="spelling-option-bank">
-                ${getSpellingTenseOptionOrder(currentFamilyWord)
+              <div class="ss-option-bank">
+                ${getSpellingTenseOptionOrder(spelling, currentFamilyWord)
                   .map((option) => `
                     <button
                       type="button"
-                      class="spelling-option-chip${Object.values(currentFamilyAnswer?.placements || {}).includes(option) ? " is-used" : ""}${currentFamilyAnswer?.selectedOption === option ? " is-selected" : ""}"
+                      class="ss-option-chip${Object.values(currentFamilyAnswer?.placements || {}).includes(option) ? " is-used" : ""}${currentFamilyAnswer?.selectedOption === option ? " is-selected" : ""}"
                       draggable="true"
                       data-spelling-tense-option="${escapeHtml(option)}"
                       data-spelling-tense-word="${currentFamilyWord.id}"
@@ -11619,8 +11658,8 @@ function renderSpelling() {
                 <button type="button" class="primary-button primary-button--dark" data-spelling-tense-submit="${currentFamilyWord.id}">Check word</button>
                 ${currentFamilyAnswer?.awaitingAdvance ? `<button type="button" class="ghost-button ghost-button--small" data-spelling-tense-advance="${currentFamilyWord.id}">${escapeHtml(spelling.tenseTransfer.completed ? "Finish stage" : "Continue to next word")}</button>` : ""}
               </div>
-              ${currentFamilyAnswer?.checked ? `<p class="spelling-choice-feedback${currentFamilyAnswer?.feedbackKind === "correct" ? " is-correct" : " is-incorrect"}">${escapeHtml(currentFamilyAnswer?.feedbackMessage || "")}</p>` : ""}
-            </article>
+              ${currentFamilyAnswer?.checked ? `<div class="ss-rule-note${currentFamilyAnswer?.feedbackKind === "correct" ? " is-correct" : " is-incorrect"}"><strong>${escapeHtml(currentFamilyAnswer?.feedbackKind === "correct" ? "Correct" : "Incorrect")}</strong><p>${escapeHtml(currentFamilyAnswer?.feedbackMessage || "")}</p></div>` : ""}
+            </section>
           ` : ""}
           <div class="spelling-stage-actions">
             <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="tense-transfer">Reset stage</button>
