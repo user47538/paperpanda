@@ -489,26 +489,39 @@ const SPELLING_FOCUS_LABELS = {
 };
 const SPELLING_UNIT_SEED = {
   id: "spelling-progression",
-  title: "Spelling Progression",
+  title: "Spelling Stables",
   intro:
-    "Start with a spoken diagnostic, then move into visual checking, word families, and tense transfer built from the words the student actually missed.",
+    "Run a four-stage spelling session built from the words that still need attention, then earn ribbons and grow the stable.",
   diagnosticTargetCount: 10,
   followUpWordCount: 10,
   reviewDays: ["Day 1", "Day 3", "Day 7", "Day 14", "Day 30"]
 };
 const SPELLING_PADDOCK_HORSES = [
-  { id: "arabian", label: "Arabian", image: "/horses/Arabian.png" },
-  { id: "appaloosa", label: "Appaloosa", image: "/horses/Appaloosa.png" },
-  { id: "mustang", label: "Mustang", image: "/horses/Mustang.png" },
-  { id: "quarter-horse", label: "Quarter Horse", image: "/horses/Quarter Horse.png" },
-  { id: "thoroughbred", label: "Thoroughbred", image: "/horses/Thoroughbred.png" },
-  { id: "welsh-pony", label: "Welsh Pony", image: "/horses/Welsh Pony.png" },
-  { id: "paint-horse", label: "Paint Horse", image: "/horses/Paint Horse.png" },
-  { id: "irish-sport-horse", label: "Irish Sport Horse", image: "/horses/Irish Sport Horse.png" }
+  { id: "arabian", label: "Arabian", name: "Dusty", image: "/horses/Arabian.png" },
+  { id: "quarter-horse", label: "Quarter Horse", name: "Willow", image: "/horses/Quarter Horse.png" },
+  { id: "thoroughbred", label: "Thoroughbred", name: "Comet", image: "/horses/Thoroughbred.png" },
+  { id: "australian-stock-horse", label: "Australian Stock Horse", name: "Maple", image: "/horses/Australian Stock Horse.png" },
+  { id: "clydesdale", label: "Clydesdale", name: "Bracken", image: "/horses/Clydesdale.png" },
+  { id: "fresian", label: "Fresian", name: "Skye", image: "/horses/Fresian.png" },
+  { id: "andalusian", label: "Andalusian", name: "Juniper", image: "/horses/Andalusian.png" },
+  { id: "morgan-horse", label: "Morgan Horse", name: "Scout", image: "/horses/Morgan House.png" },
+  { id: "appaloosa", label: "Appaloosa", name: "Poppy", image: "/horses/Appaloosa.png" },
+  { id: "paint-horse", label: "Paint Horse", name: "Ember", image: "/horses/Paint Horse.png" },
+  { id: "welsh-pony", label: "Welsh Pony", name: "Tilly", image: "/horses/Welsh Pony.png" },
+  { id: "connemara-pony", label: "Connemara Pony", name: "Mabel", image: "/horses/Connemara Pony.png" },
+  { id: "shetland-pony", label: "Shetland Pony", name: "Honey", image: "/horses/Shetland Pony.png" },
+  { id: "gypsy-vanner", label: "Gypsy Vanner", name: "Rowan", image: "/horses/Gypsy Vanner.png" },
+  { id: "percheron", label: "Percheron", name: "Fern", image: "/horses/Percheron.png" },
+  { id: "haflinger", label: "Haflinger", name: "Clover", image: "/horses/Haflinger.png" },
+  { id: "tennessee-walking-horse", label: "Tennessee Walking Horse", name: "Marley", image: "/horses/Tennessee Walking Horse .png" },
+  { id: "akhal-teke", label: "Akhal-Teke", name: "Flint", image: "/horses/Akhal-Teke.png" },
+  { id: "mustang", label: "Mustang", name: "Storm", image: "/horses/Mustang.png" },
+  { id: "irish-sport-horse", label: "Irish Sport Horse", name: "Jasper", image: "/horses/Irish Sport Horse.png" }
 ];
 const SPELLING_PADDOCK_HORSE_BY_ID = Object.fromEntries(
   SPELLING_PADDOCK_HORSES.map((horse) => [horse.id, horse])
 );
+const SPELLING_HORSE_RANKS = ["Foal", "Pony", "School Horse", "Show Horse", "Champion"];
 const SPELLING_CHALLENGE_MODE_ORDER = ["looks-right", "dictation", "root-word", "missing-letter"];
 const SPELLING_INTERVENTION_LIBRARY = {
   believe: {
@@ -4156,7 +4169,7 @@ function createDefaultSpellingState(subjectId = "") {
     enabled,
     activeUnitId: SPELLING_UNIT_SEED.id,
     coachMessage: enabled
-      ? "Start with the spoken diagnostic so the follow-up work is built from real errors."
+      ? "Start with the spelling challenge so the stable work is built from the words that still need attention."
       : "",
     preferences: {
       font: "lexend",
@@ -4211,6 +4224,8 @@ function createDefaultSpellingState(subjectId = "") {
       lastCompletedWeekKey: ""
     },
     paddockHorses: [],
+    paddockState: {},
+    lastUnlockedHorseId: "",
     lastOverallScorePercent: 0
   };
 }
@@ -4384,6 +4399,20 @@ function normaliseSpellingState(spelling, subjectId = "") {
     paddockHorses: Array.isArray(next.paddockHorses)
       ? next.paddockHorses.map((horse) => String(horse || "").trim()).filter(Boolean).slice(0, SPELLING_PADDOCK_HORSES.length)
       : [],
+    paddockState: next.paddockState && typeof next.paddockState === "object" && !Array.isArray(next.paddockState)
+      ? Object.fromEntries(
+          Object.entries(next.paddockState).map(([horseId, entry], index) => [
+            String(horseId || ""),
+            {
+              stallId: String(entry?.stallId || `s${index + 1}`),
+              roaming: Boolean(entry?.roaming),
+              left: Math.max(0, Number(entry?.left || 24) || 24),
+              top: Math.max(0, Number(entry?.top || 24) || 24)
+            }
+          ])
+        )
+      : {},
+    lastUnlockedHorseId: String(next.lastUnlockedHorseId || ""),
     lastOverallScorePercent: Math.max(0, Math.min(100, Number(next.lastOverallScorePercent || 0) || 0))
   };
 }
@@ -4491,11 +4520,74 @@ function unlockSpellingPaddockHorse(spelling) {
     return "";
   }
   spelling.paddockHorses = [...(spelling.paddockHorses || []), nextHorse.id];
+  ensureSpellingPaddockState(spelling);
+  spelling.lastUnlockedHorseId = nextHorse.id;
   return nextHorse.id;
 }
 
 function getSpellingPaddockHorseMeta(horseId = "") {
   return SPELLING_PADDOCK_HORSE_BY_ID[String(horseId || "")] || null;
+}
+
+function getSpellingHorseRankLabel(horseCount = 0) {
+  if (horseCount <= 0) {
+    return SPELLING_HORSE_RANKS[0];
+  }
+  const rankIndex = Math.min(
+    SPELLING_HORSE_RANKS.length - 1,
+    Math.floor((Math.max(0, horseCount - 1)) / 4)
+  );
+  return SPELLING_HORSE_RANKS[rankIndex];
+}
+
+function buildDefaultSpellingPaddockEntry(index = 0) {
+  return {
+    stallId: `s${index + 1}`,
+    roaming: false,
+    left: 28 + (index % 4) * 34,
+    top: 140 + Math.floor(index / 4) * 18
+  };
+}
+
+function ensureSpellingPaddockState(spelling) {
+  if (!spelling.paddockState || typeof spelling.paddockState !== "object" || Array.isArray(spelling.paddockState)) {
+    spelling.paddockState = {};
+  }
+  (spelling.paddockHorses || []).forEach((horseId, index) => {
+    const normalizedHorseId = String(horseId || "");
+    if (!normalizedHorseId) {
+      return;
+    }
+    if (!spelling.paddockState[normalizedHorseId]) {
+      spelling.paddockState[normalizedHorseId] = buildDefaultSpellingPaddockEntry(index);
+      return;
+    }
+    spelling.paddockState[normalizedHorseId] = {
+      ...buildDefaultSpellingPaddockEntry(index),
+      ...spelling.paddockState[normalizedHorseId],
+      stallId: String(spelling.paddockState[normalizedHorseId].stallId || `s${index + 1}`)
+    };
+  });
+  return spelling.paddockState;
+}
+
+function getSpellingOwnedHorseMeta(spelling) {
+  ensureSpellingPaddockState(spelling);
+  return (spelling.paddockHorses || [])
+    .map((horseId, index) => {
+      const meta = getSpellingPaddockHorseMeta(horseId);
+      if (!meta) {
+        return null;
+      }
+      const stateEntry = spelling.paddockState[horseId] || buildDefaultSpellingPaddockEntry(index);
+      return {
+        ...meta,
+        number: index + 1,
+        rank: getSpellingHorseRankLabel(index + 1),
+        state: stateEntry
+      };
+    })
+    .filter(Boolean);
 }
 
 function getSpellingStageId(subject) {
@@ -4614,7 +4706,8 @@ function resetSpellingProgressForNewAttempt(spelling) {
   spelling.challenge.checked = false;
   spelling.challenge.completed = false;
   spelling.challenge.inputValue = "";
-  spelling.coachMessage = "Start with the spoken diagnostic so the follow-up work is built from the ten words for this attempt.";
+  spelling.lastUnlockedHorseId = "";
+  spelling.coachMessage = "Start with the spelling challenge so the stable work is built from the ten words for this attempt.";
 }
 
 function getWeeklyCompletedSpellingAttempts(spelling, weekKey = currentWeekKey()) {
@@ -4720,6 +4813,147 @@ function finishSpellingSession(subject) {
   persistSubjects();
 }
 
+function sendSpellingHorseToPaddock(subject, horseId, stageElement) {
+  const spelling = getSubjectSpellingState(subject);
+  ensureSpellingPaddockState(spelling);
+  const horseState = spelling.paddockState[horseId];
+  if (!horseState) {
+    return;
+  }
+  const stageWidth = Math.max(320, Math.round(stageElement?.clientWidth || 520));
+  const stageHeight = Math.max(220, Math.round(stageElement?.clientHeight || 320));
+  horseState.roaming = true;
+  horseState.left = Math.max(16, Math.min(stageWidth - 170, Math.round(stageWidth * (0.18 + Math.random() * 0.5))));
+  horseState.top = Math.max(92, Math.min(stageHeight - 150, Math.round(stageHeight * (0.44 + Math.random() * 0.24))));
+  persistSubjects();
+  render();
+}
+
+function returnSpellingHorseToStall(subject, horseId) {
+  const spelling = getSubjectSpellingState(subject);
+  ensureSpellingPaddockState(spelling);
+  const horseState = spelling.paddockState[horseId];
+  if (!horseState) {
+    return;
+  }
+  horseState.roaming = false;
+  persistSubjects();
+  render();
+}
+
+function setupSpellingPaddockInteractions(subject, host) {
+  if (!host) {
+    return;
+  }
+  if (typeof host._spellingPaddockCleanup === "function") {
+    host._spellingPaddockCleanup();
+  }
+
+  const stage = host.querySelector("[data-spelling-paddock-stage]");
+  if (!stage) {
+    return;
+  }
+
+  let drag = null;
+
+  const handlePointerDown = (event) => {
+    const horse = event.target.closest("[data-spelling-horse]");
+    if (!horse) {
+      return;
+    }
+    event.preventDefault();
+    const horseId = horse.dataset.spellingHorse || "";
+    const mode = horse.dataset.spellingHorseMode || "stall";
+    if (!horseId) {
+      return;
+    }
+    if (mode === "stall") {
+      drag = {
+        horseId,
+        stage,
+        moved: false,
+        startX: event.clientX,
+        startY: event.clientY,
+        send: true
+      };
+      return;
+    }
+    const rect = horse.getBoundingClientRect();
+    drag = {
+      horseId,
+      horse,
+      stage,
+      moved: false,
+      startX: event.clientX,
+      startY: event.clientY,
+      roam: true,
+      dx: event.clientX - rect.left,
+      dy: event.clientY - rect.top
+    };
+    try {
+      horse.setPointerCapture(event.pointerId);
+    } catch (error) {
+      // Ignore environments without pointer capture support.
+    }
+  };
+
+  const handlePointerMove = (event) => {
+    if (!drag) {
+      return;
+    }
+    if (Math.abs(event.clientX - drag.startX) + Math.abs(event.clientY - drag.startY) > 4) {
+      drag.moved = true;
+    }
+    if (!drag.roam || !drag.horse) {
+      return;
+    }
+    const stageRect = drag.stage.getBoundingClientRect();
+    let nextLeft = event.clientX - stageRect.left - drag.dx;
+    let nextTop = event.clientY - stageRect.top - drag.dy;
+    nextLeft = Math.max(8, Math.min(nextLeft, stageRect.width - drag.horse.offsetWidth - 8));
+    nextTop = Math.max(76, Math.min(nextTop, stageRect.height - drag.horse.offsetHeight - 8));
+    drag.horse.style.left = `${nextLeft}px`;
+    drag.horse.style.top = `${nextTop}px`;
+  };
+
+  const handlePointerUp = () => {
+    if (!drag) {
+      return;
+    }
+    if (drag.send) {
+      if (!drag.moved) {
+        sendSpellingHorseToPaddock(subject, drag.horseId, drag.stage);
+      }
+      drag = null;
+      return;
+    }
+    if (!drag.moved) {
+      returnSpellingHorseToStall(subject, drag.horseId);
+      drag = null;
+      return;
+    }
+    const spelling = getSubjectSpellingState(subject);
+    ensureSpellingPaddockState(spelling);
+    const horseState = spelling.paddockState[drag.horseId];
+    if (horseState && drag.horse) {
+      horseState.roaming = true;
+      horseState.left = Math.max(0, Math.round(parseFloat(drag.horse.style.left) || horseState.left || 0));
+      horseState.top = Math.max(0, Math.round(parseFloat(drag.horse.style.top) || horseState.top || 0));
+      persistSubjects({ skipRemoteSync: true });
+    }
+    drag = null;
+  };
+
+  host.addEventListener("pointerdown", handlePointerDown);
+  window.addEventListener("pointermove", handlePointerMove);
+  window.addEventListener("pointerup", handlePointerUp);
+  host._spellingPaddockCleanup = () => {
+    host.removeEventListener("pointerdown", handlePointerDown);
+    window.removeEventListener("pointermove", handlePointerMove);
+    window.removeEventListener("pointerup", handlePointerUp);
+  };
+}
+
 function getSpellingCelebrationCopy(stageId) {
   if (stageId === "diagnostic") {
     return {
@@ -4792,9 +5026,14 @@ function getSpellingTopFocuses(spelling, limit = 3) {
 
 function buildSpellingFollowUpWordIdsFromResponses(responses, spelling = null) {
   const diagnosticWords = spelling ? getSpellingAttemptWords(spelling) : SPELLING_DIAGNOSTIC_WORDS;
-  const followUpWordIds = diagnosticWords
+  const missedWordIds = diagnosticWords
+    .filter((wordEntry) => responses[wordEntry.id] && !responses[wordEntry.id].correct)
     .map((wordEntry) => String(wordEntry.interventionId || ""))
     .filter(Boolean);
+  const fallbackWordIds = diagnosticWords
+    .map((wordEntry) => String(wordEntry.interventionId || ""))
+    .filter(Boolean);
+  const followUpWordIds = missedWordIds.length ? missedWordIds : fallbackWordIds;
   return followUpWordIds.slice(0, SPELLING_UNIT_SEED.followUpWordCount);
 }
 
@@ -5041,7 +5280,7 @@ function resetSpellingActivity(subject, activityId) {
     spelling.challenge.checked = false;
     spelling.challenge.completed = false;
     spelling.challenge.inputValue = "";
-    spelling.coachMessage = "Start with the spoken diagnostic so the follow-up work is built from the same ten words across this attempt.";
+    spelling.coachMessage = "Start with the spelling challenge so the stable work is built from the same ten words across this attempt.";
   } else if (activityId === "looks-right") {
     spelling.looksRight = {
       answers: {},
@@ -5064,7 +5303,7 @@ function resetSpellingActivity(subject, activityId) {
       currentWordId: "",
       completed: false
     };
-    spelling.coachMessage = "Use the visual check to decide which spelling pattern looks settled on the page.";
+    spelling.coachMessage = "Choose the spelling that looks right, then use the rule note before moving on.";
   } else if (activityId === "word-families") {
     spelling.flashcards = {
       version: SPELLING_FLASHCARDS_VERSION,
@@ -5078,7 +5317,7 @@ function resetSpellingActivity(subject, activityId) {
       currentWordId: "",
       completed: false
     };
-    spelling.coachMessage = "Reveal the word map, hide it, then write the word from memory.";
+    spelling.coachMessage = "Tap the key word, listen to the family sentences, then write the root from memory.";
   } else if (activityId === "tense-transfer") {
     spelling.tenseTransfer = {
       version: SPELLING_TENSE_TRANSFER_VERSION,
@@ -5086,7 +5325,7 @@ function resetSpellingActivity(subject, activityId) {
       currentWordId: "",
       completed: false
     };
-    spelling.coachMessage = "Drag the correct form of the word onto yesterday, today, and tomorrow.";
+    spelling.coachMessage = "Drag the correct form onto yesterday, today, and tomorrow.";
   } else {
     subject.spelling = createDefaultSpellingState(subject.id);
   }
@@ -5194,9 +5433,11 @@ function selectSpellingLooksRightAnswer(subject, wordId, value) {
   spelling.looksRight.awaitingAdvanceWordId = wordId;
   spelling.looksRight.feedbackKind = value === entry.word ? "correct" : "incorrect";
   spelling.looksRight.feedbackMessage = value === entry.word
-    ? `Correct. ${entry.word} is the settled spelling.`
-    : `Incorrect. The correct spelling is ${entry.word}.`;
-  spelling.coachMessage = spelling.looksRight.feedbackMessage;
+    ? `${entry.word} is the settled spelling in this word family.`
+    : `The correct spelling is ${entry.word}.`;
+  spelling.coachMessage = value === entry.word
+    ? `Correct. ${entry.lookRightNote || entry.familyNote || ""}`.trim()
+    : `Incorrect. ${entry.lookRightNote || `Look back at how ${entry.word} is built.`}`.trim();
   persistSubjects();
 }
 
@@ -5274,6 +5515,125 @@ function getSpellingWordFamilyReferenceMarkup(entry) {
           .join("")}
       </div>
     </div>
+  `;
+}
+
+function buildSpellingSyntheticDistractor(entry) {
+  const baseWrong = String(entry?.lookRightWrong || "").trim();
+  const baseWord = String(entry?.word || "").trim();
+  if (!baseWrong || !baseWord) {
+    return baseWrong || baseWord;
+  }
+  if (baseWrong.endsWith("e")) {
+    return baseWrong.slice(0, -1);
+  }
+  if (baseWord.endsWith("e")) {
+    return `${baseWrong}e`;
+  }
+  return `${baseWrong}${baseWrong.at(-1) || ""}`;
+}
+
+function buildSpellingLooksRightOptions(spelling, entry) {
+  const diagnosticEntry = SPELLING_DIAGNOSTIC_WORDS.find((wordEntry) => wordEntry.interventionId === entry.id);
+  const diagnosticAttempt = String(spelling.diagnostic.responses[diagnosticEntry?.id || ""]?.attempt || "").trim();
+  const options = [
+    {
+      value: entry.word,
+      displayWord: entry.lookRightChoiceCorrect || entry.articulation || entry.word
+    },
+    {
+      value: entry.lookRightWrong,
+      displayWord: entry.lookRightChoiceWrong || entry.lookRightWrong
+    },
+    diagnosticAttempt && normalizeSpellingAttempt(diagnosticAttempt) !== normalizeSpellingAttempt(entry.word)
+      ? {
+          value: diagnosticAttempt,
+          displayWord: diagnosticAttempt
+        }
+      : {
+          value: buildSpellingSyntheticDistractor(entry),
+          displayWord: buildSpellingSyntheticDistractor(entry)
+        }
+  ]
+    .filter((option) => option.value)
+    .filter((option, index, array) => array.findIndex((candidate) => normalizeSpellingAttempt(candidate.value) === normalizeSpellingAttempt(option.value)) === index);
+
+  while (options.length < 3) {
+    const fallbackValue = `${entry.lookRightWrong}${options.length}`;
+    options.push({
+      value: fallbackValue,
+      displayWord: fallbackValue
+    });
+  }
+
+  const seededRank = (value) =>
+    String(`${entry.id}:${value}`)
+      .split("")
+      .reduce((total, character, index) => total + character.charCodeAt(0) * (index + 1), 0);
+
+  return options
+    .slice(0, 3)
+    .sort((left, right) => {
+      const difference = (seededRank(left.value) % 101) - (seededRank(right.value) % 101);
+      return difference || left.value.localeCompare(right.value);
+    });
+}
+
+function buildSpellingPaddockMarkup(spelling) {
+  const ownedHorses = getSpellingOwnedHorseMeta(spelling);
+  const stalls = ownedHorses.length ? ownedHorses : [];
+  const stallCount = Math.max(4, stalls.length || 0);
+  const stallMarkup = Array.from({ length: stallCount }, (_, index) => {
+    const horse = stalls[index] || null;
+    const stateEntry = horse?.state || buildDefaultSpellingPaddockEntry(index);
+    const isRoaming = Boolean(horse && stateEntry.roaming);
+    return `
+      <div class="ss-stall${isRoaming ? " is-empty" : ""}" data-spelling-stall="${escapeHtml(`s${index + 1}`)}">
+        <div class="ss-stall-cell">
+          <div class="ss-stall-inner">
+            ${horse && !isRoaming ? `<img class="ss-horse ss-horse--stall" src="${escapeHtml(horse.image)}" alt="${escapeHtml(horse.name)}" data-spelling-horse="${escapeHtml(horse.id)}" data-spelling-horse-mode="stall" />` : ""}
+          </div>
+          <div class="ss-stall-bars"></div>
+          <div class="ss-stall-door"><span class="ss-stall-plate">No. ${index + 1}</span></div>
+          <div class="ss-stall-empty">Out roaming</div>
+        </div>
+      </div>
+    `;
+  }).join("");
+  const roamingMarkup = ownedHorses
+    .filter((horse) => horse.state.roaming)
+    .map((horse) => `
+      <img
+        class="ss-horse ss-horse--roaming"
+        src="${escapeHtml(horse.image)}"
+        alt="${escapeHtml(horse.name)}"
+        data-spelling-horse="${escapeHtml(horse.id)}"
+        data-spelling-horse-mode="roaming"
+        style="left:${escapeHtml(String(horse.state.left))}px;top:${escapeHtml(String(horse.state.top))}px;"
+      />
+    `)
+    .join("");
+
+  return `
+    <section class="ss-stable-card">
+      <div class="ss-section-head">
+        <div>
+          <p class="eyebrow">Your stable</p>
+          <h4>${escapeHtml(ownedHorses.length ? `${ownedHorses.length} horses in the stable` : "The stable is waiting")}</h4>
+        </div>
+        <span class="ss-rank-pill">${escapeHtml(getSpellingHorseRankLabel(ownedHorses.length))}</span>
+      </div>
+      <div class="ss-paddock-frame pf-frame" data-spelling-paddock-frame="true">
+        <div class="ss-paddock-stage" data-spelling-paddock-stage="true">
+          <div class="ss-paddock-copy">
+            <strong>Paddock</strong>
+            <span>Tap a horse to send it out. Drag roaming horses to move them. Tap again to return them.</span>
+          </div>
+          ${roamingMarkup}
+        </div>
+        <div class="ss-stall-grid">${stallMarkup}</div>
+      </div>
+    </section>
   `;
 }
 
@@ -5553,12 +5913,13 @@ function advanceSpellingTenseTransfer(subject, wordId) {
     const overallScorePercent = getSpellingOverallScorePercent(spelling);
     spelling.lastOverallScorePercent = overallScorePercent;
     const unlockedHorse = overallScorePercent > 50 ? unlockSpellingPaddockHorse(spelling) : "";
+    const unlockedHorseMeta = getSpellingPaddockHorseMeta(unlockedHorse);
     recordCompletedSpellingAttempt(subject);
     celebrateSpellingStage(
       subject,
       "tense-transfer",
       unlockedHorse
-        ? `Final stage complete. Overall score ${overallScorePercent}%. ${unlockedHorse} has been added to the paddock.`
+        ? `Final stage complete. Overall score ${overallScorePercent}%. ${unlockedHorseMeta?.name || "A new horse"} has been added to the paddock.`
         : `Final stage complete. Overall score ${overallScorePercent}%.`
     );
     return;
@@ -10593,6 +10954,7 @@ function renderSpelling() {
   const attemptWords = getSpellingAttemptWords(spelling);
   const stageScoreSummary = getSpellingStageScoreSummary(spelling);
   const overallScorePercent = getSpellingOverallScorePercent(spelling);
+  const ownedHorseMeta = getSpellingOwnedHorseMeta(spelling);
 
   if (spelling.challenge.active || (spelling.challenge.completed && spelling.challenge.lastCompletedWeekKey === currentWeekKey())) {
     const currentChallengeItem = getSpellingChallengeCurrentItem(spelling);
@@ -10712,18 +11074,23 @@ function renderSpelling() {
 
   if (stageId === "diagnostic" && !spelling.diagnostic.completed && !showingCelebration) {
     host.innerHTML = `
-      <section class="spelling-shell spelling-shell--diagnostic-only" data-spelling-font="${escapeHtml(spelling.preferences.font)}" data-spelling-spacing="${escapeHtml(spelling.preferences.spacing)}" data-spelling-tint="${escapeHtml(spelling.preferences.tint)}">
-        <article class="spelling-stage-header spelling-stage-header--compact">
-          <div>
+      <section class="ss-root spelling-shell" data-spelling-font="${escapeHtml(spelling.preferences.font)}" data-spelling-spacing="${escapeHtml(spelling.preferences.spacing)}" data-spelling-tint="${escapeHtml(spelling.preferences.tint)}">
+        <article class="ss-hero">
+          <div class="ss-hero__copy">
             <p class="eyebrow">Spelling Stables</p>
             <div class="spelling-hero__title-row">
               <h3>Spelling Challenge</h3>
               <span class="spelling-hero__stage">Stage 1 · ${escapeHtml(SPELLING_STAGE_LABELS.diagnostic)}</span>
             </div>
-            <p>Listen carefully, type the spelling once, and keep moving. These same 10 words will carry through the full session.</p>
+            <p>Listen carefully, type the spelling once, and move on. The follow-up stages will be built from the spellings that still need work.</p>
+          </div>
+          <div class="ss-hero__meta">
+            <strong>${escapeHtml(`${attemptWords.length}-word session`)}</strong>
+            <span>${escapeHtml(`${ownedHorseMeta.length} horse${ownedHorseMeta.length === 1 ? "" : "s"} in the stable`)}</span>
+            <span>${escapeHtml(`${getSpellingHorseRankLabel(ownedHorseMeta.length)} rank`)}</span>
           </div>
         </article>
-        <section class="spelling-stage-rail" aria-label="Spelling stages">
+        <section class="spelling-stage-rail ss-ribbon-rail" aria-label="Spelling stages">
           ${SPELLING_STAGE_ORDER
             .map(
               (levelId, index) => `
@@ -10739,42 +11106,62 @@ function renderSpelling() {
             )
             .join("")}
         </section>
-        <article class="spelling-stage-card spelling-stage-card--diagnostic">
-          <h4>Spelling Challenge</h4>
-          <p>Type what you hear.</p>
-          <div class="spelling-stage-meta">
-            <span>Word ${escapeHtml(String(Math.min(spelling.diagnostic.currentIndex + 1, attemptWords.length)))} of ${escapeHtml(String(attemptWords.length))}</span>
-            <span>${escapeHtml(`${attemptWords.length}-word session`)}</span>
+        <div class="ss-layout">
+          <div class="ss-main">
+            <article class="ss-note-card">
+              <strong>Teaching note</strong>
+              <p>${escapeHtml(spelling.coachMessage || "Type the word you hear.")}</p>
+            </article>
+            <article class="spelling-stage-card spelling-stage-card--diagnostic">
+              <h4>Spelling Challenge</h4>
+              <p>Type what you hear.</p>
+              <div class="spelling-stage-meta">
+                <span>Word ${escapeHtml(String(Math.min(spelling.diagnostic.currentIndex + 1, attemptWords.length)))} of ${escapeHtml(String(attemptWords.length))}</span>
+                <span>${escapeHtml(`${attemptWords.length}-word session`)}</span>
+              </div>
+              <div class="spelling-diagnostic-dots" aria-label="Diagnostic progress">
+                ${attemptWords
+                  .map((_, index) => `
+                    <span class="spelling-diagnostic-dot${index < spelling.diagnostic.currentIndex ? " is-complete" : ""}${index === spelling.diagnostic.currentIndex ? " is-current" : ""}"></span>
+                  `)
+                  .join("")}
+              </div>
+              <div class="spelling-audio-panel">
+                <button type="button" class="primary-button primary-button--dark" data-spelling-play-diagnostic="true">Play word</button>
+              </div>
+              <label class="spelling-input-label" for="spelling-diagnostic-input">Type the word you hear</label>
+              <input
+                id="spelling-diagnostic-input"
+                class="reader-editor spelling-inline-input"
+                type="text"
+                autocomplete="off"
+                autocapitalize="off"
+                spellcheck="false"
+                value="${escapeHtml(spelling.diagnostic.currentInput)}"
+                placeholder="Type the spelling exactly as you hear it"
+              />
+              <div class="spelling-stage-actions">
+                <button type="button" class="primary-button primary-button--dark" data-spelling-submit-diagnostic="true">
+                  ${spelling.diagnostic.currentIndex >= attemptWords.length - 1 ? "Finish diagnostic" : "Submit and next"}
+                </button>
+              </div>
+            </article>
           </div>
-          <div class="spelling-diagnostic-dots" aria-label="Diagnostic progress">
-            ${attemptWords
-              .map((_, index) => `
-                <span class="spelling-diagnostic-dot${index < spelling.diagnostic.currentIndex ? " is-complete" : ""}${index === spelling.diagnostic.currentIndex ? " is-current" : ""}"></span>
-              `)
-              .join("")}
-          </div>
-          <div class="spelling-audio-panel">
-            <button type="button" class="primary-button primary-button--dark" data-spelling-play-diagnostic="true">Play word</button>
-          </div>
-          <label class="spelling-input-label" for="spelling-diagnostic-input">Type the word you hear</label>
-          <input
-            id="spelling-diagnostic-input"
-            class="reader-editor spelling-inline-input"
-            type="text"
-            autocomplete="off"
-            autocapitalize="off"
-            spellcheck="false"
-            value="${escapeHtml(spelling.diagnostic.currentInput)}"
-            placeholder="Type the spelling exactly as you hear it"
-          />
-          <div class="spelling-stage-actions">
-            <button type="button" class="primary-button primary-button--dark" data-spelling-submit-diagnostic="true">
-              ${spelling.diagnostic.currentIndex >= attemptWords.length - 1 ? "Finish diagnostic" : "Submit and next"}
-            </button>
-          </div>
-        </article>
+          <aside class="ss-side">
+            ${buildSpellingPaddockMarkup(spelling)}
+            <section class="ss-side-card">
+              <p class="eyebrow">Review rhythm</p>
+              <h4>Spaced review</h4>
+              <div class="spelling-review-card__days">
+                ${SPELLING_UNIT_SEED.reviewDays.map((dayLabel) => `<span>${escapeHtml(dayLabel)}</span>`).join("")}
+              </div>
+            </section>
+          </aside>
+        </div>
       </section>
     `;
+
+    setupSpellingPaddockInteractions(subject, host);
 
     host.querySelector("[data-spelling-play-diagnostic]")?.addEventListener("click", () => {
       const input = host.querySelector("#spelling-diagnostic-input");
@@ -10894,29 +11281,7 @@ function renderSpelling() {
   } else if (stageId === "looks-right") {
     const currentLookWord = getSpellingLooksRightCurrentWord(spelling);
     const answeredLookCount = followUpWords.filter((entry) => Boolean(spelling.looksRight.answers[entry.id])).length;
-    const currentLookOptions = currentLookWord
-      ? (() => {
-          const options = [
-            [
-              currentLookWord.word,
-              buildSpellingLooksRightChoiceSentence(
-                getSpellingLooksRightSentence(currentLookWord),
-                currentLookWord.word,
-                currentLookWord.lookRightChoiceCorrect || currentLookWord.articulation
-              )
-            ],
-            [
-              currentLookWord.lookRightWrong,
-              buildSpellingLooksRightChoiceSentence(
-                getSpellingLooksRightSentence(currentLookWord),
-                currentLookWord.word,
-                currentLookWord.lookRightChoiceWrong || currentLookWord.lookRightWrong
-              )
-            ]
-          ];
-          return shouldSpellingLooksRightShowCorrectFirst(currentLookWord.id) ? options : [options[1], options[0]];
-        })()
-      : [];
+    const currentLookOptions = currentLookWord ? buildSpellingLooksRightOptions(spelling, currentLookWord) : [];
     stageBody = spelling.looksRight.completed
       ? `
         <article class="spelling-stage-card spelling-stage-card--single">
@@ -10954,36 +11319,44 @@ function renderSpelling() {
             </div>
             <span class="spelling-card__status">Ribbon available</span>
           </div>
-          <p>Read the sentence and choose the spelling that looks right.</p>
+          <p>Choose the spelling that looks settled on the page.</p>
           <div class="spelling-stage-meta spelling-stage-meta--single">
-            <span>Sentence ${escapeHtml(String(Math.min(answeredLookCount + 1, followUpWords.length)))} of ${escapeHtml(String(followUpWords.length))}</span>
-            <span>${escapeHtml(`${answeredLookCount} answered`)}</span>
+            <span>Word ${escapeHtml(String(Math.min(answeredLookCount + 1, followUpWords.length)))} of ${escapeHtml(String(followUpWords.length))}</span>
+            <span>${escapeHtml(`${followUpWords.length} missed word${followUpWords.length === 1 ? "" : "s"} in this set`)}</span>
           </div>
           ${currentLookWord ? `
             <article class="spelling-comparison-card spelling-comparison-card--single">
               <div class="spelling-comparison-card__top">
-                <strong>Sentence check</strong>
-                <span>${escapeHtml(currentLookWord.articulation || currentLookWord.word)}</span>
+                <strong>Looks right</strong>
+                <span>${escapeHtml(currentLookWord.word)}</span>
               </div>
               <p class="spelling-comparison-card__prompt">Which sentence looks right?</p>
               <div class="spelling-choice-row spelling-choice-row--stacked">
                 ${currentLookOptions
                   .map(
-                    ([value, sentenceChoice]) => `
+                    (option) => `
                       <button
                         type="button"
                         class="spelling-choice spelling-choice--sentence spelling-choice--sentence-large"
                         data-spelling-looks-right-word="${currentLookWord.id}"
-                        data-spelling-looks-right-value="${value}"
+                        data-spelling-looks-right-value="${escapeHtml(option.value)}"
                       >
-                        <span>${sentenceChoice}</span>
+                        <span>${buildSpellingLooksRightChoiceSentence(
+                          getSpellingLooksRightSentence(currentLookWord),
+                          currentLookWord.word,
+                          option.displayWord
+                        )}</span>
                       </button>
                     `
                   )
                   .join("")}
               </div>
               ${spelling.looksRight.awaitingAdvanceWordId === currentLookWord.id ? `
-                <p class="spelling-choice-feedback${spelling.looksRight.feedbackKind === "correct" ? " is-correct" : " is-incorrect"}">${escapeHtml(spelling.looksRight.feedbackMessage || "")}</p>
+                <div class="ss-rule-note${spelling.looksRight.feedbackKind === "correct" ? " is-correct" : " is-incorrect"}">
+                  <strong>${escapeHtml(spelling.looksRight.feedbackKind === "correct" ? "Correct" : "Try this pattern")}</strong>
+                  <p>${escapeHtml(spelling.looksRight.feedbackMessage || "")}</p>
+                  <span>${escapeHtml(currentLookWord.lookRightNote || currentLookWord.familyNote || "")}</span>
+                </div>
                 <div class="spelling-stage-actions spelling-stage-actions--compact">
                   <button type="button" class="ghost-button ghost-button--small" data-spelling-looks-right-advance="${currentLookWord.id}">${escapeHtml(followUpWords.every((entry) => Boolean(spelling.looksRight.answers[entry.id])) ? "Finish stage" : "Continue to next word")}</button>
                 </div>
@@ -11097,7 +11470,7 @@ function renderSpelling() {
   } else {
     const currentFamilyWord = getSpellingTenseCurrentWord(spelling);
     const currentFamilyAnswer = currentFamilyWord ? ensureSpellingTenseAnswer(spelling, currentFamilyWord.id) : null;
-    const earnedHorseMeta = getSpellingPaddockHorseMeta(spelling.paddockHorses[spelling.paddockHorses.length - 1]);
+    const earnedHorseMeta = getSpellingPaddockHorseMeta(spelling.lastUnlockedHorseId || spelling.paddockHorses[spelling.paddockHorses.length - 1]);
     const tenseLabels = {
       past: "Yesterday",
       present: "Today",
@@ -11116,10 +11489,10 @@ function renderSpelling() {
           <p>${escapeHtml(`Overall score: ${overallScorePercent}%. ${overallScorePercent > 50 ? `${earnedHorseMeta?.label || "A new horse"} earned for the paddock.` : "No horse earned this time."}`)}</p>
           ${overallScorePercent > 50 && earnedHorseMeta ? `
             <article class="spelling-horse-card">
-              <img class="spelling-horse-card__image" src="${escapeHtml(earnedHorseMeta.image)}" alt="${escapeHtml(earnedHorseMeta.label)}" />
+              <img class="spelling-horse-card__image" src="${escapeHtml(earnedHorseMeta.image)}" alt="${escapeHtml(earnedHorseMeta.name)}" />
               <div class="spelling-horse-card__copy">
-                <strong>Horse earned</strong>
-                <span>${escapeHtml(earnedHorseMeta.label)}</span>
+                <strong>${escapeHtml(`${earnedHorseMeta.name} · ${earnedHorseMeta.label}`)}</strong>
+                <span>${escapeHtml(getSpellingHorseRankLabel((spelling.paddockHorses || []).length))}</span>
               </div>
             </article>
           ` : ""}
@@ -11133,8 +11506,11 @@ function renderSpelling() {
               `)
               .join("")}
           </div>
+          <div class="spelling-review-card__days">
+            ${SPELLING_UNIT_SEED.reviewDays.map((dayLabel) => `<span class="is-done">${escapeHtml(dayLabel)}</span>`).join("")}
+          </div>
           <div class="spelling-stage-actions spelling-stage-actions--centered">
-            <button type="button" class="primary-button primary-button--dark" data-spelling-finish-session="true">Continue</button>
+            <button type="button" class="primary-button primary-button--dark" data-spelling-finish-session="true">${escapeHtml(overallScorePercent > 50 && earnedHorseMeta ? "Add to your stable" : "Continue")}</button>
           </div>
         </article>
       `
@@ -11167,10 +11543,10 @@ function renderSpelling() {
             <p>${escapeHtml(`Overall score: ${overallScorePercent}%. ${overallScorePercent > 50 ? `${earnedHorseMeta?.label || "A new horse"} has been added to the paddock.` : "Keep practising to earn a new horse next time."}`)}</p>
             ${overallScorePercent > 50 && earnedHorseMeta ? `
               <article class="spelling-horse-card">
-                <img class="spelling-horse-card__image" src="${escapeHtml(earnedHorseMeta.image)}" alt="${escapeHtml(earnedHorseMeta.label)}" />
+                <img class="spelling-horse-card__image" src="${escapeHtml(earnedHorseMeta.image)}" alt="${escapeHtml(earnedHorseMeta.name)}" />
                 <div class="spelling-horse-card__copy">
-                  <strong>New paddock horse unlocked</strong>
-                  <span>${escapeHtml(earnedHorseMeta.label)}</span>
+                  <strong>${escapeHtml(`${earnedHorseMeta.name} · ${earnedHorseMeta.label}`)}</strong>
+                  <span>${escapeHtml(getSpellingHorseRankLabel((spelling.paddockHorses || []).length))}</span>
                 </div>
               </article>
             ` : ""}
@@ -11254,42 +11630,43 @@ function renderSpelling() {
   }
 
   host.innerHTML = `
-    <section class="spelling-shell" data-spelling-font="${escapeHtml(spelling.preferences.font)}" data-spelling-spacing="${escapeHtml(spelling.preferences.spacing)}" data-spelling-tint="${escapeHtml(spelling.preferences.tint)}">
-      <article class="spelling-stage-header">
-        <div>
+    <section class="ss-root spelling-shell" data-spelling-font="${escapeHtml(spelling.preferences.font)}" data-spelling-spacing="${escapeHtml(spelling.preferences.spacing)}" data-spelling-tint="${escapeHtml(spelling.preferences.tint)}">
+      <article class="ss-hero">
+        <div class="ss-hero__copy">
           <p class="eyebrow">Spelling Stables</p>
           <div class="spelling-hero__title-row">
             <h3>Spelling Stables</h3>
             <span class="spelling-hero__stage">Stage ${escapeHtml(String(stageIndex + 1))} · ${escapeHtml(SPELLING_STAGE_LABELS[stageId])}</span>
           </div>
-          <p>${escapeHtml(SPELLING_UNIT_SEED.intro)}</p>
+          <p>Build this four-ribbon session from the words that still need attention, then earn a new horse for the stable.</p>
         </div>
-        <div class="spelling-progress-copy spelling-progress-copy--compact">
+        <div class="ss-hero__meta">
           <strong>${escapeHtml(`${completedCount} of ${totalCount} ribbons earned`)}</strong>
           <span>${escapeHtml(`${masteryPercent}% mastery so far`)}</span>
-          <div class="spelling-stage-actions spelling-stage-actions--compact">
-            <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-unit="true">Reset all stages</button>
-          </div>
+          <span>${escapeHtml(`${ownedHorseMeta.length} horse${ownedHorseMeta.length === 1 ? "" : "s"} in the stable`)}</span>
         </div>
       </article>
 
-      <section class="spelling-stage-nav">
-        <button
-          type="button"
-          class="ghost-button ghost-button--small"
-          data-spelling-open-stage="${stageIndex > 0 ? SPELLING_STAGE_ORDER[stageIndex - 1] : ""}"
-          ${stageIndex > 0 ? "" : "disabled"}
-        >
-          Previous stage
-        </button>
-        ${stageId !== currentStageId ? `
-          <button type="button" class="ghost-button ghost-button--small" data-spelling-open-stage="${currentStageId}">
-            Return to current stage
+      <section class="ss-toolbar">
+        <div class="ss-toolbar__actions">
+          <button
+            type="button"
+            class="ghost-button ghost-button--small"
+            data-spelling-open-stage="${stageIndex > 0 ? SPELLING_STAGE_ORDER[stageIndex - 1] : ""}"
+            ${stageIndex > 0 ? "" : "disabled"}
+          >
+            Previous stage
           </button>
-        ` : ""}
+          ${stageId !== currentStageId ? `
+            <button type="button" class="ghost-button ghost-button--small" data-spelling-open-stage="${currentStageId}">
+              Return to current stage
+            </button>
+          ` : ""}
+        </div>
+        <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-unit="true">Reset all stages</button>
       </section>
 
-      <section class="spelling-stage-rail" aria-label="Spelling stages">
+      <section class="spelling-stage-rail ss-ribbon-rail" aria-label="Spelling stages">
         ${SPELLING_STAGE_ORDER
           .map(
             (levelId, index) => `
@@ -11307,51 +11684,55 @@ function renderSpelling() {
           .join("")}
       </section>
 
-      ${focusSummary.length ? `
-        <section class="spelling-focus-summary">
-          ${focusSummary
-            .map(
-              (entry) => `
-                <article class="spelling-focus-card">
-                  <strong>${escapeHtml(SPELLING_FOCUS_LABELS[entry.id] || entry.id)}</strong>
-                  <span>${escapeHtml(`${entry.count} diagnostic miss${entry.count === 1 ? "" : "es"}`)}</span>
-                </article>
-              `
-            )
-            .join("")}
-        </section>
-      ` : ""}
+      <div class="ss-layout">
+        <div class="ss-main">
+          ${focusSummary.length ? `
+            <section class="ss-focus-row">
+              ${focusSummary
+                .map(
+                  (entry) => `
+                    <article class="ss-focus-card">
+                      <strong>${escapeHtml(SPELLING_FOCUS_LABELS[entry.id] || entry.id)}</strong>
+                      <span>${escapeHtml(`${entry.count} diagnostic miss${entry.count === 1 ? "" : "es"}`)}</span>
+                    </article>
+                  `
+                )
+                .join("")}
+            </section>
+          ` : ""}
 
-      <article class="spelling-coach-card">
-        <span class="spelling-coach-card__icon">Aa</span>
-        <div>
-          <strong>Teaching note</strong>
-          <p>${escapeHtml(spelling.coachMessage)}</p>
+          <article class="ss-note-card">
+            <strong>Teaching note</strong>
+            <p>${escapeHtml(spelling.coachMessage)}</p>
+          </article>
+
+          ${stageBody}
         </div>
-      </article>
 
-      ${stageBody}
-
-      <section class="spelling-review-strip">
-        <article class="spelling-review-card">
-          <p class="eyebrow">Review rhythm</p>
-          <h4>Spaced practice</h4>
-          <div class="spelling-review-card__days">
-            ${SPELLING_UNIT_SEED.reviewDays
-              .map((dayLabel, index) => `<span class="${index <= completedCount ? "is-done" : index === completedCount + 1 ? "is-next" : ""}">${escapeHtml(dayLabel)}</span>`)
-              .join("")}
-          </div>
-        </article>
-        <article class="spelling-review-card spelling-review-card--skills">
-          <p class="eyebrow">Target words</p>
-          <h4>Words carrying through the sequence</h4>
-          <div class="spelling-skill-list">
-            ${followUpWords.map((entry) => `<span class="spelling-skill">${escapeHtml(entry.word)}</span>`).join("")}
-          </div>
-        </article>
-      </section>
+        <aside class="ss-side">
+          ${buildSpellingPaddockMarkup(spelling)}
+          <section class="ss-side-card">
+            <p class="eyebrow">Review rhythm</p>
+            <h4>Spaced review</h4>
+            <div class="spelling-review-card__days">
+              ${SPELLING_UNIT_SEED.reviewDays
+                .map((dayLabel, index) => `<span class="${index <= completedCount ? "is-done" : index === completedCount + 1 ? "is-next" : ""}">${escapeHtml(dayLabel)}</span>`)
+                .join("")}
+            </div>
+          </section>
+          <section class="ss-side-card">
+            <p class="eyebrow">Current words</p>
+            <h4>Words in this session</h4>
+            <div class="spelling-skill-list">
+              ${(followUpWords.length ? followUpWords : attemptWords).map((entry) => `<span class="spelling-skill">${escapeHtml(entry.word)}</span>`).join("")}
+            </div>
+          </section>
+        </aside>
+      </div>
     </section>
   `;
+
+  setupSpellingPaddockInteractions(subject, host);
 
   host.querySelector("[data-spelling-reset-unit]")?.addEventListener("click", () => {
     const spelling = getSubjectSpellingState(subject);
