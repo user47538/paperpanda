@@ -5115,12 +5115,8 @@ function speakSpellingDiagnosticWord(wordEntry) {
       error: "Spelling audio failed."
     }
   })
-    .then(() => {
-      render();
-    })
     .catch((error) => {
       console.error("Spelling audio failed.", error);
-      render();
     });
 }
 
@@ -10718,8 +10714,7 @@ function renderSpelling() {
     host.innerHTML = `
       <section class="spelling-shell spelling-shell--diagnostic-only" data-spelling-font="${escapeHtml(spelling.preferences.font)}" data-spelling-spacing="${escapeHtml(spelling.preferences.spacing)}" data-spelling-tint="${escapeHtml(spelling.preferences.tint)}">
         <article class="spelling-stage-card spelling-stage-card--diagnostic">
-          <p class="eyebrow">Spelling Diagnostic</p>
-          <h3>Spoken baseline</h3>
+          <h3>Spelling Challenge</h3>
           <p>Listen to each word, type it once, and move on. These same 10 words will carry through every stage in this attempt.</p>
           <div class="spelling-stage-meta">
             <span>Word ${escapeHtml(String(Math.min(spelling.diagnostic.currentIndex + 1, attemptWords.length)))} of ${escapeHtml(String(attemptWords.length))}</span>
@@ -10727,7 +10722,6 @@ function renderSpelling() {
           </div>
           <div class="spelling-audio-panel">
             <button type="button" class="primary-button primary-button--dark" data-spelling-play-diagnostic="true">Play word</button>
-            <p>The voice reads the target word in a sentence. Replay it as often as needed before you submit.</p>
           </div>
           <label class="spelling-input-label" for="spelling-diagnostic-input">Type the word you hear</label>
           <input
@@ -10745,16 +10739,19 @@ function renderSpelling() {
               ${spelling.diagnostic.currentIndex >= attemptWords.length - 1 ? "Finish diagnostic" : "Submit and next"}
             </button>
           </div>
-          <p class="spelling-stage-note">This screen stays minimal on purpose so the diagnostic is the only task in view.</p>
         </article>
       </section>
     `;
 
     host.querySelector("[data-spelling-play-diagnostic]")?.addEventListener("click", () => {
+      const input = host.querySelector("#spelling-diagnostic-input");
+      spelling.diagnostic.currentInput = input?.value || spelling.diagnostic.currentInput;
+      persistSubjects({ skipRemoteSync: true });
       speakSpellingDiagnosticWord(diagnosticWord);
     });
     host.querySelector("#spelling-diagnostic-input")?.addEventListener("input", (event) => {
       spelling.diagnostic.currentInput = event.target.value;
+      persistSubjects({ skipRemoteSync: true });
     });
     host.querySelector("#spelling-diagnostic-input")?.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {

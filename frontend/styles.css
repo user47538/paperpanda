@@ -5972,6 +5972,13 @@ input[type="date"] {
   min-height: 54px;
   border-radius: 18px;
   padding: 14px 16px;
+  background: #FFFFFF;
+  border-color: rgba(27, 24, 37, 0.12);
+}
+
+.spelling-inline-input:focus {
+  background: #FFFFFF;
+  border-color: #1B1825;
 }
 
 .spelling-stage-actions {
