@@ -4,7 +4,7 @@ const authTokenStorageKey = "paperpanda-session-token";
 const subjectsStorageKey = "paperpanda-subjects-by-account";
 const settingsStorageKey = "studylift-settings";
 const uiVersionStorageKey = "paperpanda-ui-version";
-const currentUiVersion = "2026-06-25-spelling-final-summary";
+const currentUiVersion = "2026-06-26-spelling-heather-visual-pass";
 const previewDatabaseName = "paperpanda-assets";
 const previewStoreName = "document-previews";
 const settingsAssetStoreName = "settings-assets";
@@ -10713,12 +10713,45 @@ function renderSpelling() {
   if (stageId === "diagnostic" && !spelling.diagnostic.completed && !showingCelebration) {
     host.innerHTML = `
       <section class="spelling-shell spelling-shell--diagnostic-only" data-spelling-font="${escapeHtml(spelling.preferences.font)}" data-spelling-spacing="${escapeHtml(spelling.preferences.spacing)}" data-spelling-tint="${escapeHtml(spelling.preferences.tint)}">
+        <article class="spelling-stage-header spelling-stage-header--compact">
+          <div>
+            <p class="eyebrow">Spelling Stables</p>
+            <div class="spelling-hero__title-row">
+              <h3>Spelling Challenge</h3>
+              <span class="spelling-hero__stage">Stage 1 · ${escapeHtml(SPELLING_STAGE_LABELS.diagnostic)}</span>
+            </div>
+            <p>Listen carefully, type the spelling once, and keep moving. These same 10 words will carry through the full session.</p>
+          </div>
+        </article>
+        <section class="spelling-stage-rail" aria-label="Spelling stages">
+          ${SPELLING_STAGE_ORDER
+            .map(
+              (levelId, index) => `
+                <button
+                  type="button"
+                  class="spelling-stage-pill${levelId === stageId ? " is-current" : ""}"
+                  ${index === 0 ? "" : "disabled"}
+                >
+                  <span>${index + 1}</span>
+                  <strong>${escapeHtml(SPELLING_STAGE_LABELS[levelId])}</strong>
+                </button>
+              `
+            )
+            .join("")}
+        </section>
         <article class="spelling-stage-card spelling-stage-card--diagnostic">
-          <h3>Spelling Challenge</h3>
-          <p>Listen to each word, type it once, and move on. These same 10 words will carry through every stage in this attempt.</p>
+          <h4>Spelling Challenge</h4>
+          <p>Type what you hear.</p>
           <div class="spelling-stage-meta">
             <span>Word ${escapeHtml(String(Math.min(spelling.diagnostic.currentIndex + 1, attemptWords.length)))} of ${escapeHtml(String(attemptWords.length))}</span>
-            <span>${escapeHtml(`${getSpellingDiagnosticCorrectCount(spelling)} correct so far`)}</span>
+            <span>${escapeHtml(`${attemptWords.length}-word session`)}</span>
+          </div>
+          <div class="spelling-diagnostic-dots" aria-label="Diagnostic progress">
+            ${attemptWords
+              .map((_, index) => `
+                <span class="spelling-diagnostic-dot${index < spelling.diagnostic.currentIndex ? " is-complete" : ""}${index === spelling.diagnostic.currentIndex ? " is-current" : ""}"></span>
+              `)
+              .join("")}
           </div>
           <div class="spelling-audio-panel">
             <button type="button" class="primary-button primary-button--dark" data-spelling-play-diagnostic="true">Play word</button>
@@ -11224,16 +11257,16 @@ function renderSpelling() {
     <section class="spelling-shell" data-spelling-font="${escapeHtml(spelling.preferences.font)}" data-spelling-spacing="${escapeHtml(spelling.preferences.spacing)}" data-spelling-tint="${escapeHtml(spelling.preferences.tint)}">
       <article class="spelling-stage-header">
         <div>
-          <p class="eyebrow">Spelling</p>
+          <p class="eyebrow">Spelling Stables</p>
           <div class="spelling-hero__title-row">
-            <h3>${escapeHtml(SPELLING_UNIT_SEED.title)}</h3>
+            <h3>Spelling Stables</h3>
             <span class="spelling-hero__stage">Stage ${escapeHtml(String(stageIndex + 1))} · ${escapeHtml(SPELLING_STAGE_LABELS[stageId])}</span>
           </div>
           <p>${escapeHtml(SPELLING_UNIT_SEED.intro)}</p>
         </div>
         <div class="spelling-progress-copy spelling-progress-copy--compact">
-          <strong>${escapeHtml(`${completedCount}/${totalCount} ribbons earned`)}</strong>
-          <span>${escapeHtml(`${masteryPercent}% complete`)}</span>
+          <strong>${escapeHtml(`${completedCount} of ${totalCount} ribbons earned`)}</strong>
+          <span>${escapeHtml(`${masteryPercent}% mastery so far`)}</span>
           <div class="spelling-stage-actions spelling-stage-actions--compact">
             <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-unit="true">Reset all stages</button>
           </div>
@@ -11292,7 +11325,7 @@ function renderSpelling() {
       <article class="spelling-coach-card">
         <span class="spelling-coach-card__icon">Aa</span>
         <div>
-          <strong>Current focus</strong>
+          <strong>Teaching note</strong>
           <p>${escapeHtml(spelling.coachMessage)}</p>
         </div>
       </article>
