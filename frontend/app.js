@@ -4206,6 +4206,7 @@ function createDefaultSpellingState(subjectId = "") {
       currentWordId: "",
       completed: false
     },
+    homeTab: "stable",
     selectedStageId: "",
     celebrationStageId: "",
     sessionCompletionReady: false,
@@ -4356,6 +4357,7 @@ function normaliseSpellingState(spelling, subjectId = "") {
       currentWordId: isCurrentTenseTransferVersion ? String(tenseTransfer.currentWordId || "") : "",
       completed: isCurrentTenseTransferVersion ? Boolean(tenseTransfer.completed) : false
     },
+    homeTab: ["session", "stable", "progress", "review"].includes(String(next.homeTab || "")) ? String(next.homeTab || "") : "stable",
     selectedStageId: SPELLING_STAGE_ORDER.includes(String(next.selectedStageId || "")) ? String(next.selectedStageId || "") : "",
     celebrationStageId: SPELLING_STAGE_ORDER.includes(String(next.celebrationStageId || "")) ? String(next.celebrationStageId || "") : "",
     sessionCompletionReady: Boolean(next.sessionCompletionReady),
@@ -4695,6 +4697,7 @@ function resetSpellingProgressForNewAttempt(spelling) {
     currentWordId: "",
     completed: false
   };
+  spelling.homeTab = "stable";
   spelling.selectedStageId = "";
   spelling.celebrationStageId = "";
   spelling.sessionCompletionReady = false;
@@ -4759,6 +4762,15 @@ function getSpellingVisibleStageId(subject) {
   return getSpellingStageId(subject);
 }
 
+function setSpellingHomeTab(subject, tabId) {
+  const spelling = getSubjectSpellingState(subject);
+  if (!["session", "stable", "progress", "review"].includes(String(tabId || ""))) {
+    return;
+  }
+  spelling.homeTab = String(tabId);
+  persistSubjects();
+}
+
 function setSpellingSelectedStage(subject, stageId) {
   const spelling = getSubjectSpellingState(subject);
   if (!SPELLING_STAGE_ORDER.includes(stageId)) {
@@ -4769,6 +4781,7 @@ function setSpellingSelectedStage(subject, stageId) {
   if (nextStageIndex > unlockedStageIndex) {
     return;
   }
+  spelling.homeTab = "session";
   spelling.selectedStageId = stageId;
   spelling.celebrationStageId = "";
   persistSubjects();
@@ -4776,6 +4789,7 @@ function setSpellingSelectedStage(subject, stageId) {
 
 function celebrateSpellingStage(subject, stageId, coachMessage) {
   const spelling = getSubjectSpellingState(subject);
+  spelling.homeTab = "session";
   spelling.selectedStageId = stageId;
   spelling.celebrationStageId = stageId;
   spelling.sessionCompletionReady = false;
@@ -4787,6 +4801,7 @@ function celebrateSpellingStage(subject, stageId, coachMessage) {
 
 function continueSpellingStage(subject) {
   const spelling = getSubjectSpellingState(subject);
+  spelling.homeTab = "session";
   const celebrationStageId = String(spelling.celebrationStageId || "");
   const celebrationStageIndex = SPELLING_STAGE_ORDER.indexOf(celebrationStageId);
   if (celebrationStageId === "tense-transfer" && SPELLING_STAGE_ORDER.every((stageId) => getSpellingStageCompletionMap(subject)[stageId])) {
@@ -4809,6 +4824,7 @@ function continueSpellingStage(subject) {
 function finishSpellingSession(subject) {
   const spelling = getSubjectSpellingState(subject);
   resetSpellingProgressForNewAttempt(spelling);
+  spelling.homeTab = "stable";
   spelling.sessionPreparedKey = currentSpellingSessionKey;
   persistSubjects();
 }
@@ -5337,6 +5353,7 @@ function resetSpellingActivity(subject, activityId) {
   } else {
     subject.spelling = createDefaultSpellingState(subject.id);
   }
+  spelling.homeTab = activityId === "diagnostic" ? "stable" : "session";
   spelling.selectedStageId = "";
   spelling.celebrationStageId = "";
   spelling.sessionCompletionReady = false;
@@ -5643,6 +5660,216 @@ function buildSpellingPaddockMarkup(spelling) {
         <div class="ss-stall-grid">${stallMarkup}</div>
       </div>
     </section>
+  `;
+}
+
+function buildSpellingSurfaceTabs(activeTab) {
+  const tabs = [
+    { id: "session", label: "Session" },
+    { id: "stable", label: "Paddock & stalls" },
+    { id: "progress", label: "Progress" },
+    { id: "review", label: "Review" }
+  ];
+
+  return `
+    <div class="ss-surface-tabs" role="tablist" aria-label="Spelling views">
+      ${tabs
+        .map(
+          (tab) => `
+            <button
+              type="button"
+              class="ss-surface-tab${tab.id === activeTab ? " is-active" : ""}"
+              data-spelling-home-tab="${tab.id}"
+            >
+              ${escapeHtml(tab.label)}
+            </button>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function buildSpellingSessionProgressCard(subject, spelling, currentStageId = getSpellingStageId(subject)) {
+  const completionMap = getSpellingStageCompletionMap(subject);
+  return `
+    <section class="ss-side-card">
+      <p class="eyebrow">Set progress</p>
+      <h4>Earn 4 ribbons to win a horse.</h4>
+      <div class="ss-progress-list">
+        ${SPELLING_STAGE_ORDER
+          .map((stageId, index) => {
+            const isComplete = completionMap[stageId];
+            const isCurrent = !isComplete && currentStageId === stageId;
+            const status = isComplete ? "Earned" : isCurrent ? "In progress" : "Locked";
+            return `
+              <article class="ss-progress-row${isComplete ? " is-complete" : isCurrent ? " is-current" : ""}">
+                <span class="ss-progress-token">${isComplete ? "✓" : index + 1}</span>
+                <div class="ss-progress-copy">
+                  <strong>${escapeHtml(SPELLING_STAGE_LABELS[stageId])}</strong>
+                  <span>${escapeHtml(status)}</span>
+                </div>
+              </article>
+            `;
+          })
+          .join("")}
+      </div>
+    </section>
+  `;
+}
+
+function buildSpellingReviewBacklogCard(spelling) {
+  const words = (getSpellingFollowUpWords(spelling).length ? getSpellingFollowUpWords(spelling) : getSpellingAttemptWords(spelling)).slice(0, 3);
+  return `
+    <section class="ss-side-card">
+      <p class="eyebrow">Review backlog</p>
+      <h4>Words coming back soon</h4>
+      <div class="ss-backlog-list">
+        ${words
+          .map((entry, index) => `
+            <article class="ss-backlog-row">
+              <strong>${escapeHtml(entry.word)}</strong>
+              <span>${escapeHtml(index === 0 ? "due now" : SPELLING_UNIT_SEED.reviewDays[Math.min(index, SPELLING_UNIT_SEED.reviewDays.length - 1)])}</span>
+            </article>
+          `)
+          .join("")}
+      </div>
+    </section>
+  `;
+}
+
+function buildSpellingHorsePreviewCard(spelling) {
+  const nextHorse = SPELLING_PADDOCK_HORSES[(spelling.paddockHorses || []).length] || null;
+  if (!nextHorse) {
+    return `
+      <section class="ss-side-card">
+        <p class="eyebrow">Stable full</p>
+        <h4>All horses unlocked</h4>
+        <p class="ss-stage-copy">Keep finishing sessions to strengthen review, even though the stable is already complete.</p>
+      </section>
+    `;
+  }
+
+  return `
+    <section class="ss-side-card ss-side-card--horse-preview">
+      <div class="ss-horse-preview">
+        <img src="${escapeHtml(nextHorse.image)}" alt="${escapeHtml(nextHorse.name)}" />
+      </div>
+      <strong>${escapeHtml(`${nextHorse.name} is waiting`)}</strong>
+      <span>${escapeHtml(`Earn the 4th ribbon to add this ${nextHorse.label} to your stable.`)}</span>
+    </section>
+  `;
+}
+
+function buildSpellingHomeOverview(subject, spelling) {
+  const currentStageId = getSpellingStageId(subject);
+  const currentStageLabel = SPELLING_STAGE_LABELS[currentStageId] || "Diagnostic";
+  const isFreshSession = !spelling.diagnostic.completed && !Object.keys(spelling.diagnostic.responses || {}).length;
+  return `
+    <section class="ss-home-stack">
+      <article class="ss-stage-panel">
+        <div class="ss-stage-panel__head">
+          <div>
+            <p class="eyebrow">Spelling Stables</p>
+            <h4>${escapeHtml(isFreshSession ? "Ready to begin a new set" : `Continue with ${currentStageLabel}`)}</h4>
+          </div>
+          <span class="ss-stage-badge">${escapeHtml(`${(spelling.paddockHorses || []).length} / ${SPELLING_PADDOCK_HORSES.length} horses`)}</span>
+        </div>
+        <p class="ss-stage-copy">${escapeHtml(SPELLING_UNIT_SEED.intro)}</p>
+        <div class="ss-stage-actions">
+          <button type="button" class="primary-button primary-button--dark" data-spelling-begin-session="true">${escapeHtml(isFreshSession ? "Start spelling session" : `Continue to ${currentStageLabel}`)}</button>
+        </div>
+      </article>
+      ${buildSpellingSessionProgressCard(subject, spelling, currentStageId)}
+    </section>
+  `;
+}
+
+function buildSpellingStableHome(subject, spelling) {
+  return `
+    <div class="ss-home-panel ss-home-panel--stable">
+      <div class="ss-main">
+        ${buildSpellingPaddockMarkup(spelling)}
+      </div>
+      <aside class="ss-side">
+        ${buildSpellingHomeOverview(subject, spelling)}
+        ${buildSpellingReviewBacklogCard(spelling)}
+      </aside>
+    </div>
+  `;
+}
+
+function buildSpellingProgressHome(subject, spelling) {
+  const stageScoreSummary = getSpellingStageScoreSummary(spelling);
+  return `
+    <div class="ss-home-panel">
+      <div class="ss-main">
+        <article class="ss-stage-panel">
+          <div class="ss-stage-panel__head">
+            <div>
+              <p class="eyebrow">Progress</p>
+              <h4>Stage results so far</h4>
+            </div>
+            <span class="ss-stage-badge">${escapeHtml(`${getSpellingOverallScorePercent(spelling)}% overall`)}</span>
+          </div>
+          <div class="ss-review-list">
+            ${Object.entries(stageScoreSummary)
+              .map(([stageKey, stageScore]) => `
+                <article class="ss-review-row${getSpellingStageScorePercent(spelling, stageKey) >= 50 ? " is-correct" : " is-incorrect"}">
+                  <div>
+                    <strong>${escapeHtml(stageScore.label)}</strong>
+                    <span>${escapeHtml(`${stageScore.correct}/${stageScore.total} · ${getSpellingStageScorePercent(spelling, stageKey)}%`)}</span>
+                  </div>
+                  <span class="ss-review-mark">${getSpellingStageScorePercent(spelling, stageKey) >= 50 ? "✓" : "✕"}</span>
+                </article>
+              `)
+              .join("")}
+          </div>
+        </article>
+      </div>
+      <aside class="ss-side">
+        ${buildSpellingSessionProgressCard(subject, spelling)}
+        ${buildSpellingHorsePreviewCard(spelling)}
+      </aside>
+    </div>
+  `;
+}
+
+function buildSpellingReviewHome(subject, spelling) {
+  return `
+    <div class="ss-home-panel">
+      <div class="ss-main">
+        <article class="ss-stage-panel">
+          <div class="ss-stage-panel__head">
+            <div>
+              <p class="eyebrow">Review</p>
+              <h4>Spaced practice rhythm</h4>
+            </div>
+          </div>
+          <div class="spelling-review-card__days ss-review-days-large">
+            ${SPELLING_UNIT_SEED.reviewDays.map((dayLabel, index) => `<span class="${index === 0 ? "is-done" : index === 1 ? "is-next" : ""}">${escapeHtml(dayLabel)}</span>`).join("")}
+          </div>
+          <p class="ss-stage-copy">We&rsquo;ll bring these ten words back on this rhythm so they stick.</p>
+          <div class="ss-review-list">
+            ${(getSpellingFollowUpWords(spelling).length ? getSpellingFollowUpWords(spelling) : getSpellingAttemptWords(spelling))
+              .slice(0, 10)
+              .map((entry, index) => `
+                <article class="ss-review-row">
+                  <div>
+                    <strong>${escapeHtml(entry.word)}</strong>
+                    <span>${escapeHtml(index === 0 ? "due now" : SPELLING_UNIT_SEED.reviewDays[Math.min(index, SPELLING_UNIT_SEED.reviewDays.length - 1)])}</span>
+                  </div>
+                </article>
+              `)
+              .join("")}
+          </div>
+        </article>
+      </div>
+      <aside class="ss-side">
+        ${buildSpellingSessionProgressCard(subject, spelling)}
+        ${buildSpellingHorsePreviewCard(spelling)}
+      </aside>
+    </div>
   `;
 }
 
@@ -10964,6 +11191,7 @@ function renderSpelling() {
   const stageScoreSummary = getSpellingStageScoreSummary(spelling);
   const overallScorePercent = getSpellingOverallScorePercent(spelling);
   const ownedHorseMeta = getSpellingOwnedHorseMeta(spelling);
+  const homeTab = String(spelling.homeTab || "stable");
 
   if (spelling.challenge.active || (spelling.challenge.completed && spelling.challenge.lastCompletedWeekKey === currentWeekKey())) {
     const currentChallengeItem = getSpellingChallengeCurrentItem(spelling);
@@ -11081,6 +11309,54 @@ function renderSpelling() {
     return;
   }
 
+  if (homeTab !== "session" && !showingCelebration && !spelling.sessionCompletionReady) {
+    const homeBody = homeTab === "progress"
+      ? buildSpellingProgressHome(subject, spelling)
+      : homeTab === "review"
+        ? buildSpellingReviewHome(subject, spelling)
+        : homeTab === "session"
+          ? buildSpellingHomeOverview(subject, spelling)
+          : buildSpellingStableHome(subject, spelling);
+
+    host.innerHTML = `
+      <section class="ss-root spelling-shell" data-spelling-font="${escapeHtml(spelling.preferences.font)}" data-spelling-spacing="${escapeHtml(spelling.preferences.spacing)}" data-spelling-tint="${escapeHtml(spelling.preferences.tint)}">
+        <article class="ss-hero">
+          <div class="ss-hero__copy">
+            <p class="eyebrow">Spelling Stables</p>
+            <div class="spelling-hero__title-row">
+              <h3>Your stable</h3>
+              <span class="spelling-hero__stage">${escapeHtml(`${ownedHorseMeta.length} horse${ownedHorseMeta.length === 1 ? "" : "s"} earned`)}</span>
+            </div>
+            <p>Earn ribbons, grow the paddock, and return to the same words on a spaced rhythm.</p>
+          </div>
+          <div class="ss-hero__meta">
+            <strong>${escapeHtml(`${completedCount} of ${totalCount} ribbons earned`)}</strong>
+            <span>${escapeHtml(`${masteryPercent}% mastery so far`)}</span>
+            <span>${escapeHtml(`${SPELLING_UNIT_SEED.diagnosticTargetCount}-word sets`)}</span>
+          </div>
+        </article>
+
+        ${buildSpellingSurfaceTabs(homeTab)}
+
+        ${homeBody}
+      </section>
+    `;
+
+    setupSpellingPaddockInteractions(subject, host);
+
+    host.querySelectorAll("[data-spelling-home-tab]").forEach((button) => {
+      button.addEventListener("click", () => {
+        setSpellingHomeTab(subject, button.dataset.spellingHomeTab);
+        render();
+      });
+    });
+    host.querySelector("[data-spelling-begin-session]")?.addEventListener("click", () => {
+      setSpellingHomeTab(subject, "session");
+      render();
+    });
+    return;
+  }
+
   if (stageId === "diagnostic" && !spelling.diagnostic.completed && !showingCelebration) {
     host.innerHTML = `
       <section class="ss-root spelling-shell" data-spelling-font="${escapeHtml(spelling.preferences.font)}" data-spelling-spacing="${escapeHtml(spelling.preferences.spacing)}" data-spelling-tint="${escapeHtml(spelling.preferences.tint)}">
@@ -11099,6 +11375,7 @@ function renderSpelling() {
             <span>${escapeHtml(`${getSpellingHorseRankLabel(ownedHorseMeta.length)} rank`)}</span>
           </div>
         </article>
+        ${buildSpellingSurfaceTabs("session")}
         <section class="spelling-stage-rail ss-ribbon-rail" aria-label="Spelling stages">
           ${SPELLING_STAGE_ORDER
             .map(
@@ -11155,22 +11432,21 @@ function renderSpelling() {
                 </button>
               </div>
             </article>
-          </div>
+        </div>
           <aside class="ss-side">
-            ${buildSpellingPaddockMarkup(spelling)}
-            <section class="ss-side-card">
-              <p class="eyebrow">Review rhythm</p>
-              <h4>Spaced review</h4>
-              <div class="spelling-review-card__days">
-                ${SPELLING_UNIT_SEED.reviewDays.map((dayLabel) => `<span>${escapeHtml(dayLabel)}</span>`).join("")}
-              </div>
-            </section>
+            ${buildSpellingSessionProgressCard(subject, spelling, stageId)}
+            ${buildSpellingHorsePreviewCard(spelling)}
           </aside>
         </div>
       </section>
     `;
 
-    setupSpellingPaddockInteractions(subject, host);
+    host.querySelectorAll("[data-spelling-home-tab]").forEach((button) => {
+      button.addEventListener("click", () => {
+        setSpellingHomeTab(subject, button.dataset.spellingHomeTab);
+        render();
+      });
+    });
 
     host.querySelector("[data-spelling-play-diagnostic]")?.addEventListener("click", () => {
       const input = host.querySelector("#spelling-diagnostic-input");
@@ -11705,6 +11981,8 @@ function renderSpelling() {
         <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-unit="true">Reset all stages</button>
       </section>
 
+      ${buildSpellingSurfaceTabs("session")}
+
       <section class="spelling-stage-rail ss-ribbon-rail" aria-label="Spelling stages">
         ${SPELLING_STAGE_ORDER
           .map(
@@ -11749,23 +12027,9 @@ function renderSpelling() {
         </div>
 
         <aside class="ss-side">
-          ${buildSpellingPaddockMarkup(spelling)}
-          <section class="ss-side-card">
-            <p class="eyebrow">Review rhythm</p>
-            <h4>Spaced review</h4>
-            <div class="spelling-review-card__days">
-              ${SPELLING_UNIT_SEED.reviewDays
-                .map((dayLabel, index) => `<span class="${index <= completedCount ? "is-done" : index === completedCount + 1 ? "is-next" : ""}">${escapeHtml(dayLabel)}</span>`)
-                .join("")}
-            </div>
-          </section>
-          <section class="ss-side-card">
-            <p class="eyebrow">Current words</p>
-            <h4>Words in this session</h4>
-            <div class="spelling-skill-list">
-              ${(followUpWords.length ? followUpWords : attemptWords).map((entry) => `<span class="spelling-skill">${escapeHtml(entry.word)}</span>`).join("")}
-            </div>
-          </section>
+          ${buildSpellingSessionProgressCard(subject, spelling, stageId)}
+          ${buildSpellingReviewBacklogCard(spelling)}
+          ${buildSpellingHorsePreviewCard(spelling)}
         </aside>
       </div>
     </section>
@@ -11789,6 +12053,13 @@ function renderSpelling() {
   host.querySelector("[data-spelling-finish-session]")?.addEventListener("click", () => {
     finishSpellingSession(subject);
     render();
+  });
+
+  host.querySelectorAll("[data-spelling-home-tab]").forEach((button) => {
+    button.addEventListener("click", () => {
+      setSpellingHomeTab(subject, button.dataset.spellingHomeTab);
+      render();
+    });
   });
 
   host.querySelectorAll("[data-spelling-open-stage]").forEach((button) => {

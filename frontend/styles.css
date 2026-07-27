@@ -6689,11 +6689,51 @@ input[type="date"] {
   gap: 12px;
 }
 
+.ss-surface-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ss-surface-tab {
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,0.72);
+  color: var(--soft);
+  min-height: 40px;
+  padding: 9px 16px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ss-surface-tab.is-active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
 .ss-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.9fr);
   gap: 18px;
   align-items: start;
+}
+
+.ss-home-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.ss-home-stack {
+  display: grid;
+  gap: 18px;
+}
+
+.ss-home-panel--stable .ss-main {
+  gap: 0;
 }
 
 .ss-main,
@@ -6776,6 +6816,22 @@ input[type="date"] {
   letter-spacing: -0.02em;
 }
 
+.ss-side-card--horse-preview {
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+  text-align: center;
+}
+
+.ss-side-card--horse-preview strong {
+  color: var(--ink);
+}
+
+.ss-side-card--horse-preview span {
+  color: var(--soft);
+  font-size: 14px;
+}
+
 .ss-rank-pill {
   display: inline-flex;
   min-height: 40px;
@@ -6787,6 +6843,96 @@ input[type="date"] {
   color: var(--accent);
   font-size: 13px;
   font-weight: 800;
+}
+
+.ss-progress-list,
+.ss-backlog-list {
+  display: grid;
+}
+
+.ss-progress-row,
+.ss-backlog-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(46, 42, 51, 0.08);
+}
+
+.ss-progress-row:last-child,
+.ss-backlog-row:last-child {
+  border-bottom: 0;
+}
+
+.ss-progress-token {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--line);
+  color: var(--soft);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ss-progress-row.is-current .ss-progress-token {
+  border-style: solid;
+  border-color: var(--accent);
+  color: var(--accent);
+  background: #fff;
+}
+
+.ss-progress-row.is-complete .ss-progress-token {
+  border-style: solid;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.ss-progress-copy,
+.ss-backlog-row {
+  justify-content: space-between;
+  width: 100%;
+}
+
+.ss-progress-copy {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ss-progress-copy strong,
+.ss-backlog-row strong {
+  color: var(--ink);
+  font-size: 15px;
+}
+
+.ss-progress-copy span,
+.ss-backlog-row span {
+  color: var(--soft);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.ss-horse-preview {
+  width: 100%;
+  min-height: 132px;
+  border-radius: 18px;
+  background: radial-gradient(120% 120% at 50% 30%, #efeaf1, #ddd2e4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ss-horse-preview img {
+  width: 128px;
+  height: 96px;
+  object-fit: contain;
+  filter: drop-shadow(0 10px 14px rgba(50, 34, 60, 0.18));
 }
 
 .ss-paddock-frame {
@@ -7371,9 +7517,14 @@ input[type="date"] {
   background: rgba(94, 125, 99, 0.08);
 }
 
+.ss-review-days-large {
+  margin-top: 4px;
+}
+
 @media (max-width: 1080px) {
   .ss-hero,
-  .ss-layout {
+  .ss-layout,
+  .ss-home-panel {
     grid-template-columns: 1fr;
   }
 }
