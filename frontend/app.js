@@ -1088,6 +1088,7 @@ const state = {
   currentUserPoints: 0,
   authMode: "signin",
   authPending: false,
+  authViewOpen: true,
   selectedSubjectId: subjectSeed[0].id,
   activeSubjectTab: "reader",
   focusMode: window.localStorage.getItem(FOCUS_MODE_STORAGE_KEY) === "on",
@@ -6937,6 +6938,7 @@ function setFocusMode(on) {
 
 function openDashboard(nextView = "home") {
   setAuthPending(false);
+  state.authViewOpen = false;
   elements.landingPanel.classList.add("hidden");
   elements.appShell.classList.remove("hidden");
   elements.welcomeHeading.textContent = "";
@@ -6966,6 +6968,7 @@ function resetRevisionState() {
 
 function showLanding() {
   setAuthPending(false);
+  state.authViewOpen = true;
   stopListening();
   stopAskMicrophone({ preserveStatus: true });
   closeUpcomingModal();
@@ -7370,7 +7373,11 @@ function renderOverview() {
 function renderCurrentView() {
   elements.appBrandTag.textContent = "";
   elements.welcomeHeading.textContent = "";
-  elements.appShell.classList.toggle("hidden", state.currentView === "task" || state.currentView === "revision");
+  elements.landingPanel.classList.toggle("hidden", !state.authViewOpen);
+  elements.appShell.classList.toggle(
+    "hidden",
+    state.authViewOpen || state.currentView === "task" || state.currentView === "revision"
+  );
   elements.appShell.classList.toggle("focus-mode", state.focusMode);
   elements.homeView.classList.toggle("hidden", state.currentView !== "home");
   elements.settingsView.classList.toggle("hidden", state.currentView !== "settings");
