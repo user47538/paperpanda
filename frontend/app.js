@@ -5608,7 +5608,7 @@ function buildSpellingLooksRightOptions(spelling, entry) {
 function buildSpellingPaddockMarkup(spelling) {
   const ownedHorses = getSpellingOwnedHorseMeta(spelling);
   const stalls = ownedHorses.length ? ownedHorses : [];
-  const stallCount = Math.max(4, stalls.length || 0);
+  const stallCount = Math.max(6, stalls.length || 0);
   const stallMarkup = Array.from({ length: stallCount }, (_, index) => {
     const horse = stalls[index] || null;
     const stateEntry = horse?.state || buildDefaultSpellingPaddockEntry(index);
@@ -5641,22 +5641,15 @@ function buildSpellingPaddockMarkup(spelling) {
     .join("");
 
   return `
-    <section class="ss-stable-card">
-      <div class="ss-stable-banner" aria-hidden="true"></div>
-      <div class="ss-section-head">
-        <div>
-          <p class="eyebrow">Paddock and stables</p>
-          <h4>${escapeHtml(ownedHorses.length ? `${ownedHorses.length} horses earned` : "Earn a horse to open the stable" )}</h4>
-        </div>
-        <span class="ss-rank-pill">${escapeHtml(getSpellingHorseRankLabel(ownedHorses.length))}</span>
-      </div>
+    <section class="ss-stable-card ss-stable-card--full">
       <div class="ss-paddock-frame pf-frame" data-spelling-paddock-frame="true">
         <div class="ss-paddock-stage" data-spelling-paddock-stage="true">
-          <div class="ss-paddock-copy">
-            <strong>Paddock</strong>
-            <span>Tap a horse to send it out. Drag it to move around the paddock, then tap again to return it.</span>
-          </div>
+          <div class="ss-paddock-callout">Tap a horse from the stalls to bring it into the paddock, then drag it anywhere</div>
           ${roamingMarkup}
+        </div>
+        <div class="ss-stalls-head">
+          <h4>The stalls</h4>
+          <span>Tap a horse to send it out · tap it again in the paddock to bring it back</span>
         </div>
         <div class="ss-stall-grid">${stallMarkup}</div>
       </div>
@@ -5792,10 +5785,6 @@ function buildSpellingStableHome(subject, spelling) {
       <div class="ss-main">
         ${buildSpellingPaddockMarkup(spelling)}
       </div>
-      <aside class="ss-side">
-        ${buildSpellingHomeOverview(subject, spelling)}
-        ${buildSpellingReviewBacklogCard(spelling)}
-      </aside>
     </div>
   `;
 }
