@@ -7035,23 +7035,23 @@ input[type="date"] {
 
 .ss-stall-inner {
   position: absolute;
-  top: 2px;
+  top: 0;
   left: 0;
   right: 0;
-  height: 84px;
+  height: 72px;
   overflow: hidden;
   display: flex;
   justify-content: center;
-  align-items: flex-end;
+  align-items: flex-start;
   z-index: 1;
 }
 
 .ss-stall-bars {
   position: absolute;
-  top: 58px;
+  top: 52px;
   left: 0;
   right: 0;
-  height: 24px;
+  height: 28px;
   z-index: 2;
   border-top: 3px solid var(--iron);
   background: repeating-linear-gradient(90deg, transparent 0 9px, var(--iron) 9px 12px);
@@ -7107,10 +7107,10 @@ input[type="date"] {
 }
 
 .ss-horse--stall {
-  width: 148px;
-  height: 148px;
+  width: 164px;
+  height: 186px;
   object-fit: contain;
-  object-position: center bottom;
+  object-position: center top;
   display: block;
   cursor: pointer;
   filter: drop-shadow(0 10px 10px rgba(20, 30, 18, 0.14));
