@@ -6692,25 +6692,40 @@ input[type="date"] {
 .ss-surface-tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 24px;
+  align-items: center;
+  padding: 0 2px 12px;
+  border-bottom: 1px solid var(--line);
 }
 
 .ss-surface-tab {
-  border: 1px solid var(--line);
-  background: rgba(255,255,255,0.72);
+  position: relative;
+  padding: 0 0 10px;
+  border: 0;
+  background: transparent;
   color: var(--soft);
-  min-height: 40px;
-  padding: 9px 16px;
-  border-radius: 999px;
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 15px;
+  font-weight: 700;
   cursor: pointer;
 }
 
+.ss-surface-tab::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -13px;
+  height: 3px;
+  border-radius: 999px;
+  background: transparent;
+}
+
 .ss-surface-tab.is-active {
-  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ss-surface-tab.is-active::after {
   background: var(--accent);
-  color: #fff;
 }
 
 .ss-layout {
@@ -7851,6 +7866,13 @@ input[type="date"] {
 
   .ss-hero {
     gap: 14px;
+  }
+
+  .ss-surface-tabs {
+    gap: 16px;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    padding-bottom: 10px;
   }
 
   .ss-hero__meta {

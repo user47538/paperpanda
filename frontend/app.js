@@ -2969,6 +2969,10 @@ function renderFocusAskFab() {
 
 function renderFocusMode() {
   const askOpen = state.focusMode && state.currentView === "subjects" && state.focusAskOpen;
+  if (state.focusMode && state.currentView === "subjects" && !state.focusArea && !askOpen && getSelectedSubject()?.id === "spelling") {
+    state.activeSubjectTab = "spelling";
+    state.focusArea = "spelling";
+  }
   const showLaunchpad = state.focusMode && state.currentView === "subjects" && !state.focusArea && !askOpen;
   const drilledIn = state.focusMode && state.currentView === "subjects" && Boolean(state.focusArea) && !askOpen;
   const readerDrilled = drilledIn && state.focusArea === "reader";
@@ -11409,22 +11413,6 @@ function renderSpelling() {
 
     host.innerHTML = `
       <section class="ss-root spelling-shell" data-spelling-font="${escapeHtml(spelling.preferences.font)}" data-spelling-spacing="${escapeHtml(spelling.preferences.spacing)}" data-spelling-tint="${escapeHtml(spelling.preferences.tint)}">
-        <article class="ss-hero">
-          <div class="ss-hero__copy">
-            <p class="eyebrow">Spelling Stables</p>
-            <div class="spelling-hero__title-row">
-              <h3>Your stable</h3>
-              <span class="spelling-hero__stage">${escapeHtml(`${ownedHorseMeta.length} horse${ownedHorseMeta.length === 1 ? "" : "s"} earned`)}</span>
-            </div>
-            <p>Earn ribbons, grow the paddock, and return to the same words on a spaced rhythm.</p>
-          </div>
-          <div class="ss-hero__meta">
-            <strong>${escapeHtml(`${completedCount} of ${totalCount} ribbons earned`)}</strong>
-            <span>${escapeHtml(`${masteryPercent}% mastery so far`)}</span>
-            <span>${escapeHtml(`${SPELLING_UNIT_SEED.diagnosticTargetCount}-word sets`)}</span>
-          </div>
-        </article>
-
         ${buildSpellingSurfaceTabs(homeTab)}
 
         ${homeBody}
@@ -11449,21 +11437,6 @@ function renderSpelling() {
   if (stageId === "diagnostic" && !spelling.diagnostic.completed && !showingCelebration) {
     host.innerHTML = `
       <section class="ss-root spelling-shell" data-spelling-font="${escapeHtml(spelling.preferences.font)}" data-spelling-spacing="${escapeHtml(spelling.preferences.spacing)}" data-spelling-tint="${escapeHtml(spelling.preferences.tint)}">
-        <article class="ss-hero">
-          <div class="ss-hero__copy">
-            <p class="eyebrow">Spelling Stables</p>
-            <div class="spelling-hero__title-row">
-              <h3>Spelling Stables</h3>
-              <span class="spelling-hero__stage">${escapeHtml(getSpellingHorseRankLabel(ownedHorseMeta.length))}</span>
-            </div>
-            <p>Spell what you hear, then move through looks right, word families, and tenses.</p>
-          </div>
-          <div class="ss-hero__meta">
-            <strong>${escapeHtml(`Word ${Math.min(spelling.diagnostic.currentIndex + 1, attemptWords.length)} of ${attemptWords.length}`)}</strong>
-            <span>${escapeHtml(`${ownedHorseMeta.length} horse${ownedHorseMeta.length === 1 ? "" : "s"} earned`)}</span>
-            <span>${escapeHtml(`${attemptWords.length}-word set`)}</span>
-          </div>
-        </article>
         ${buildSpellingSurfaceTabs("session")}
         <section class="spelling-stage-rail ss-ribbon-rail" aria-label="Spelling stages">
           ${SPELLING_STAGE_ORDER
@@ -12020,22 +11993,6 @@ function renderSpelling() {
 
   host.innerHTML = `
     <section class="ss-root spelling-shell" data-spelling-font="${escapeHtml(spelling.preferences.font)}" data-spelling-spacing="${escapeHtml(spelling.preferences.spacing)}" data-spelling-tint="${escapeHtml(spelling.preferences.tint)}">
-      <article class="ss-hero">
-        <div class="ss-hero__copy">
-          <p class="eyebrow">Spelling Stables</p>
-          <div class="spelling-hero__title-row">
-            <h3>Spelling Stables</h3>
-            <span class="spelling-hero__stage">${escapeHtml(getSpellingHorseRankLabel(ownedHorseMeta.length))}</span>
-          </div>
-          <p>Move through one clean stage at a time and earn a new horse at the end of the set.</p>
-        </div>
-        <div class="ss-hero__meta">
-          <strong>${escapeHtml(`${completedCount} of ${totalCount} ribbons earned`)}</strong>
-          <span>${escapeHtml(`${masteryPercent}% mastery so far`)}</span>
-          <span>${escapeHtml(`${ownedHorseMeta.length} horse${ownedHorseMeta.length === 1 ? "" : "s"} in the stable`)}</span>
-        </div>
-      </article>
-
       ${buildSpellingSurfaceTabs("session")}
 
       <section class="spelling-stage-rail ss-ribbon-rail" aria-label="Spelling stages">
