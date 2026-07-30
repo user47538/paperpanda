@@ -5001,10 +5001,11 @@ input[type="date"] {
   background: rgba(17, 17, 17, 0.18);
   backdrop-filter: blur(6px);
   z-index: 60;
+  pointer-events: none;
 }
 
 .focus-mode #subjects-view.focus-ask-open .workspace-main {
-  pointer-events: none;
+  pointer-events: auto;
 }
 
 .focus-mode #subjects-view.focus-ask-open .workspace-dock {

@@ -7465,6 +7465,7 @@ function setFocusMode(on) {
 function openDashboard(nextView = "home") {
   setAuthPending(false);
   state.authViewOpen = false;
+  state.focusAskOpen = false;
   elements.landingPanel.classList.add("hidden");
   elements.appShell.classList.remove("hidden");
   elements.welcomeHeading.textContent = "";
@@ -7897,6 +7898,9 @@ function renderOverview() {
 }
 
 function renderCurrentView() {
+  if (state.currentView !== "subjects") {
+    state.focusAskOpen = false;
+  }
   elements.appBrandTag.textContent = "";
   elements.welcomeHeading.textContent = "";
   elements.landingPanel.classList.toggle("hidden", !state.authViewOpen);
