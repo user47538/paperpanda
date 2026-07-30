@@ -11438,22 +11438,6 @@ function renderSpelling() {
     host.innerHTML = `
       <section class="ss-root spelling-shell" data-spelling-font="${escapeHtml(spelling.preferences.font)}" data-spelling-spacing="${escapeHtml(spelling.preferences.spacing)}" data-spelling-tint="${escapeHtml(spelling.preferences.tint)}">
         ${buildSpellingSurfaceTabs("session")}
-        <section class="spelling-stage-rail ss-ribbon-rail" aria-label="Spelling stages">
-          ${SPELLING_STAGE_ORDER
-            .map(
-              (levelId, index) => `
-                <button
-                  type="button"
-                  class="spelling-stage-pill${levelId === stageId ? " is-current" : ""}"
-                  ${index === 0 ? "" : "disabled"}
-                >
-                  <span>${index + 1}</span>
-                  <strong>${escapeHtml(SPELLING_STAGE_LABELS[levelId])}</strong>
-                </button>
-              `
-            )
-            .join("")}
-        </section>
         <div class="ss-layout">
           <div class="ss-main">
             <article class="ss-stage-panel ss-stage-panel--diagnostic">
@@ -11994,24 +11978,6 @@ function renderSpelling() {
   host.innerHTML = `
     <section class="ss-root spelling-shell" data-spelling-font="${escapeHtml(spelling.preferences.font)}" data-spelling-spacing="${escapeHtml(spelling.preferences.spacing)}" data-spelling-tint="${escapeHtml(spelling.preferences.tint)}">
       ${buildSpellingSurfaceTabs("session")}
-
-      <section class="spelling-stage-rail ss-ribbon-rail" aria-label="Spelling stages">
-        ${SPELLING_STAGE_ORDER
-          .map(
-            (levelId, index) => `
-              <button
-                type="button"
-                class="spelling-stage-pill${index < completedCount ? " is-complete" : ""}${levelId === stageId ? " is-current" : ""}"
-                data-spelling-open-stage="${levelId}"
-                ${index <= unlockedStageIndex ? "" : "disabled"}
-              >
-                <span>${index + 1}</span>
-                <strong>${escapeHtml(SPELLING_STAGE_LABELS[levelId])}</strong>
-              </button>
-            `
-          )
-          .join("")}
-      </section>
 
       <div class="ss-layout">
         <div class="ss-main">
