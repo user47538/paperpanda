@@ -6950,6 +6950,70 @@ input[type="date"] {
   font-weight: 500;
 }
 
+.ss-progress-ribbon {
+  position: relative;
+  flex: none;
+  width: 28px;
+  height: 42px;
+  display: inline-block;
+}
+
+.ss-progress-ribbon__straps,
+.ss-progress-ribbon__medal {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.ss-progress-ribbon__straps {
+  top: 0;
+  width: 20px;
+  height: 24px;
+}
+
+.ss-progress-ribbon__straps::before,
+.ss-progress-ribbon__straps::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  width: 8px;
+  height: 24px;
+  background: linear-gradient(180deg, #b14a3a, #a43c2e);
+  border-radius: 4px;
+}
+
+.ss-progress-ribbon__straps::before {
+  left: 1px;
+  transform: skewX(-16deg);
+}
+
+.ss-progress-ribbon__straps::after {
+  right: 1px;
+  transform: skewX(16deg);
+}
+
+.ss-progress-ribbon__medal {
+  bottom: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #f8d77a, #efbc4c 70%);
+  border: 2px solid #e3ab39;
+  box-shadow: inset 0 0 0 2px rgba(255, 244, 198, 0.46);
+}
+
+.ss-progress-ribbon__medal::before {
+  content: "★";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(194, 132, 25, 0.8);
+  font-size: 12px;
+  line-height: 1;
+}
+
 .ss-horse-preview {
   width: 100%;
   min-height: 132px;

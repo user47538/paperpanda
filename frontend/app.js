@@ -2819,6 +2819,9 @@ function renderSubjectFocusLaunchpad() {
     return;
   }
 
+  const englishSubject = state.subjects.find((item) => item.id === "english") || null;
+  const writingSubject = subject.id === "english" ? subject : subject.id === "spelling" ? englishSubject : null;
+
   const readerBundle = getAllDocumentBundles(subject).find((bundle) => !bundle.reviewed) || getAllDocumentBundles(subject)[0] || null;
   const homeworkBundle = getSubjectHomeworkBundles(subject)[0] || null;
   const watchItem = getSubjectWatchItems(subject)[0] || null;
@@ -2827,7 +2830,7 @@ function renderSubjectFocusLaunchpad() {
     reader: getAllDocumentBundles(subject).length,
     homework: getSubjectHomeworkBundles(subject).length,
     spelling: getSpellingPendingActivityCount(subject),
-    writing: getSubjectWritingPendingSectionCount(subject),
+    writing: writingSubject ? getSubjectWritingPendingSectionCount(writingSubject) : 0,
     watch: getSubjectWatchItems(subject).length,
     assessments: getActiveSubjectAssessments(subject).length
   };
@@ -2867,10 +2870,10 @@ function renderSubjectFocusLaunchpad() {
           meta: "Open the Spelling subject from the subject list to train this lesson.",
           action: "Aa Open spelling"
         },
-    writing: subject.id === "english"
+    writing: writingSubject
       ? {
           title: WRITING_STUDIO_TAB_LABEL,
-          meta: `${getSubjectWritingPendingSectionCount(subject)} section${getSubjectWritingPendingSectionCount(subject) === 1 ? "" : "s"} left · picture-book flow`,
+          meta: `${getSubjectWritingPendingSectionCount(writingSubject)} section${getSubjectWritingPendingSectionCount(writingSubject) === 1 ? "" : "s"} left · picture-book flow`,
           action: "✍ Open writing"
         }
       : {
@@ -2911,7 +2914,12 @@ function renderSubjectFocusLaunchpad() {
     .join("");
 
   const cards = FOCUS_AREAS
-    .filter((area) => getAvailableSubjectTabs(subject).includes(area.id))
+    .filter((area) => {
+      if (area.id === "writing" && subject.id === "spelling") {
+        return true;
+      }
+      return getAvailableSubjectTabs(subject).includes(area.id);
+    })
     .map((area) => {
     const preview = focusPreview[area.id];
     return `
@@ -5158,6 +5166,24 @@ function continueSpellingStage(subject) {
   persistSubjects();
 }
 
+function continueSpellingStageToTarget(subject, targetStageId = "") {
+  const normalizedTarget = String(targetStageId || "");
+  if (!normalizedTarget) {
+    continueSpellingStage(subject);
+    return;
+  }
+  const spelling = getSubjectSpellingState(subject);
+  spelling.homeTab = "session";
+  spelling.celebrationStageId = "";
+  spelling.sessionCompletionReady = false;
+  if (normalizedTarget === "repeat-check" || canOpenSpellingStage(subject, normalizedTarget)) {
+    spelling.selectedStageId = normalizedTarget;
+    persistSubjects();
+    return;
+  }
+  continueSpellingStage(subject);
+}
+
 function finishSpellingSession(subject) {
   const spelling = getSubjectSpellingState(subject);
   resetSpellingProgressForNewAttempt(spelling);
@@ -5314,7 +5340,8 @@ function getSpellingCelebrationCopy(subject, stageId) {
       eyebrow: "Ribbon earned",
       title: "Stage 1 complete",
       body: "The spelling profile is ready. Continue to the next spelling activity so the follow-up words can be narrowed to the patterns that still need attention.",
-      action: `Continue to ${getSpellingStageActionLabel(nextStageId)}`
+      action: `Continue to ${getSpellingStageActionLabel(nextStageId)}`,
+      nextStageId
     };
   }
   if (stageId === "looks-right") {
@@ -5323,7 +5350,8 @@ function getSpellingCelebrationCopy(subject, stageId) {
       eyebrow: "Ribbon earned",
       title: "Stage 2 complete",
       body: "The words that still look unstable have been identified. Continue to the next stage to rehearse them one at a time through word-family sentences.",
-      action: `Continue to ${getSpellingStageActionLabel(nextStageId)}`
+      action: `Continue to ${getSpellingStageActionLabel(nextStageId)}`,
+      nextStageId
     };
   }
   if (stageId === "word-families") {
@@ -5332,7 +5360,8 @@ function getSpellingCelebrationCopy(subject, stageId) {
       eyebrow: "Ribbon earned",
       title: "Stage 3 complete",
       body: "Those family clues held. Continue to the next spelling activity to check how the word changes across tense.",
-      action: `Continue to ${getSpellingStageActionLabel(nextStageId)}`
+      action: `Continue to ${getSpellingStageActionLabel(nextStageId)}`,
+      nextStageId
     };
   }
   if (stageId === "tense-transfer") {
@@ -5343,14 +5372,16 @@ function getSpellingCelebrationCopy(subject, stageId) {
       body: nextStageId === "repeat-check"
         ? "The tense check is complete. Continue to the final spelling check so you can compare the first dictation with what changed after the lesson."
         : "The tense check is complete. Continue to the next open spelling activity before the final check unlocks.",
-      action: `Continue to ${getSpellingStageActionLabel(nextStageId)}`
+      action: `Continue to ${getSpellingStageActionLabel(nextStageId)}`,
+      nextStageId
     };
   }
   return {
     eyebrow: "Final ribbon",
     title: "Stage 5 complete",
     body: "All five stages are complete. Continue to review the session summary, compare the two dictation checks, and then reset for the next spelling round.",
-    action: "Continue"
+    action: "Continue",
+    nextStageId: "repeat-check"
   };
 }
 
@@ -6194,7 +6225,7 @@ function buildSpellingSessionProgressCard(
             const isComplete = completionMap[stageId];
             const isCurrent = !isComplete && currentStageId === stageId;
             const isOpenable = canOpenSpellingStage(subject, stageId);
-            const status = isComplete ? "Earned" : isCurrent ? "In progress" : isOpenable ? "Ready" : "Locked";
+            const status = isCurrent ? "In progress" : isOpenable ? "Ready" : "Locked";
             return `
               <button
                 type="button"
@@ -6205,7 +6236,7 @@ function buildSpellingSessionProgressCard(
                 <span class="ss-progress-token">${isComplete ? "✓" : index + 1}</span>
                 <div class="ss-progress-copy">
                   <strong>${escapeHtml(SPELLING_STAGE_LABELS[stageId])}</strong>
-                  <span>${escapeHtml(status)}</span>
+                  ${isComplete ? '<span class="ss-progress-ribbon" aria-label="Ribbon earned"><span class="ss-progress-ribbon__straps"></span><span class="ss-progress-ribbon__medal"></span></span>' : `<span>${escapeHtml(status)}</span>`}
                 </div>
               </button>
             `;
@@ -12290,7 +12321,7 @@ function renderSpelling() {
               .join("")}
           </div>
           <div class="spelling-stage-actions spelling-stage-actions--centered">
-            <button type="button" class="primary-button primary-button--dark" data-spelling-continue-stage="true">${escapeHtml(celebrationCopy.action)}</button>
+            <button type="button" class="primary-button primary-button--dark" data-spelling-continue-stage="${escapeHtml(celebrationCopy.nextStageId || "")}">${escapeHtml(celebrationCopy.action)}</button>
           </div>
         </article>
       `
@@ -12301,7 +12332,7 @@ function renderSpelling() {
           <h4>${escapeHtml(celebrationCopy.title)}</h4>
           <p class="ss-stage-copy">${escapeHtml(celebrationCopy.body)}</p>
           <div class="spelling-stage-actions spelling-stage-actions--centered">
-            <button type="button" class="primary-button primary-button--dark" data-spelling-continue-stage="true">${escapeHtml(celebrationCopy.action)}</button>
+            <button type="button" class="primary-button primary-button--dark" data-spelling-continue-stage="${escapeHtml(celebrationCopy.nextStageId || "")}">${escapeHtml(celebrationCopy.action)}</button>
           </div>
         </article>
       `;
@@ -12773,7 +12804,7 @@ function renderSpelling() {
   });
 
   host.querySelector("[data-spelling-continue-stage]")?.addEventListener("click", () => {
-    continueSpellingStage(subject);
+    continueSpellingStageToTarget(subject, host.querySelector("[data-spelling-continue-stage]")?.dataset.spellingContinueStage || "");
     render();
   });
 
