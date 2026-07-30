@@ -6635,6 +6635,11 @@ input[type="date"] {
   box-shadow: 0 18px 32px rgba(46, 42, 51, 0.05);
 }
 
+.ss-root > .ss-hero,
+.spelling-hero {
+  display: none !important;
+}
+
 .ss-hero,
 .ss-note-card,
 .ss-side-card,
