@@ -4372,6 +4372,8 @@ function createDefaultWritingState(subjectId = "") {
     bookPreviewIndex: 0,
     coachMessage: enabled ? "Answer the three quick questions to begin your story." : "",
     activeSuggestion: null,
+    isGeneratingIllustrations: false,
+    illustrationError: "",
     sections: createDefaultWritingSections()
   };
 }
@@ -4395,6 +4397,8 @@ function normaliseWritingState(writing, subjectId = "") {
     currentSectionIndex: Math.max(0, Math.min(WRITING_STUDIO_SECTION_COUNT - 1, Number(next.currentSectionIndex || 0) || 0)),
     bookPreviewIndex: Math.max(0, Math.min(WRITING_STUDIO_SECTION_COUNT - 1, Number(next.bookPreviewIndex || 0) || 0)),
     coachMessage: String(next.coachMessage || base.coachMessage || ""),
+    isGeneratingIllustrations: Boolean(next.isGeneratingIllustrations),
+    illustrationError: String(next.illustrationError || ""),
     activeSuggestion: next.activeSuggestion && typeof next.activeSuggestion === "object"
       ? {
           sectionId: String(next.activeSuggestion.sectionId || ""),
@@ -4409,7 +4413,8 @@ function normaliseWritingState(writing, subjectId = "") {
         ? incoming.illustrationOptions
             .map((option, optionIndex) => ({
               id: String(option?.id || `${section.id}-option-${optionIndex + 1}`),
-              prompt: String(option?.prompt || "")
+              prompt: String(option?.prompt || ""),
+              imageUrl: String(option?.imageUrl || "")
             }))
             .filter((option) => option.prompt)
         : [];
@@ -5679,13 +5684,15 @@ function finaliseSpellingRepeatCheck(subject) {
   const unlockedHorse = overallScorePercent > 50 ? unlockSpellingPaddockHorse(spelling) : "";
   const unlockedHorseMeta = getSpellingPaddockHorseMeta(unlockedHorse);
   recordCompletedSpellingAttempt(subject);
-  celebrateSpellingStage(
-    subject,
-    "repeat-check",
-    unlockedHorse
-      ? `Final spelling check complete. You moved from ${initialScore}/${SPELLING_UNIT_SEED.diagnosticTargetCount} to ${repeatScore}/${SPELLING_UNIT_SEED.diagnosticTargetCount}. ${unlockedHorseMeta?.name || "A new horse"} has been added to the paddock.`
-      : `Final spelling check complete. You moved from ${initialScore}/${SPELLING_UNIT_SEED.diagnosticTargetCount} to ${repeatScore}/${SPELLING_UNIT_SEED.diagnosticTargetCount}.`
-  );
+  const completionMessage = unlockedHorse
+    ? `Final spelling check complete. You moved from ${initialScore}/${SPELLING_UNIT_SEED.diagnosticTargetCount} to ${repeatScore}/${SPELLING_UNIT_SEED.diagnosticTargetCount}. ${unlockedHorseMeta?.name || "A new horse"} has been added to the paddock.`
+    : `Final spelling check complete. You moved from ${initialScore}/${SPELLING_UNIT_SEED.diagnosticTargetCount} to ${repeatScore}/${SPELLING_UNIT_SEED.diagnosticTargetCount}.`;
+  resetSpellingProgressForNewAttempt(spelling);
+  spelling.homeTab = "stable";
+  spelling.sessionPreparedKey = currentSpellingSessionKey;
+  spelling.coachMessage = completionMessage;
+  spelling.lastUnlockedHorseId = unlockedHorse || spelling.lastUnlockedHorseId;
+  persistSubjects();
 }
 
 function recordCompletedSpellingAttempt(subject) {
@@ -6403,6 +6410,7 @@ function buildSpellingStableHome(subject, spelling) {
 
 function buildSpellingProgressHome(subject, spelling) {
   const stageScoreSummary = getSpellingStageScoreSummary(spelling);
+  const wordProgressRows = getSpellingWordProgressRows(spelling);
   return `
     <div class="ss-home-panel">
       <div class="ss-main">
@@ -6423,6 +6431,27 @@ function buildSpellingProgressHome(subject, spelling) {
                     <span>${escapeHtml(`${stageScore.correct}/${stageScore.total} · ${getSpellingStageScorePercent(spelling, stageKey)}%`)}</span>
                   </div>
                   <span class="ss-review-mark">${getSpellingStageScorePercent(spelling, stageKey) >= 50 ? "✓" : "✕"}</span>
+                </article>
+              `)
+              .join("")}
+          </div>
+        </article>
+        <article class="ss-stage-panel">
+          <div class="ss-stage-panel__head">
+            <div>
+              <p class="eyebrow">Word accuracy</p>
+              <h4>Compared from stage 1 to stage 5</h4>
+            </div>
+          </div>
+          <div class="ss-review-list">
+            ${wordProgressRows
+              .map((row) => `
+                <article class="ss-review-row ${escapeHtml(row.ratingClass)}">
+                  <div>
+                    <strong>${escapeHtml(row.word)}</strong>
+                    <span>${escapeHtml(`Stage 1: ${row.stageOneAttempt} · Stage 5: ${row.stageFiveAttempt}`)}</span>
+                  </div>
+                  <span class="ss-review-mark">${escapeHtml(row.rating)}</span>
                 </article>
               `)
               .join("")}
@@ -11720,7 +11749,8 @@ function buildWritingIllustrationOptions(writing, sectionIndex) {
     `AI option 3 · a close-up moment from ${clipText(baseText.toLowerCase(), 52)}`
   ].map((prompt, index) => ({
     id: `${section.id}-illustration-${index + 1}-${Math.abs(prompt.split("").reduce((total, character) => total + character.charCodeAt(0), 0))}`,
-    prompt
+    prompt,
+    imageUrl: ""
   }));
 }
 
@@ -11729,7 +11759,12 @@ function ensureWritingIllustrationOptions(writing, sectionIndex, { force = false
   if (!section) {
     return [];
   }
-  if (!force && Array.isArray(section.illustrationOptions) && section.illustrationOptions.length) {
+  if (
+    !force
+    && Array.isArray(section.illustrationOptions)
+    && section.illustrationOptions.length
+    && section.illustrationOptions.every((option) => String(option.imageUrl || "").trim())
+  ) {
     return section.illustrationOptions;
   }
   section.illustrationOptions = buildWritingIllustrationOptions(writing, sectionIndex);
@@ -11737,6 +11772,10 @@ function ensureWritingIllustrationOptions(writing, sectionIndex, { force = false
     section.selectedIllustrationId = section.illustrationOptions[0]?.id || "";
   }
   return section.illustrationOptions;
+}
+
+function hasWritingIllustrationImages(section) {
+  return Array.isArray(section?.illustrationOptions) && section.illustrationOptions.some((option) => String(option?.imageUrl || "").trim());
 }
 
 function getWritingSuggestionForText(text) {
@@ -11786,6 +11825,8 @@ function startWritingStory(subject) {
   writing.currentSectionIndex = 0;
   writing.bookPreviewIndex = 0;
   writing.view = "write";
+  writing.illustrationError = "";
+  writing.isGeneratingIllustrations = false;
   const firstSection = writing.sections[0];
   firstSection.text = firstSection.text || buildWritingOpeningSentence(writing.openingAnswers);
   updateWritingSuggestionState(writing, firstSection);
@@ -11823,7 +11864,72 @@ function dismissWritingSuggestion(subject) {
   persistSubjects({ skipRemoteSync: true });
 }
 
-function continueWritingToIllustration(subject) {
+function openWritingSection(subject, sectionIndex, view = "write") {
+  const writing = getSubjectWritingState(subject);
+  const nextIndex = Math.max(0, Math.min(WRITING_STUDIO_SECTION_COUNT - 1, Number(sectionIndex || 0) || 0));
+  writing.currentSectionIndex = nextIndex;
+  if (view === "book") {
+    writing.bookPreviewIndex = nextIndex;
+    writing.view = "book";
+  } else if (view === "illustrate") {
+    writing.view = "illustrate";
+  } else {
+    writing.view = "write";
+    updateWritingSuggestionState(writing, getWritingCurrentSection(writing));
+  }
+  writing.illustrationError = "";
+  persistSubjects({ skipRemoteSync: true });
+}
+
+async function loadWritingIllustrations(subject, { force = false } = {}) {
+  const writing = getSubjectWritingState(subject);
+  const section = getWritingCurrentSection(writing);
+  if (!section || !String(section.text || "").trim()) {
+    writing.illustrationError = "Write this section before generating illustrations.";
+    persistSubjects();
+    return [];
+  }
+  const baseOptions = ensureWritingIllustrationOptions(writing, writing.currentSectionIndex, { force });
+  if (!force && hasWritingIllustrationImages(section)) {
+    return section.illustrationOptions;
+  }
+  writing.isGeneratingIllustrations = true;
+  writing.illustrationError = "";
+  writing.view = "illustrate";
+  writing.coachMessage = "Generating illustration options for this section...";
+  persistSubjects({ skipRemoteSync: true });
+
+  const previousSection = writing.currentSectionIndex > 0 ? writing.sections[writing.currentSectionIndex - 1] : null;
+  try {
+    const payload = await requestApi("/api/writing/illustrations", {
+      storyTitle: writing.storyTitle,
+      sectionNumber: section.number,
+      sectionText: section.text,
+      openingAnswers: writing.openingAnswers,
+      previousSectionText: previousSection?.text || "",
+      prompts: baseOptions.map((option) => option.prompt)
+    });
+    const generatedOptions = Array.isArray(payload?.options) ? payload.options : [];
+    section.illustrationOptions = baseOptions.map((option, index) => ({
+      ...option,
+      imageUrl: String(generatedOptions[index]?.imageUrl || "")
+    }));
+    if (!section.illustrationOptions.some((option) => option.id === section.selectedIllustrationId)) {
+      section.selectedIllustrationId = section.illustrationOptions[0]?.id || "";
+    }
+    writing.coachMessage = "Pick the picture that matches your section best.";
+  } catch (error) {
+    writing.illustrationError = error instanceof Error ? error.message : "Illustrations could not be generated.";
+    writing.coachMessage = "Illustration generation failed. Try again in a moment.";
+  } finally {
+    writing.isGeneratingIllustrations = false;
+    persistSubjects();
+  }
+
+  return section.illustrationOptions;
+}
+
+async function continueWritingToIllustration(subject) {
   const writing = getSubjectWritingState(subject);
   const section = getWritingCurrentSection(writing);
   if (!section || !String(section.text || "").trim()) {
@@ -11831,17 +11937,13 @@ function continueWritingToIllustration(subject) {
     persistSubjects();
     return;
   }
-  ensureWritingIllustrationOptions(writing, writing.currentSectionIndex, { force: true });
   writing.view = "illustrate";
-  writing.coachMessage = "Pick the picture that matches your section best.";
-  persistSubjects();
+  persistSubjects({ skipRemoteSync: true });
+  await loadWritingIllustrations(subject, { force: !hasWritingIllustrationImages(section) });
 }
 
-function rerollWritingIllustrations(subject) {
-  const writing = getSubjectWritingState(subject);
-  ensureWritingIllustrationOptions(writing, writing.currentSectionIndex, { force: true });
-  writing.coachMessage = "Three new illustration options are ready.";
-  persistSubjects();
+async function rerollWritingIllustrations(subject) {
+  await loadWritingIllustrations(subject, { force: true });
 }
 
 function selectWritingIllustration(subject, illustrationId) {
@@ -11864,8 +11966,13 @@ function acceptWritingIllustration(subject) {
   if (!section.selectedIllustrationId) {
     section.selectedIllustrationId = section.illustrationOptions[0]?.id || "";
   }
+  const wasCompleted = Boolean(section.completed);
   section.completed = true;
-  if (writing.currentSectionIndex >= WRITING_STUDIO_SECTION_COUNT - 1) {
+  if (wasCompleted) {
+    writing.view = "write";
+    updateWritingSuggestionState(writing, section);
+    writing.coachMessage = `Section ${section.number} has been updated.`;
+  } else if (writing.currentSectionIndex >= WRITING_STUDIO_SECTION_COUNT - 1) {
     writing.view = "book";
     writing.bookPreviewIndex = WRITING_STUDIO_SECTION_COUNT - 1;
     writing.coachMessage = "Your picture book is ready to preview and save as a PDF.";
@@ -11878,10 +11985,72 @@ function acceptWritingIllustration(subject) {
   persistSubjects();
 }
 
+function getSpellingWordProgressRows(spelling) {
+  const attemptWords = getSpellingAttemptWords(spelling);
+  return attemptWords.map((wordEntry) => {
+    const diagnosticResponse = spelling.diagnostic.responses[wordEntry.id] || {};
+    const repeatResponse = spelling.repeatCheck.responses[wordEntry.id] || {};
+    const diagnosticCorrect = Boolean(diagnosticResponse.correct);
+    const repeatCorrect = Boolean(repeatResponse.correct);
+    let rating = "Not checked yet";
+    let ratingClass = "";
+
+    if (repeatResponse.attempt) {
+      if (diagnosticCorrect && repeatCorrect) {
+        rating = "Stable · 100%";
+        ratingClass = "is-correct";
+      } else if (!diagnosticCorrect && repeatCorrect) {
+        rating = "Improved · 50%";
+        ratingClass = "is-correct";
+      } else if (diagnosticCorrect && !repeatCorrect) {
+        rating = "Dropped · 50%";
+        ratingClass = "is-incorrect";
+      } else {
+        rating = "Needs review · 0%";
+        ratingClass = "is-incorrect";
+      }
+    } else if (diagnosticResponse.attempt) {
+      rating = diagnosticCorrect ? "Strong start" : "Waiting for recheck";
+      ratingClass = diagnosticCorrect ? "is-correct" : "";
+    }
+
+    return {
+      word: wordEntry.word,
+      stageOneAttempt: String(diagnosticResponse.attempt || "No answer"),
+      stageFiveAttempt: String(repeatResponse.attempt || "Not rechecked"),
+      rating,
+      ratingClass
+    };
+  });
+}
+
 function moveWritingBookPage(subject, direction) {
   const writing = getSubjectWritingState(subject);
   writing.bookPreviewIndex = Math.max(0, Math.min(WRITING_STUDIO_SECTION_COUNT - 1, writing.bookPreviewIndex + direction));
   persistSubjects({ skipRemoteSync: true });
+}
+
+function editWritingBookPage(subject) {
+  const writing = getSubjectWritingState(subject);
+  const completedSections = writing.sections.filter((section) => String(section.text || "").trim());
+  const previewSection = completedSections[writing.bookPreviewIndex] || completedSections[0] || null;
+  if (!previewSection) {
+    return;
+  }
+  const sectionIndex = writing.sections.findIndex((section) => section.id === previewSection.id);
+  openWritingSection(subject, sectionIndex, "write");
+}
+
+async function changeWritingBookIllustration(subject) {
+  const writing = getSubjectWritingState(subject);
+  const completedSections = writing.sections.filter((section) => String(section.text || "").trim());
+  const previewSection = completedSections[writing.bookPreviewIndex] || completedSections[0] || null;
+  if (!previewSection) {
+    return;
+  }
+  const sectionIndex = writing.sections.findIndex((section) => section.id === previewSection.id);
+  openWritingSection(subject, sectionIndex, "illustrate");
+  await loadWritingIllustrations(subject, { force: !hasWritingIllustrationImages(previewSection) });
 }
 
 function speakWritingSection(subject) {
@@ -11923,13 +12092,13 @@ function saveWritingBookAsPdf(subject) {
       const selectedOption = section.illustrationOptions.find((option) => option.id === section.selectedIllustrationId) || section.illustrationOptions[0];
       return `
         <section class="book-page">
-          <div class="book-page__art"><div class="book-page__placeholder">${escapeHtml(selectedOption?.prompt || `Illustration for page ${index + 1}`)}</div></div>
+          <div class="book-page__art">${selectedOption?.imageUrl ? `<img class="book-page__image" src="${escapeHtml(selectedOption.imageUrl)}" alt="${escapeHtml(selectedOption.prompt || `Illustration for page ${index + 1}`)}" />` : `<div class="book-page__placeholder">${escapeHtml(selectedOption?.prompt || `Illustration for page ${index + 1}`)}</div>`}</div>
           <div class="book-page__text"><p class="book-page__number">Page ${index + 1} of ${completedSections.length}</p><div>${escapeHtml(section.text)}</div></div>
         </section>
       `;
     })
     .join("");
-  previewWindow.document.write(`<!doctype html><html><head><title>${escapeHtml(writing.storyTitle || WRITING_STUDIO_TAB_LABEL)}</title><style>body{font-family:Lexend,system-ui,sans-serif;margin:0;padding:32px;background:#efeaf2;color:#2e2a33}h1{margin:0 0 24px;font-size:32px}.book-page{display:flex;min-height:520px;background:#fff;border-radius:18px;overflow:hidden;box-shadow:0 18px 36px rgba(34,28,40,.12);margin:0 0 24px;page-break-after:always}.book-page__art,.book-page__text{width:50%}.book-page__art{border-right:1px dashed #d9d3df;background:#f5f2f7;padding:24px;display:flex}.book-page__placeholder{flex:1;border:2px dashed #cfc6d7;border-radius:18px;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;color:#645d6c;line-height:1.5}.book-page__text{padding:32px 36px;font-size:24px;line-height:1.7}.book-page__number{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#645d6c;margin:0 0 18px}@media print{body{background:#fff;padding:0}.book-page{box-shadow:none;margin:0;border-radius:0}}</style></head><body><h1>${escapeHtml(writing.storyTitle || WRITING_STUDIO_TAB_LABEL)}</h1>${pagesMarkup}</body></html>`);
+  previewWindow.document.write(`<!doctype html><html><head><title>${escapeHtml(writing.storyTitle || WRITING_STUDIO_TAB_LABEL)}</title><style>body{font-family:Lexend,system-ui,sans-serif;margin:0;padding:32px;background:#efeaf2;color:#2e2a33}h1{margin:0 0 24px;font-size:32px}.book-page{display:flex;min-height:520px;background:#fff;border-radius:18px;overflow:hidden;box-shadow:0 18px 36px rgba(34,28,40,.12);margin:0 0 24px;page-break-after:always}.book-page__art,.book-page__text{width:50%}.book-page__art{border-right:1px dashed #d9d3df;background:#f5f2f7;padding:24px;display:flex}.book-page__image{width:100%;height:100%;object-fit:cover;border-radius:18px}.book-page__placeholder{flex:1;border:2px dashed #cfc6d7;border-radius:18px;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;color:#645d6c;line-height:1.5}.book-page__text{padding:32px 36px;font-size:24px;line-height:1.7}.book-page__number{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#645d6c;margin:0 0 18px}@media print{body{background:#fff;padding:0}.book-page{box-shadow:none;margin:0;border-radius:0}}</style></head><body><h1>${escapeHtml(writing.storyTitle || WRITING_STUDIO_TAB_LABEL)}</h1>${pagesMarkup}</body></html>`);
   previewWindow.document.close();
   previewWindow.focus();
   previewWindow.print();
@@ -11949,7 +12118,7 @@ function renderWriting() {
 
   const currentSection = getWritingCurrentSection(writing);
   const completedCount = getWritingCompletedSectionCount(writing);
-  const storyProgressMarkup = `<section class="ws-side-card"><h4>Your story</h4><p>${escapeHtml(`${completedCount} section${completedCount === 1 ? "" : "s"} written so far.`)}</p><div class="ws-progress-list">${writing.sections.map((section, index) => `<article class="ws-progress-row${index === writing.currentSectionIndex ? " is-current" : ""}${section.completed ? " is-complete" : ""}"><strong>${escapeHtml(`Section ${section.number}`)}</strong><span>${escapeHtml(section.completed ? "Done" : index === writing.currentSectionIndex ? "Today" : "Later")}</span></article>`).join("")}</div></section>`;
+  const storyProgressMarkup = `<section class="ws-side-card"><h4>Your story</h4><p>${escapeHtml(`${completedCount} section${completedCount === 1 ? "" : "s"} written so far.`)}</p><div class="ws-progress-list">${writing.sections.map((section, index) => `<div class="ws-progress-item${index === writing.currentSectionIndex ? " is-current" : ""}${section.completed ? " is-complete" : ""}"><button type="button" class="ws-progress-row" data-writing-open-section="${index}" data-writing-open-view="write"><strong>${escapeHtml(`Section ${section.number}`)}</strong><span>${escapeHtml(section.completed ? "Edit" : index === writing.currentSectionIndex ? "Today" : "Later")}</span></button>${String(section.text || "").trim() ? `<button type="button" class="ghost-button ghost-button--light ws-progress-image-button" data-writing-open-section="${index}" data-writing-open-view="illustrate">Change picture</button>` : ""}</div>`).join("")}</div></section>`;
 
   let bodyMarkup = "";
   if (writing.view === "begin") {
@@ -11957,15 +12126,15 @@ function renderWriting() {
   } else if (writing.view === "write" && currentSection) {
     const previousSection = writing.currentSectionIndex > 0 ? writing.sections[writing.currentSectionIndex - 1] : null;
     const suggestion = writing.activeSuggestion && writing.activeSuggestion.sectionId === currentSection.id ? writing.activeSuggestion : null;
-    bodyMarkup = `<div class="ws-layout"><article class="ws-card ws-card--main"><div class="ws-card__head"><p class="eyebrow">Write today’s section</p><span class="ws-pill">${escapeHtml(`Section ${currentSection.number}`)}</span></div>${previousSection ? `<div class="ws-label">So far</div><div class="ws-quote">“${escapeHtml(previousSection.text)}”</div>` : ""}<div class="ws-hint"><span>?</span><p>${escapeHtml(buildWritingSectionSuggestion(writing, writing.currentSectionIndex))}</p></div><div class="ws-editor-head"><span>Your turn</span><button type="button" class="ghost-button ghost-button--light" data-writing-read-aloud="true">Read aloud</button></div><div class="ws-editor-wrap"><textarea id="writing-section-editor" class="ws-editor" placeholder="Write today’s part of the story...">${escapeHtml(currentSection.text)}</textarea>${suggestion ? `<div class="ws-suggestion-pop"><div>${escapeHtml(suggestion.message)}</div><div class="ws-suggestion-pop__actions"><button type="button" class="ws-suggestion-pop__fix" data-writing-apply-suggestion="true">Yes, fix it</button><button type="button" class="ws-suggestion-pop__keep" data-writing-dismiss-suggestion="true">Keep mine</button></div></div>` : ""}</div><div class="ws-actions"><button type="button" class="primary-button primary-button--dark" data-writing-continue-illustration="true">Continue to illustration →</button></div></article><aside class="ws-side">${storyProgressMarkup}</aside></div>`;
+    bodyMarkup = `<div class="ws-layout"><article class="ws-card ws-card--main"><div class="ws-card__head"><p class="eyebrow">Write today’s section</p><span class="ws-pill">${escapeHtml(`Section ${currentSection.number}`)}</span></div>${previousSection ? `<div class="ws-label">So far</div><div class="ws-quote">“${escapeHtml(previousSection.text)}”</div>` : ""}<div class="ws-hint"><span>?</span><p>${escapeHtml(buildWritingSectionSuggestion(writing, writing.currentSectionIndex))}</p></div><div class="ws-editor-head"><span>Your turn</span><div class="ws-editor-head__actions"><button type="button" class="ghost-button ghost-button--light" data-writing-read-aloud="true">Read aloud</button>${String(currentSection.text || "").trim() ? `<button type="button" class="ghost-button ghost-button--light" data-writing-open-section="${currentSection.number - 1}" data-writing-open-view="illustrate">Change illustration</button>` : ""}</div></div><div class="ws-editor-wrap"><textarea id="writing-section-editor" class="ws-editor" placeholder="Write today’s part of the story...">${escapeHtml(currentSection.text)}</textarea>${suggestion ? `<div class="ws-suggestion-pop"><div>${escapeHtml(suggestion.message)}</div><div class="ws-suggestion-pop__actions"><button type="button" class="ws-suggestion-pop__fix" data-writing-apply-suggestion="true">Yes, fix it</button><button type="button" class="ws-suggestion-pop__keep" data-writing-dismiss-suggestion="true">Keep mine</button></div></div>` : ""}</div><div class="ws-actions"><button type="button" class="primary-button primary-button--dark" data-writing-continue-illustration="true">Continue to illustration →</button></div></article><aside class="ws-side">${storyProgressMarkup}</aside></div>`;
   } else if (writing.view === "illustrate" && currentSection) {
     const options = ensureWritingIllustrationOptions(writing, writing.currentSectionIndex);
-    bodyMarkup = `<div class="ws-layout ws-layout--single"><article class="ws-card ws-card--main"><div class="ws-card__head"><div><p class="eyebrow">Choose an illustration</p><p class="ws-copy">Pick the picture that matches your section best.</p></div><span class="ws-pill">${escapeHtml(`Section ${currentSection.number}`)}</span></div><div class="ws-illustration-grid">${options.map((option) => `<button type="button" class="ws-illustration-card${option.id === currentSection.selectedIllustrationId ? " is-selected" : ""}" data-writing-select-illustration="${escapeHtml(option.id)}"><span class="ws-illustration-card__icon">🖼</span><strong>${escapeHtml(option.prompt)}</strong></button>`).join("")}</div><div class="ws-actions ws-actions--spread"><button type="button" class="ghost-button ghost-button--light" data-writing-reroll-illustrations="true">↻ Try 3 new pictures</button><button type="button" class="primary-button primary-button--dark" data-writing-use-illustration="true">Use this picture →</button></div></article></div>`;
+    bodyMarkup = `<div class="ws-layout"><article class="ws-card ws-card--main"><div class="ws-card__head"><div><p class="eyebrow">Choose an illustration</p><p class="ws-copy">Pick the picture that matches your section best.</p></div><span class="ws-pill">${escapeHtml(`Section ${currentSection.number}`)}</span></div>${writing.illustrationError ? `<div class="ws-error-note">${escapeHtml(writing.illustrationError)}</div>` : ""}<div class="ws-illustration-grid">${options.map((option) => `<button type="button" class="ws-illustration-card${option.id === currentSection.selectedIllustrationId ? " is-selected" : ""}" data-writing-select-illustration="${escapeHtml(option.id)}" ${option.imageUrl ? "" : "disabled"}>${option.imageUrl ? `<img class="ws-illustration-card__image" src="${escapeHtml(option.imageUrl)}" alt="${escapeHtml(option.prompt)}" />` : `<div class="ws-illustration-card__placeholder">${writing.isGeneratingIllustrations ? "Generating..." : "No image yet"}</div>`}<strong>${escapeHtml(option.prompt)}</strong></button>`).join("")}</div><div class="ws-actions ws-actions--spread"><button type="button" class="ghost-button ghost-button--light" data-writing-open-section="${currentSection.number - 1}" data-writing-open-view="write">← Back to writing</button><button type="button" class="ghost-button ghost-button--light" data-writing-reroll-illustrations="true" ${writing.isGeneratingIllustrations ? "disabled" : ""}>↻ Try 3 new pictures</button><button type="button" class="primary-button primary-button--dark" data-writing-use-illustration="true" ${writing.isGeneratingIllustrations ? "disabled" : ""}>Use this picture →</button></div></article><aside class="ws-side">${storyProgressMarkup}</aside></div>`;
   } else {
     const completedSections = writing.sections.filter((section) => String(section.text || "").trim());
     const previewSection = completedSections[writing.bookPreviewIndex] || completedSections[0] || writing.sections[0];
     const selectedOption = previewSection?.illustrationOptions.find((option) => option.id === previewSection.selectedIllustrationId) || previewSection?.illustrationOptions[0];
-    bodyMarkup = `<div class="ws-layout ws-layout--single"><article class="ws-card ws-card--main"><div class="ws-card__head"><div><p class="eyebrow">Finished · your book</p><h3>${escapeHtml(writing.storyTitle || WRITING_STUDIO_TAB_LABEL)}</h3></div><button type="button" class="ghost-button ghost-button--mint" data-writing-save-pdf="true">Save as PDF</button></div><div class="ws-book-spread"><div class="ws-book-spread__art">${escapeHtml(selectedOption?.prompt || `Illustration for page ${previewSection?.number || 1}`)}</div><div class="ws-book-spread__text"><p class="eyebrow">${escapeHtml(`Page ${previewSection?.number || 1} of ${Math.max(1, completedSections.length)}`)}</p><div>${escapeHtml(previewSection?.text || "")}</div></div></div><div class="ws-book-nav"><button type="button" class="ghost-button ghost-button--light ws-book-nav__button" data-writing-book-move="-1" ${writing.bookPreviewIndex <= 0 ? "disabled" : ""}>‹</button><div class="ws-book-dots">${completedSections.map((_, index) => `<span class="ws-book-dot${index === writing.bookPreviewIndex ? " is-active" : ""}"></span>`).join("")}</div><button type="button" class="primary-button primary-button--dark ws-book-nav__button" data-writing-book-move="1" ${writing.bookPreviewIndex >= completedSections.length - 1 ? "disabled" : ""}>›</button></div></article></div>`;
+    bodyMarkup = `<div class="ws-layout ws-layout--single"><article class="ws-card ws-card--main"><div class="ws-card__head"><div><p class="eyebrow">Finished · your book</p><h3>${escapeHtml(writing.storyTitle || WRITING_STUDIO_TAB_LABEL)}</h3></div><button type="button" class="ghost-button ghost-button--mint" data-writing-save-pdf="true">Save as PDF</button></div><div class="ws-book-spread"><div class="ws-book-spread__art">${selectedOption?.imageUrl ? `<img class="ws-book-spread__image" src="${escapeHtml(selectedOption.imageUrl)}" alt="${escapeHtml(selectedOption.prompt || `Illustration for page ${previewSection?.number || 1}`)}" />` : `<div class="ws-book-spread__placeholder">${escapeHtml(selectedOption?.prompt || `Illustration for page ${previewSection?.number || 1}`)}</div>`}</div><div class="ws-book-spread__text"><p class="eyebrow">${escapeHtml(`Page ${previewSection?.number || 1} of ${Math.max(1, completedSections.length)}`)}</p><div>${escapeHtml(previewSection?.text || "")}</div></div></div><div class="ws-actions ws-actions--spread"><button type="button" class="ghost-button ghost-button--light" data-writing-book-edit="true">Edit this section</button><button type="button" class="ghost-button ghost-button--light" data-writing-book-change-illustration="true">Change picture</button></div><div class="ws-book-nav"><button type="button" class="ghost-button ghost-button--light ws-book-nav__button" data-writing-book-move="-1" ${writing.bookPreviewIndex <= 0 ? "disabled" : ""}>‹</button><div class="ws-book-dots">${completedSections.map((_, index) => `<span class="ws-book-dot${index === writing.bookPreviewIndex ? " is-active" : ""}"></span>`).join("")}</div><button type="button" class="primary-button primary-button--dark ws-book-nav__button" data-writing-book-move="1" ${writing.bookPreviewIndex >= completedSections.length - 1 ? "disabled" : ""}>›</button></div></article></div>`;
   }
 
   host.innerHTML = `<section class="ws-shell">${bodyMarkup}</section>`;
@@ -11986,8 +12155,16 @@ function renderWriting() {
   host.querySelector("[data-writing-read-aloud]")?.addEventListener("click", () => speakWritingSection(subject));
   host.querySelector("[data-writing-apply-suggestion]")?.addEventListener("click", () => { applyWritingSuggestion(subject); render(); });
   host.querySelector("[data-writing-dismiss-suggestion]")?.addEventListener("click", () => { dismissWritingSuggestion(subject); render(); });
-  host.querySelector("[data-writing-continue-illustration]")?.addEventListener("click", () => { continueWritingToIllustration(subject); render(); });
-  host.querySelector("[data-writing-reroll-illustrations]")?.addEventListener("click", () => { rerollWritingIllustrations(subject); render(); });
+  host.querySelector("[data-writing-continue-illustration]")?.addEventListener("click", async () => {
+    render();
+    await continueWritingToIllustration(subject);
+    render();
+  });
+  host.querySelector("[data-writing-reroll-illustrations]")?.addEventListener("click", async () => {
+    render();
+    await rerollWritingIllustrations(subject);
+    render();
+  });
   host.querySelectorAll("[data-writing-select-illustration]").forEach((button) => {
     button.addEventListener("click", () => {
       selectWritingIllustration(subject, button.dataset.writingSelectIllustration);
@@ -11996,6 +12173,24 @@ function renderWriting() {
   });
   host.querySelector("[data-writing-use-illustration]")?.addEventListener("click", () => { acceptWritingIllustration(subject); render(); });
   host.querySelector("[data-writing-save-pdf]")?.addEventListener("click", () => saveWritingBookAsPdf(subject));
+  host.querySelector("[data-writing-book-edit]")?.addEventListener("click", () => { editWritingBookPage(subject); render(); });
+  host.querySelector("[data-writing-book-change-illustration]")?.addEventListener("click", async () => {
+    render();
+    await changeWritingBookIllustration(subject);
+    render();
+  });
+  host.querySelectorAll("[data-writing-open-section]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const sectionIndex = Number(button.dataset.writingOpenSection || 0);
+      const nextView = String(button.dataset.writingOpenView || "write");
+      openWritingSection(subject, sectionIndex, nextView);
+      if (nextView === "illustrate") {
+        render();
+        await loadWritingIllustrations(subject, { force: !hasWritingIllustrationImages(getWritingCurrentSection(getSubjectWritingState(subject))) });
+      }
+      render();
+    });
+  });
   host.querySelectorAll("[data-writing-book-move]").forEach((button) => {
     button.addEventListener("click", () => {
       moveWritingBookPage(subject, Number(button.dataset.writingBookMove || 0));

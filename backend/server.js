@@ -261,6 +261,22 @@ async function callOpenAiSpeech(payload) {
   };
 }
 
+async function generateOpenAiImage(prompt) {
+  const payload = await callOpenAiJson("images/generations", {
+    model: "gpt-image-1",
+    prompt,
+    size: "1024x1024"
+  });
+  const imageRecord = Array.isArray(payload?.data) ? payload.data[0] : null;
+  if (imageRecord?.b64_json) {
+    return `data:image/png;base64,${imageRecord.b64_json}`;
+  }
+  if (imageRecord?.url) {
+    return String(imageRecord.url);
+  }
+  throw new Error("OpenAI image generation returned no image.");
+}
+
 function extractPdfPageText(items) {
   let currentLine = "";
   let previousY = null;
@@ -798,6 +814,59 @@ app.post("/api/speak", async (request, response) => {
   } catch (error) {
     response.status(500).json({
       error: error instanceof Error ? error.message : "Speech generation failed."
+    });
+  }
+});
+
+app.post("/api/writing/illustrations", async (request, response) => {
+  try {
+    const storyTitle = String(request.body?.storyTitle || "").trim();
+    const sectionNumber = Math.max(1, Number(request.body?.sectionNumber || 1) || 1);
+    const sectionText = String(request.body?.sectionText || "").trim();
+    const previousSectionText = String(request.body?.previousSectionText || "").trim();
+    const openingAnswers = request.body?.openingAnswers && typeof request.body.openingAnswers === "object" ? request.body.openingAnswers : {};
+    const prompts = Array.isArray(request.body?.prompts)
+      ? request.body.prompts.map((prompt) => String(prompt || "").trim()).filter(Boolean).slice(0, 3)
+      : [];
+
+    if (!sectionText) {
+      response.status(400).json({ error: "sectionText is required." });
+      return;
+    }
+
+    if (!prompts.length) {
+      response.status(400).json({ error: "At least one illustration prompt is required." });
+      return;
+    }
+
+    const who = String(openingAnswers.who || "the main character").trim();
+    const where = String(openingAnswers.where || "the setting").trim();
+    const want = String(openingAnswers.want || "their goal").trim();
+
+    const options = await Promise.all(
+      prompts.map(async (prompt) => {
+        const fullPrompt = [
+          "Create a warm, detailed children's picture-book illustration.",
+          "No words, labels, speech bubbles, borders, or watermarks.",
+          "Use a soft storybook style with clear characters and readable scene composition.",
+          storyTitle ? `Story title: ${storyTitle}.` : "",
+          `Section ${sectionNumber}.`,
+          `Main character: ${who}.`,
+          `Setting: ${where}.`,
+          `Goal: ${want}.`,
+          previousSectionText ? `Previous section summary: ${previousSectionText}` : "",
+          `Current section text: ${sectionText}`,
+          `Scene direction: ${prompt}`
+        ].filter(Boolean).join(" ");
+        const imageUrl = await generateOpenAiImage(fullPrompt);
+        return { prompt, imageUrl };
+      })
+    );
+
+    response.json({ options });
+  } catch (error) {
+    response.status(500).json({
+      error: error instanceof Error ? error.message : "Illustration generation failed."
     });
   }
 });
