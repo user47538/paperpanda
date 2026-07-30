@@ -8638,6 +8638,7 @@ function renderSubjectList() {
       state.selectedSubjectId = subject.id;
       state.activeSubjectTab = getPreferredSubjectTab(subject);
       state.focusArea = null;
+      state.focusAskOpen = false;
       state.selectedDocumentIds = [];
       state.expandedDocumentGroups = {};
       state.watchExpanded = false;
