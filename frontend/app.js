@@ -11881,6 +11881,15 @@ function openWritingSection(subject, sectionIndex, view = "write") {
   persistSubjects({ skipRemoteSync: true });
 }
 
+function moveWritingSection(subject, direction, view = "write") {
+  const writing = getSubjectWritingState(subject);
+  const nextIndex = Math.max(
+    0,
+    Math.min(WRITING_STUDIO_SECTION_COUNT - 1, Number(writing.currentSectionIndex || 0) + Number(direction || 0))
+  );
+  openWritingSection(subject, nextIndex, view);
+}
+
 async function loadWritingIllustrations(subject, { force = false } = {}) {
   const writing = getSubjectWritingState(subject);
   const section = getWritingCurrentSection(writing);
@@ -12026,7 +12035,9 @@ function getSpellingWordProgressRows(spelling) {
 
 function moveWritingBookPage(subject, direction) {
   const writing = getSubjectWritingState(subject);
-  writing.bookPreviewIndex = Math.max(0, Math.min(WRITING_STUDIO_SECTION_COUNT - 1, writing.bookPreviewIndex + direction));
+  const completedSections = writing.sections.filter((section) => String(section.text || "").trim());
+  const maxIndex = Math.max(0, completedSections.length - 1);
+  writing.bookPreviewIndex = Math.max(0, Math.min(maxIndex, Number(writing.bookPreviewIndex || 0) + Number(direction || 0)));
   persistSubjects({ skipRemoteSync: true });
 }
 
@@ -12126,10 +12137,10 @@ function renderWriting() {
   } else if (writing.view === "write" && currentSection) {
     const previousSection = writing.currentSectionIndex > 0 ? writing.sections[writing.currentSectionIndex - 1] : null;
     const suggestion = writing.activeSuggestion && writing.activeSuggestion.sectionId === currentSection.id ? writing.activeSuggestion : null;
-    bodyMarkup = `<div class="ws-layout"><article class="ws-card ws-card--main"><div class="ws-card__head"><p class="eyebrow">Write today’s section</p><span class="ws-pill">${escapeHtml(`Section ${currentSection.number}`)}</span></div>${previousSection ? `<div class="ws-label">So far</div><div class="ws-quote">“${escapeHtml(previousSection.text)}”</div>` : ""}<div class="ws-hint"><span>?</span><p>${escapeHtml(buildWritingSectionSuggestion(writing, writing.currentSectionIndex))}</p></div><div class="ws-editor-head"><span>Your turn</span><div class="ws-editor-head__actions"><button type="button" class="ghost-button ghost-button--light" data-writing-read-aloud="true">Read aloud</button>${String(currentSection.text || "").trim() ? `<button type="button" class="ghost-button ghost-button--light" data-writing-open-section="${currentSection.number - 1}" data-writing-open-view="illustrate">Change illustration</button>` : ""}</div></div><div class="ws-editor-wrap"><textarea id="writing-section-editor" class="ws-editor" placeholder="Write today’s part of the story...">${escapeHtml(currentSection.text)}</textarea>${suggestion ? `<div class="ws-suggestion-pop"><div>${escapeHtml(suggestion.message)}</div><div class="ws-suggestion-pop__actions"><button type="button" class="ws-suggestion-pop__fix" data-writing-apply-suggestion="true">Yes, fix it</button><button type="button" class="ws-suggestion-pop__keep" data-writing-dismiss-suggestion="true">Keep mine</button></div></div>` : ""}</div><div class="ws-actions"><button type="button" class="primary-button primary-button--dark" data-writing-continue-illustration="true">Continue to illustration →</button></div></article><aside class="ws-side">${storyProgressMarkup}</aside></div>`;
+    bodyMarkup = `<div class="ws-layout"><article class="ws-card ws-card--main"><div class="ws-card__head"><p class="eyebrow">Write today’s section</p><span class="ws-pill">${escapeHtml(`Section ${currentSection.number}`)}</span></div>${previousSection ? `<div class="ws-label">So far</div><div class="ws-quote">“${escapeHtml(previousSection.text)}”</div>` : ""}<div class="ws-hint"><span>?</span><p>${escapeHtml(buildWritingSectionSuggestion(writing, writing.currentSectionIndex))}</p></div><div class="ws-editor-head"><span>Your turn</span><div class="ws-editor-head__actions"><button type="button" class="ghost-button ghost-button--light" data-writing-read-aloud="true">Read aloud</button>${String(currentSection.text || "").trim() ? `<button type="button" class="ghost-button ghost-button--light" data-writing-open-section="${currentSection.number - 1}" data-writing-open-view="illustrate">Change illustration</button>` : ""}</div></div><div class="ws-editor-wrap"><textarea id="writing-section-editor" class="ws-editor" placeholder="Write today’s part of the story...">${escapeHtml(currentSection.text)}</textarea>${suggestion ? `<div class="ws-suggestion-pop"><div>${escapeHtml(suggestion.message)}</div><div class="ws-suggestion-pop__actions"><button type="button" class="ws-suggestion-pop__fix" data-writing-apply-suggestion="true">Yes, fix it</button><button type="button" class="ws-suggestion-pop__keep" data-writing-dismiss-suggestion="true">Keep mine</button></div></div>` : ""}</div><div class="ws-actions ws-actions--spread">${writing.currentSectionIndex > 0 ? `<button type="button" class="ghost-button ghost-button--light" data-writing-move-section="-1" data-writing-move-view="write">← Previous section</button>` : `<span></span>`}<button type="button" class="primary-button primary-button--dark" data-writing-continue-illustration="true">Continue to illustration →</button>${writing.currentSectionIndex < WRITING_STUDIO_SECTION_COUNT - 1 ? `<button type="button" class="ghost-button ghost-button--light" data-writing-move-section="1" data-writing-move-view="write">Next section →</button>` : `<span></span>`}</div></article><aside class="ws-side">${storyProgressMarkup}</aside></div>`;
   } else if (writing.view === "illustrate" && currentSection) {
     const options = ensureWritingIllustrationOptions(writing, writing.currentSectionIndex);
-    bodyMarkup = `<div class="ws-layout"><article class="ws-card ws-card--main"><div class="ws-card__head"><div><p class="eyebrow">Choose an illustration</p><p class="ws-copy">Pick the picture that matches your section best.</p></div><span class="ws-pill">${escapeHtml(`Section ${currentSection.number}`)}</span></div>${writing.illustrationError ? `<div class="ws-error-note">${escapeHtml(writing.illustrationError)}</div>` : ""}<div class="ws-illustration-grid">${options.map((option) => `<button type="button" class="ws-illustration-card${option.id === currentSection.selectedIllustrationId ? " is-selected" : ""}" data-writing-select-illustration="${escapeHtml(option.id)}" ${option.imageUrl ? "" : "disabled"}>${option.imageUrl ? `<img class="ws-illustration-card__image" src="${escapeHtml(option.imageUrl)}" alt="${escapeHtml(option.prompt)}" />` : `<div class="ws-illustration-card__placeholder">${writing.isGeneratingIllustrations ? "Generating..." : "No image yet"}</div>`}<strong>${escapeHtml(option.prompt)}</strong></button>`).join("")}</div><div class="ws-actions ws-actions--spread"><button type="button" class="ghost-button ghost-button--light" data-writing-open-section="${currentSection.number - 1}" data-writing-open-view="write">← Back to writing</button><button type="button" class="ghost-button ghost-button--light" data-writing-reroll-illustrations="true" ${writing.isGeneratingIllustrations ? "disabled" : ""}>↻ Try 3 new pictures</button><button type="button" class="primary-button primary-button--dark" data-writing-use-illustration="true" ${writing.isGeneratingIllustrations ? "disabled" : ""}>Use this picture →</button></div></article><aside class="ws-side">${storyProgressMarkup}</aside></div>`;
+    bodyMarkup = `<div class="ws-layout"><article class="ws-card ws-card--main"><div class="ws-card__head"><div><p class="eyebrow">Choose an illustration</p><p class="ws-copy">Pick the picture that matches your section best.</p></div><span class="ws-pill">${escapeHtml(`Section ${currentSection.number}`)}</span></div>${writing.illustrationError ? `<div class="ws-error-note">${escapeHtml(writing.illustrationError)}</div>` : ""}<div class="ws-illustration-grid">${options.map((option) => `<button type="button" class="ws-illustration-card${option.id === currentSection.selectedIllustrationId ? " is-selected" : ""}" data-writing-select-illustration="${escapeHtml(option.id)}" ${option.imageUrl ? "" : "disabled"}>${option.imageUrl ? `<img class="ws-illustration-card__image" src="${escapeHtml(option.imageUrl)}" alt="${escapeHtml(option.prompt)}" />` : `<div class="ws-illustration-card__placeholder">${writing.isGeneratingIllustrations ? "Generating..." : "No image yet"}</div>`}<strong>${escapeHtml(option.prompt)}</strong></button>`).join("")}</div><div class="ws-actions ws-actions--spread">${writing.currentSectionIndex > 0 ? `<button type="button" class="ghost-button ghost-button--light" data-writing-move-section="-1" data-writing-move-view="write">← Previous section</button>` : `<button type="button" class="ghost-button ghost-button--light" data-writing-open-section="${currentSection.number - 1}" data-writing-open-view="write">← Back to writing</button>`}<button type="button" class="ghost-button ghost-button--light" data-writing-reroll-illustrations="true" ${writing.isGeneratingIllustrations ? "disabled" : ""}>↻ Try 3 new pictures</button><button type="button" class="primary-button primary-button--dark" data-writing-use-illustration="true" ${writing.isGeneratingIllustrations ? "disabled" : ""}>Use this picture →</button>${writing.currentSectionIndex < WRITING_STUDIO_SECTION_COUNT - 1 ? `<button type="button" class="ghost-button ghost-button--light" data-writing-move-section="1" data-writing-move-view="write">Next section →</button>` : `<span></span>`}</div></article><aside class="ws-side">${storyProgressMarkup}</aside></div>`;
   } else {
     const completedSections = writing.sections.filter((section) => String(section.text || "").trim());
     const previewSection = completedSections[writing.bookPreviewIndex] || completedSections[0] || writing.sections[0];
@@ -12191,6 +12202,12 @@ function renderWriting() {
       render();
     });
   });
+  host.querySelectorAll("[data-writing-move-section]").forEach((button) => {
+    button.addEventListener("click", () => {
+      moveWritingSection(subject, Number(button.dataset.writingMoveSection || 0), String(button.dataset.writingMoveView || "write"));
+      render();
+    });
+  });
   host.querySelectorAll("[data-writing-book-move]").forEach((button) => {
     button.addEventListener("click", () => {
       moveWritingBookPage(subject, Number(button.dataset.writingBookMove || 0));
@@ -12237,6 +12254,14 @@ function renderSpelling() {
   const overallScorePercent = getSpellingOverallScorePercent(spelling);
   const ownedHorseMeta = getSpellingOwnedHorseMeta(spelling);
   const homeTab = String(spelling.homeTab || "stable");
+
+  if (stageId === "repeat-check" && spelling.repeatCheck.completed && !showingCelebration && !spelling.sessionCompletionReady) {
+    spelling.homeTab = "stable";
+    spelling.selectedStageId = "";
+    persistSubjects({ skipRemoteSync: true });
+    renderSpelling();
+    return;
+  }
 
   if (spelling.challenge.active || (spelling.challenge.completed && spelling.challenge.lastCompletedWeekKey === currentWeekKey())) {
     const currentChallengeItem = getSpellingChallengeCurrentItem(spelling);
