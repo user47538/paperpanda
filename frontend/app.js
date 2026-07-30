@@ -5126,6 +5126,7 @@ function setSpellingHomeTab(subject, tabId) {
     return;
   }
   spelling.homeTab = String(tabId);
+  spelling.selectedStageId = "";
   spelling.celebrationStageId = "";
   spelling.sessionCompletionReady = false;
   persistSubjects();
