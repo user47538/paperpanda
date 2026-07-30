@@ -472,14 +472,15 @@ const FOCUS_AREAS = [
 ];
 
 const SPELLING_STAGE_ORDER = ["diagnostic", "looks-right", "word-families", "tense-transfer"];
+const SPELLING_FLASHCARD_EXPOSURE_COUNT = 2;
 const SPELLING_FLASHCARDS_VERSION = 5;
-const SPELLING_TENSE_TRANSFER_VERSION = 4;
+const SPELLING_TENSE_TRANSFER_VERSION = 5;
 const SPELLING_CHALLENGE_VERSION = 2;
 const SPELLING_STAGE_LABELS = {
-  diagnostic: "Diagnostic",
-  "looks-right": "Looks Right",
-  "word-families": "Word Families",
-  "tense-transfer": "Past, Present, Future"
+  diagnostic: "Stage 1",
+  "looks-right": "Stage 2",
+  "word-families": "Stage 3",
+  "tense-transfer": "Stage 4"
 };
 const SPELLING_FOCUS_LABELS = {
   "over-articulation": "Over-articulation and hidden sounds",
@@ -522,7 +523,110 @@ const SPELLING_PADDOCK_HORSE_BY_ID = Object.fromEntries(
   SPELLING_PADDOCK_HORSES.map((horse) => [horse.id, horse])
 );
 const SPELLING_HORSE_RANKS = ["Foal", "Pony", "School Horse", "Show Horse", "Champion"];
+const SPELLING_TENSE_IDS = ["past", "present", "future"];
 const SPELLING_CHALLENGE_MODE_ORDER = ["looks-right", "dictation", "root-word", "missing-letter"];
+const SPELLING_TENSE_PROMPTS = {
+  believe: {
+    past: "Yesterday, they believed the strongest explanation straight away.",
+    present: "Today, they believe the strongest explanation straight away.",
+    future: "Tomorrow, they will believe the strongest explanation straight away."
+  },
+  describe: {
+    past: "Yesterday, they described the image with precise detail.",
+    present: "Today, they describe the image with precise detail.",
+    future: "Tomorrow, they will describe the image with precise detail."
+  },
+  decide: {
+    past: "Yesterday, they decided which example proved the point best.",
+    present: "Today, they decide which example proves the point best.",
+    future: "Tomorrow, they will decide which example proves the point best."
+  },
+  imagine: {
+    past: "Yesterday, they imagined a stronger ending for the story.",
+    present: "Today, they imagine a stronger ending for the story.",
+    future: "Tomorrow, they will imagine a stronger ending for the story."
+  },
+  measure: {
+    past: "Yesterday, they measured the fabric before cutting it.",
+    present: "Today, they measure the fabric before cutting it.",
+    future: "Tomorrow, they will measure the fabric before cutting it."
+  },
+  notice: {
+    past: "Yesterday, they noticed the spelling pattern quickly.",
+    present: "Today, they notice the spelling pattern quickly.",
+    future: "Tomorrow, they will notice the spelling pattern quickly."
+  },
+  remember: {
+    past: "Yesterday, they remembered the rule during the test.",
+    present: "Today, they remember the rule during the test.",
+    future: "Tomorrow, they will remember the rule during the test."
+  },
+  appear: {
+    past: "Yesterday, they appeared on stage with calm confidence.",
+    present: "Today, they appear on stage with calm confidence.",
+    future: "Tomorrow, they will appear on stage with calm confidence."
+  },
+  separate: {
+    past: "Yesterday, they separated the facts from the opinions.",
+    present: "Today, they separate the facts from the opinions.",
+    future: "Tomorrow, they will separate the facts from the opinions."
+  },
+  achieve: {
+    past: "Yesterday, they achieved their goal through steady practice.",
+    present: "Today, they achieve their goal through steady practice.",
+    future: "Tomorrow, they will achieve their goal through steady practice."
+  },
+  compare: {
+    past: "Yesterday, they compared the two paragraphs carefully.",
+    present: "Today, they compare the two paragraphs carefully.",
+    future: "Tomorrow, they will compare the two paragraphs carefully."
+  },
+  complete: {
+    past: "Yesterday, they completed the task before lunch.",
+    present: "Today, they complete the task before lunch.",
+    future: "Tomorrow, they will complete the task before lunch."
+  },
+  consider: {
+    past: "Yesterday, they considered every option before answering.",
+    present: "Today, they consider every option before answering.",
+    future: "Tomorrow, they will consider every option before answering."
+  },
+  continue: {
+    past: "Yesterday, they continued the draft after the break.",
+    present: "Today, they continue the draft after the break.",
+    future: "Tomorrow, they will continue the draft after the break."
+  },
+  discover: {
+    past: "Yesterday, they discovered a better piece of evidence.",
+    present: "Today, they discover a better piece of evidence.",
+    future: "Tomorrow, they will discover a better piece of evidence."
+  },
+  improve: {
+    past: "Yesterday, they improved the paragraph with one clear change.",
+    present: "Today, they improve the paragraph with one clear change.",
+    future: "Tomorrow, they will improve the paragraph with one clear change."
+  },
+  include: {
+    past: "Yesterday, they included a quote in the response.",
+    present: "Today, they include a quote in the response.",
+    future: "Tomorrow, they will include a quote in the response."
+  },
+  observe: {
+    past: "Yesterday, they observed the pattern in the results.",
+    present: "Today, they observe the pattern in the results.",
+    future: "Tomorrow, they will observe the pattern in the results."
+  },
+  prepare: {
+    past: "Yesterday, they prepared the notes for the lesson.",
+    present: "Today, they prepare the notes for the lesson.",
+    future: "Tomorrow, they will prepare the notes for the lesson."
+  },
+  deliver: {
+    past: "Yesterday, they delivered the speech with confidence.",
+    present: "Today, they deliver the speech with confidence.",
+    future: "Tomorrow, they will deliver the speech with confidence."
+  }
+};
 const SPELLING_INTERVENTION_LIBRARY = {
   believe: {
     id: "believe",
@@ -4319,7 +4423,7 @@ function normaliseSpellingState(spelling, subjectId = "") {
             Object.entries(flashcards.cards).map(([wordId, entry]) => [
               wordId,
               {
-                exposureIndex: Math.max(0, Math.min(3, Number(entry?.exposureIndex || 0) || 0)),
+                exposureIndex: Math.max(0, Math.min(getSpellingFlashcardExposureLimit(wordId), Number(entry?.exposureIndex || 0) || 0)),
                 isShowingSentence: Boolean(entry?.isShowingSentence),
                 typedValue: String(entry?.typedValue || ""),
                 checked: Boolean(entry?.checked),
@@ -4343,18 +4447,13 @@ function normaliseSpellingState(spelling, subjectId = "") {
             Object.entries(tenseTransfer.answers).map(([wordId, entry]) => [
               wordId,
               {
-                placements: {
-                  past: String(entry?.placements?.past || ""),
-                  present: String(entry?.placements?.present || ""),
-                  future: String(entry?.placements?.future || "")
-                },
+                selectedTense: ["past", "present", "future"].includes(String(entry?.selectedTense || "")) ? String(entry.selectedTense) : "",
                 checked: Boolean(entry?.checked),
                 completed: Boolean(entry?.completed),
                 awaitingAdvance: Boolean(entry?.awaitingAdvance),
                 feedbackKind: ["correct", "incorrect"].includes(String(entry?.feedbackKind || "")) ? String(entry.feedbackKind) : "",
                 feedbackMessage: String(entry?.feedbackMessage || ""),
-                lastCheckedAt: String(entry?.lastCheckedAt || ""),
-                selectedOption: String(entry?.selectedOption || "")
+                lastCheckedAt: String(entry?.lastCheckedAt || "")
               }
             ])
           )
@@ -4979,7 +5078,7 @@ function getSpellingCelebrationCopy(stageId) {
   if (stageId === "diagnostic") {
     return {
       eyebrow: "Ribbon earned",
-      title: "Diagnostic complete",
+      title: "Stage 1 complete",
       body: "The spelling profile is ready. Continue to the sentence check so the follow-up words can be narrowed to the patterns that still look uncertain.",
       action: "Continue to stage 2"
     };
@@ -4987,7 +5086,7 @@ function getSpellingCelebrationCopy(stageId) {
   if (stageId === "looks-right") {
     return {
       eyebrow: "Ribbon earned",
-      title: "Sentence check complete",
+      title: "Stage 2 complete",
       body: "The words that still look unstable have been identified. Continue to the next stage to rehearse them one at a time through word-family sentences.",
       action: "Continue to stage 3"
     };
@@ -4995,7 +5094,7 @@ function getSpellingCelebrationCopy(stageId) {
   if (stageId === "word-families") {
     return {
       eyebrow: "Ribbon earned",
-      title: "Word family stage complete",
+      title: "Stage 3 complete",
       body: "Those family clues held. Continue to the final stage to sort the same key word across yesterday, today, and tomorrow.",
       action: "Continue to stage 4"
     };
@@ -5131,18 +5230,13 @@ function getSpellingFlashcardCurrentWord(spelling) {
 function ensureSpellingTenseAnswer(spelling, wordId) {
   if (!spelling.tenseTransfer.answers[wordId]) {
     spelling.tenseTransfer.answers[wordId] = {
-      placements: {
-        past: "",
-        present: "",
-        future: ""
-      },
+      selectedTense: "",
       checked: false,
       completed: false,
       awaitingAdvance: false,
       feedbackKind: "",
       feedbackMessage: "",
-      lastCheckedAt: "",
-      selectedOption: ""
+      lastCheckedAt: ""
     };
   }
   return spelling.tenseTransfer.answers[wordId];
@@ -5177,6 +5271,30 @@ function buildSpellingSessionDotRow(total, currentIndex, completedCount = 0) {
     const isCurrent = index === currentIndex;
     return `<span class="ss-dot${isComplete ? " is-complete" : ""}${isCurrent ? " is-current" : ""}"></span>`;
   }).join("");
+}
+
+function getSpellingFlashcardExposureLimit(wordId = "") {
+  const entry = SPELLING_INTERVENTION_LIBRARY[String(wordId || "")];
+  if (!entry) {
+    return SPELLING_FLASHCARD_EXPOSURE_COUNT;
+  }
+  const availableSentenceCount = Array.isArray(entry.familySentences) ? entry.familySentences.length : 0;
+  const availableFamilyWordCount = Array.isArray(entry.familyWords) ? entry.familyWords.length : 0;
+  return Math.max(1, Math.min(SPELLING_FLASHCARD_EXPOSURE_COUNT, availableSentenceCount, availableFamilyWordCount));
+}
+
+function getSpellingTensePrompt(spelling, entry) {
+  const promptSet = SPELLING_TENSE_PROMPTS[entry?.id] || {};
+  const promptSeed = String(`${spelling?.currentAttemptId || "attempt"}:${entry?.id || ""}`);
+  const promptIndex = promptSeed.split("").reduce((total, character, index) => total + character.charCodeAt(0) * (index + 1), 0) % SPELLING_TENSE_IDS.length;
+  const tenseId = SPELLING_TENSE_IDS[promptIndex] || "present";
+  const wordForm = entry?.tense?.[tenseId] || entry?.word || "";
+  const sentence = String(promptSet[tenseId] || `They ${wordForm} it carefully.`).trim();
+  return {
+    tenseId,
+    sentence,
+    wordForm
+  };
 }
 
 function getSpellingLooksRightCurrentWord(spelling) {
@@ -5354,7 +5472,7 @@ function resetSpellingActivity(subject, activityId) {
       currentWordId: "",
       completed: false
     };
-    spelling.coachMessage = "Drag the correct form onto yesterday, today, and tomorrow.";
+    spelling.coachMessage = "Read the sentence, choose the tense, and help the horse reach the stable.";
   } else {
     subject.spelling = createDefaultSpellingState(subject.id);
   }
@@ -5961,7 +6079,8 @@ function buildSpellingReviewHome(subject, spelling) {
 }
 
 function playSpellingFlashcardSentence(subject, entry, card) {
-  const sentenceIndex = Math.min(card.exposureIndex, (entry.familySentences || []).length - 1);
+  const exposureLimit = getSpellingFlashcardExposureLimit(entry.id);
+  const sentenceIndex = Math.min(card.exposureIndex, exposureLimit - 1, (entry.familySentences || []).length - 1);
   const familyWord = entry.familyWords[sentenceIndex];
   const sentence = entry.familySentences[sentenceIndex];
   if (!sentence || !familyWord) {
@@ -5983,10 +6102,10 @@ function playSpellingFlashcardSentence(subject, entry, card) {
       const freshSpelling = getSubjectSpellingState(subject);
       const freshCard = ensureSpellingFlashcardCard(freshSpelling, entry.id);
       freshCard.isShowingSentence = false;
-      freshCard.exposureIndex = Math.min(3, freshCard.exposureIndex + 1);
-      freshSpelling.coachMessage = freshCard.exposureIndex >= 3
+      freshCard.exposureIndex = Math.min(exposureLimit, freshCard.exposureIndex + 1);
+      freshSpelling.coachMessage = freshCard.exposureIndex >= exposureLimit
         ? `Now type ${entry.word} from memory.`
-        : `Sentence ${freshCard.exposureIndex + 1} of 3 is ready for ${entry.word}.`;
+        : `Sentence ${freshCard.exposureIndex + 1} of ${exposureLimit} is ready for ${entry.word}.`;
       persistSubjects();
       render();
     }
@@ -6011,7 +6130,7 @@ function revealSpellingFlashcardSentence(subject, wordId) {
     return;
   }
   const card = ensureSpellingFlashcardCard(spelling, wordId);
-  if (card.completed || card.isShowingSentence || card.exposureIndex >= 3) {
+  if (card.completed || card.isShowingSentence || card.exposureIndex >= getSpellingFlashcardExposureLimit(wordId)) {
     return;
   }
   spelling.flashcards.currentWordId = wordId;
@@ -6066,76 +6185,6 @@ function advanceSpellingFlashcardWord(subject, wordId) {
   persistSubjects();
 }
 
-function assignSpellingTensePlacement(subject, wordId, slotId, optionValue) {
-  const spelling = getSubjectSpellingState(subject);
-  const entry = SPELLING_INTERVENTION_LIBRARY[wordId];
-  if (!entry || !["past", "present", "future"].includes(slotId)) {
-    return;
-  }
-  const answer = ensureSpellingTenseAnswer(spelling, wordId);
-  const normalizedValue = String(optionValue || "").trim();
-  if (!normalizedValue || !(entry.tense?.options || []).includes(normalizedValue)) {
-    return;
-  }
-
-  Object.keys(answer.placements).forEach((existingSlotId) => {
-    if (answer.placements[existingSlotId] === normalizedValue) {
-      answer.placements[existingSlotId] = "";
-    }
-  });
-  answer.placements[slotId] = normalizedValue;
-  answer.selectedOption = "";
-  answer.checked = false;
-  answer.awaitingAdvance = false;
-  answer.feedbackKind = "";
-  answer.feedbackMessage = "";
-  spelling.coachMessage = `${normalizedValue} placed on ${slotId === "past" ? "yesterday" : slotId === "present" ? "today" : "tomorrow"}.`;
-  persistSubjects();
-}
-
-function clearSpellingTensePlacement(subject, wordId, slotId) {
-  const spelling = getSubjectSpellingState(subject);
-  if (!["past", "present", "future"].includes(slotId)) {
-    return;
-  }
-  const answer = ensureSpellingTenseAnswer(spelling, wordId);
-  answer.placements[slotId] = "";
-  answer.selectedOption = "";
-  answer.checked = false;
-  answer.awaitingAdvance = false;
-  answer.feedbackKind = "";
-  answer.feedbackMessage = "";
-  persistSubjects();
-}
-
-function buildSpellingTenseFeedback(entry, answer) {
-  const expected = {
-    past: entry.tense?.past || "",
-    present: entry.tense?.present || "",
-    future: entry.tense?.future || ""
-  };
-  const slotLabels = {
-    past: "Yesterday",
-    present: "Today",
-    future: "Tomorrow"
-  };
-  const incorrectSlots = Object.keys(expected).filter((slotId) => answer.placements[slotId] !== expected[slotId]);
-
-  if (!incorrectSlots.length) {
-    return {
-      correct: true,
-      message: `Correct. Yesterday uses ${expected.past}, today uses ${expected.present}, and tomorrow uses ${expected.future}. ${entry.familyNote}`
-    };
-  }
-
-  return {
-    correct: false,
-    message: incorrectSlots
-      .map((slotId) => `${slotLabels[slotId]} should be ${expected[slotId]}, not ${answer.placements[slotId] || "blank"}.`)
-      .join(" ")
-  };
-}
-
 function checkSpellingTenseTransfer(subject, wordId) {
   const spelling = getSubjectSpellingState(subject);
   const entry = SPELLING_INTERVENTION_LIBRARY[wordId];
@@ -6147,73 +6196,45 @@ function checkSpellingTenseTransfer(subject, wordId) {
   answer.completed = false;
   answer.awaitingAdvance = false;
   answer.lastCheckedAt = new Date().toISOString();
+  const prompt = getSpellingTensePrompt(spelling, entry);
 
-  if (!answer.placements.past || !answer.placements.present || !answer.placements.future) {
+  if (!answer.selectedTense) {
     answer.feedbackKind = "incorrect";
-    answer.feedbackMessage = "Incorrect. Place one word onto yesterday, today, and tomorrow before checking.";
-    spelling.coachMessage = "Complete all three time boxes before checking this word.";
+    answer.feedbackMessage = "Choose past, present, or future before checking.";
+    spelling.coachMessage = "Choose the tense before checking this word.";
     persistSubjects();
     return;
   }
 
-  const feedback = buildSpellingTenseFeedback(entry, answer);
-  answer.feedbackKind = feedback.correct ? "correct" : "incorrect";
-  answer.feedbackMessage = feedback.message;
-  if (!feedback.correct) {
-    answer.awaitingAdvance = true;
-    spelling.coachMessage = `Review the correction for ${entry.word}, then continue to the next word.`;
-    persistSubjects();
-    return;
-  }
-
+  const isCorrect = answer.selectedTense === prompt.tenseId;
+  answer.feedbackKind = isCorrect ? "correct" : "incorrect";
+  answer.feedbackMessage = isCorrect
+    ? `Correct. ${prompt.wordForm} is ${prompt.tenseId} tense in this sentence.`
+    : `Incorrect. ${prompt.wordForm} is ${prompt.tenseId} tense in this sentence, not ${answer.selectedTense}.`;
   answer.awaitingAdvance = true;
-  answer.selectedOption = "";
-  spelling.coachMessage = `${entry.word} is correct across past, present, and future.`;
+  spelling.coachMessage = isCorrect
+    ? `${entry.word} is correct. The horse moves one step closer to the stable.`
+    : `Review the correction for ${entry.word}, then continue to the next word.`;
   persistSubjects();
 }
 
 function selectSpellingTenseOption(subject, wordId, optionValue) {
   const spelling = getSubjectSpellingState(subject);
-  const entry = SPELLING_INTERVENTION_LIBRARY[wordId];
-  if (!entry) {
+  if (!SPELLING_INTERVENTION_LIBRARY[wordId]) {
     return;
   }
   const normalizedValue = String(optionValue || "").trim();
-  if (!normalizedValue || !(entry.tense?.options || []).includes(normalizedValue)) {
+  if (!SPELLING_TENSE_IDS.includes(normalizedValue)) {
     return;
   }
   const answer = ensureSpellingTenseAnswer(spelling, wordId);
-  answer.selectedOption = normalizedValue;
+  answer.selectedTense = normalizedValue;
   answer.checked = false;
   answer.awaitingAdvance = false;
   answer.feedbackKind = "";
   answer.feedbackMessage = "";
-  spelling.coachMessage = `${normalizedValue} selected. Now place it onto yesterday, today, or tomorrow.`;
+  spelling.coachMessage = `${normalizedValue} selected. Check the sentence when you are ready.`;
   persistSubjects();
-}
-
-function getSpellingTenseOptionOrder(spelling, entry) {
-  const options = [...(entry?.tense?.options || [])];
-  const seededRank = (value) =>
-    String(`${spelling?.currentAttemptId || "attempt"}:${entry?.id || ""}:${value}`)
-      .split("")
-      .reduce((total, character, index) => total + character.charCodeAt(0) * (index + 1), 0);
-
-  return options.sort((left, right) => {
-    const rankDifference = (seededRank(left) % 97) - (seededRank(right) % 97);
-    return rankDifference || left.localeCompare(right);
-  });
-}
-
-function placeSelectedSpellingTenseOption(subject, wordId, slotId) {
-  const spelling = getSubjectSpellingState(subject);
-  const answer = ensureSpellingTenseAnswer(spelling, wordId);
-  if (!answer.selectedOption) {
-    spelling.coachMessage = "Select a word first, then choose yesterday, today, or tomorrow.";
-    persistSubjects();
-    return;
-  }
-  assignSpellingTensePlacement(subject, wordId, slotId, answer.selectedOption);
 }
 
 function advanceSpellingTenseTransfer(subject, wordId) {
@@ -11442,7 +11463,7 @@ function renderSpelling() {
           <div class="ss-main">
             <article class="ss-stage-panel ss-stage-panel--diagnostic">
               <div class="ss-stage-panel__head ss-stage-panel__head--compact">
-                <p class="eyebrow">Stage 1 · Diagnostic — Spell what you hear</p>
+                <p class="eyebrow">Spell what you hear</p>
                 <span class="ss-stage-counter">${escapeHtml(`Word ${Math.min(spelling.diagnostic.currentIndex + 1, attemptWords.length)} of ${attemptWords.length}`)}</span>
               </div>
               <div class="spelling-diagnostic-dots spelling-diagnostic-dots--large" aria-label="Diagnostic progress">
@@ -11589,8 +11610,8 @@ function renderSpelling() {
       <article class="ss-stage-panel">
         <div class="ss-stage-panel__head">
           <div>
-            <p class="eyebrow">Stage 1</p>
-            <h4>Diagnostic review</h4>
+            <p class="eyebrow">Complete</p>
+            <h4>Stage 1 review</h4>
           </div>
           <span class="ss-stage-badge is-complete">Ribbon earned</span>
         </div>
@@ -11625,8 +11646,8 @@ function renderSpelling() {
         <article class="ss-stage-panel">
           <div class="ss-stage-panel__head">
             <div>
-              <p class="eyebrow">Stage 2</p>
-              <h4>Looks Right</h4>
+              <p class="eyebrow">Complete</p>
+              <h4>Stage 2 review</h4>
             </div>
             <span class="ss-stage-badge is-complete">Ribbon earned</span>
           </div>
@@ -11654,7 +11675,7 @@ function renderSpelling() {
       : `
         <article class="ss-stage-panel">
           <div class="ss-stage-panel__head ss-stage-panel__head--compact">
-            <p class="eyebrow">Stage 2 · Looks Right — Which one looks right?</p>
+            <p class="eyebrow">Which one looks right?</p>
             <span class="ss-stage-counter">${escapeHtml(`Word ${Math.min(answeredLookCount + 1, followUpWords.length)} of ${followUpWords.length}`)}</span>
           </div>
           <div class="ss-stage-progress">
@@ -11703,8 +11724,9 @@ function renderSpelling() {
     const flashcardWords = getSpellingFlashcardWords(spelling);
     const currentFlashcardWord = getSpellingFlashcardCurrentWord(spelling);
     const currentFlashcardCard = currentFlashcardWord ? ensureSpellingFlashcardCard(spelling, currentFlashcardWord.id) : null;
+    const flashcardExposureLimit = currentFlashcardWord ? getSpellingFlashcardExposureLimit(currentFlashcardWord.id) : SPELLING_FLASHCARD_EXPOSURE_COUNT;
     const currentFlashcardSentenceIndex = currentFlashcardCard
-      ? Math.max(0, Math.min(currentFlashcardCard.exposureIndex, (currentFlashcardWord?.familySentences || []).length - 1))
+      ? Math.max(0, Math.min(currentFlashcardCard.exposureIndex, flashcardExposureLimit - 1, (currentFlashcardWord?.familySentences || []).length - 1))
       : 0;
     const currentFlashcardSentence = currentFlashcardWord?.familySentences?.[currentFlashcardSentenceIndex] || "";
     const currentFlashcardSentenceWord = currentFlashcardWord?.familyWords?.[currentFlashcardSentenceIndex] || "";
@@ -11715,8 +11737,8 @@ function renderSpelling() {
         <article class="ss-stage-panel">
           <div class="ss-stage-panel__head">
             <div>
-              <p class="eyebrow">Stage 3</p>
-              <h4>Word families</h4>
+              <p class="eyebrow">Complete</p>
+              <h4>Stage 3 review</h4>
             </div>
             <span class="ss-stage-badge is-complete">Ribbon earned</span>
           </div>
@@ -11744,10 +11766,9 @@ function renderSpelling() {
       : `
         <article class="ss-stage-panel">
           <div class="ss-stage-panel__head ss-stage-panel__head--compact">
-            <p class="eyebrow">Stage 3 · Word Families — Tap the root</p>
+            <p class="eyebrow">Tap the root</p>
             <span class="ss-stage-counter">${escapeHtml(`Word ${completedFlashcardCount + 1} of ${flashcardWords.length}`)}</span>
           </div>
-          <p class="ss-stage-copy ss-stage-copy--lead">Press the root word — it appears in a sentence with one of its family words, then comes back. Once for each, then type the root they share.</p>
           ${currentFlashcardWord ? `
             <div class="ss-stage-progress">
               <div class="ss-dot-row" aria-label="Stage 3 progress">
@@ -11755,7 +11776,7 @@ function renderSpelling() {
               </div>
             </div>
             <section class="ss-family-panel${currentFlashcardCard?.checked ? (currentFlashcardCard?.feedbackKind === "correct" ? " is-correct" : " is-incorrect") : ""}">
-              ${currentFlashcardCard?.exposureIndex < 3 ? `
+              ${currentFlashcardCard?.exposureIndex < flashcardExposureLimit ? `
                 <div class="ss-family-stage-grid">
                   <div class="ss-family-keyword-panel">
                     <button
@@ -11769,8 +11790,8 @@ function renderSpelling() {
                     </button>
                   </div>
                   <div class="ss-family-sentence-card${currentFlashcardCard?.isShowingSentence ? " is-active" : ""}">
-                    <p class="ss-family-sentence-label">Family word ${escapeHtml(String(Math.min((currentFlashcardCard?.exposureIndex || 0) + 1, 3)))} of 3 · ${escapeHtml((currentFlashcardSentenceWord || "").toUpperCase())}</p>
-                    <p>${currentFlashcardCard?.isShowingSentence ? buildSpellingFamilySentenceMarkup(currentFlashcardSentence, currentFlashcardSentenceWord) : "Tap the root to hear the next family-word sentence."}</p>
+                    <p class="ss-family-sentence-label">Family word ${escapeHtml(String(Math.min((currentFlashcardCard?.exposureIndex || 0) + 1, flashcardExposureLimit)))} of ${escapeHtml(String(flashcardExposureLimit))} · ${escapeHtml((currentFlashcardSentenceWord || "").toUpperCase())}</p>
+                    <p>${currentFlashcardCard?.isShowingSentence ? buildSpellingFamilySentenceMarkup(currentFlashcardSentence, currentFlashcardSentenceWord) : "tap the root word"}</p>
                   </div>
                 </div>
                 <div class="ss-family-strip">
@@ -11805,13 +11826,16 @@ function renderSpelling() {
     const currentFamilyWord = getSpellingTenseCurrentWord(spelling);
     const currentFamilyAnswer = currentFamilyWord ? ensureSpellingTenseAnswer(spelling, currentFamilyWord.id) : null;
     const earnedHorseMeta = getSpellingPaddockHorseMeta(spelling.lastUnlockedHorseId || spelling.paddockHorses[spelling.paddockHorses.length - 1]);
-    const tenseLabels = {
-      past: "Yesterday",
-      present: "Today",
-      future: "Tomorrow"
-    };
     const completedTenseCount = followUpWords.filter((entry) => ensureSpellingTenseAnswer(spelling, entry.id).completed).length;
+    const displayTenseProgress = Math.min(
+      followUpWords.length,
+      completedTenseCount + (currentFamilyAnswer?.awaitingAdvance ? 1 : 0)
+    );
+    const incorrectTenseCount = followUpWords.filter((entry) => ensureSpellingTenseAnswer(spelling, entry.id).feedbackKind === "incorrect").length;
+    const hayRemaining = Math.max(0, SPELLING_UNIT_SEED.followUpWordCount - incorrectTenseCount);
     const currentTenseIndex = currentFamilyWord ? Math.max(0, followUpWords.findIndex((entry) => entry.id === currentFamilyWord.id)) : 0;
+    const currentTensePrompt = currentFamilyWord ? getSpellingTensePrompt(spelling, currentFamilyWord) : null;
+    const raceHorseMeta = SPELLING_PADDOCK_HORSES[(spelling.paddockHorses || []).length] || getSpellingOwnedHorseMeta(spelling)[0] || SPELLING_PADDOCK_HORSES[0];
     stageBody = spelling.sessionCompletionReady
       ? `
         <article class="ss-stage-panel">
@@ -11858,8 +11882,8 @@ function renderSpelling() {
         <article class="ss-stage-panel">
           <div class="ss-stage-panel__head">
             <div>
-              <p class="eyebrow">Stage 4</p>
-              <h4>Past, Present, Future</h4>
+              <p class="eyebrow">Complete</p>
+              <h4>Stage 4 review</h4>
             </div>
             <span class="ss-stage-badge is-complete">Ribbon earned</span>
           </div>
@@ -11914,60 +11938,52 @@ function renderSpelling() {
       : `
         <article class="ss-stage-panel">
           <div class="ss-stage-panel__head ss-stage-panel__head--compact">
-            <p class="eyebrow">Stage 4 · Past, Present, Future — Drag each form</p>
+            <p class="eyebrow">Choose the tense</p>
             <span class="ss-stage-counter">${escapeHtml(`Word ${completedTenseCount + 1} of ${followUpWords.length}`)}</span>
           </div>
-          ${currentFamilyWord ? `
-            <div class="ss-root-row">
-              <span>Root</span>
-              <button type="button" class="ss-keyword-chip ss-keyword-chip--static" disabled>${escapeHtml(currentFamilyWord.word)}</button>
-            </div>
-            <p class="ss-stage-copy ss-stage-copy--lead">Drag each form into the right time.</p>
-            <div class="ss-stage-progress">
-              <div class="ss-dot-row" aria-label="Stage 4 progress">
-                ${buildSpellingSessionDotRow(followUpWords.length, currentTenseIndex, completedTenseCount)}
-              </div>
-            </div>
-            <section class="ss-tense-panel${currentFamilyAnswer?.checked ? (currentFamilyAnswer?.feedbackKind === "correct" ? " is-correct" : " is-incorrect") : ""}">
-              <div class="ss-tense-board">
-                ${["past", "present", "future"]
-                  .map((slotId) => `
-                    <div class="ss-tense-slot" data-spelling-tense-slot="${slotId}" data-spelling-tense-word="${currentFamilyWord.id}" role="button" tabindex="0">
-                      <span class="ss-tense-slot__label">${escapeHtml(tenseLabels[slotId])}</span>
-                      ${
-                        currentFamilyAnswer?.placements?.[slotId]
-                          ? `
-                            <button type="button" class="ss-tense-token" data-spelling-tense-clear="${slotId}" data-spelling-tense-word="${currentFamilyWord.id}">
-                              ${escapeHtml(currentFamilyAnswer.placements[slotId])}
-                            </button>
-                          `
-                          : '<span class="ss-tense-slot__placeholder">Drop the correct word here</span>'
-                      }
+          ${currentFamilyWord && currentTensePrompt ? `
+            <section class="ss-tense-race${currentFamilyAnswer?.checked ? (currentFamilyAnswer?.feedbackKind === "correct" ? " is-correct" : " is-incorrect") : ""}">
+              <div class="ss-tense-race__scene">
+                <div class="ss-tense-race__track" aria-label="Horse progress to the stable">
+                  ${Array.from({ length: SPELLING_UNIT_SEED.followUpWordCount }, (_, index) => `
+                    <span class="ss-tense-race__tile${index < displayTenseProgress ? " is-complete" : ""}${index === Math.min(displayTenseProgress, SPELLING_UNIT_SEED.followUpWordCount - 1) ? " is-current" : ""}"></span>
+                  `).join("")}
+                  <img class="ss-tense-race__horse" src="${escapeHtml(raceHorseMeta.image)}" alt="${escapeHtml(raceHorseMeta.label)}" style="--horse-progress:${escapeHtml(String(Math.min(displayTenseProgress, SPELLING_UNIT_SEED.followUpWordCount - 1)))};" />
+                  <div class="ss-tense-race__stable">
+                    <img src="/horses/Stables.png" alt="Stable" />
+                    <div class="ss-tense-race__hay" aria-label="${escapeHtml(`${hayRemaining} hay bag${hayRemaining === 1 ? "" : "s"} left`)}">
+                      ${Array.from({ length: SPELLING_UNIT_SEED.followUpWordCount }, (_, index) => `<span class="ss-tense-race__hay-bale${index < hayRemaining ? "" : " is-gone"}"></span>`).join("")}
                     </div>
-                  `)
-                  .join("")}
+                  </div>
+                </div>
               </div>
-              <p class="ss-family-recall__prompt">Drag from here</p>
-              <div class="ss-option-bank">
-                ${getSpellingTenseOptionOrder(spelling, currentFamilyWord)
-                  .map((option) => `
-                    <button
-                      type="button"
-                      class="ss-option-chip${Object.values(currentFamilyAnswer?.placements || {}).includes(option) ? " is-used" : ""}${currentFamilyAnswer?.selectedOption === option ? " is-selected" : ""}"
-                      draggable="true"
-                      data-spelling-tense-option="${escapeHtml(option)}"
-                      data-spelling-tense-word="${currentFamilyWord.id}"
-                    >
-                      ${escapeHtml(option)}
-                    </button>
-                  `)
-                  .join("")}
+              <div class="ss-stage-progress">
+                <div class="ss-dot-row" aria-label="Stage 4 progress">
+                  ${buildSpellingSessionDotRow(followUpWords.length, currentTenseIndex, completedTenseCount)}
+                </div>
+              </div>
+              <div class="ss-tense-question">
+                <p class="ss-tense-question__sentence">${buildSpellingFamilySentenceMarkup(currentTensePrompt.sentence, currentTensePrompt.wordForm)}</p>
+                <p class="ss-family-recall__prompt">Is the highlighted word past, present, or future?</p>
+              </div>
+              <div class="ss-tense-choice-grid">
+                ${SPELLING_TENSE_IDS.map((tenseId) => `
+                  <button
+                    type="button"
+                    class="ss-tense-choice${currentFamilyAnswer?.selectedTense === tenseId ? " is-selected" : ""}"
+                    data-spelling-tense-option="${escapeHtml(tenseId)}"
+                    data-spelling-tense-word="${currentFamilyWord.id}"
+                    ${currentFamilyAnswer?.awaitingAdvance ? "disabled" : ""}
+                  >
+                    ${escapeHtml(tenseId.charAt(0).toUpperCase() + tenseId.slice(1))}
+                  </button>
+                `).join("")}
               </div>
               ${currentFamilyAnswer?.checked ? `<div class="ss-status-note ss-status-note--feedback${currentFamilyAnswer?.feedbackKind === "correct" ? " is-correct" : " is-incorrect"}"><p>${escapeHtml(currentFamilyAnswer?.feedbackMessage || "")}</p></div>` : ""}
               <div class="spelling-stage-actions spelling-stage-actions--footer">
                 ${currentFamilyAnswer?.awaitingAdvance
                   ? `<button type="button" class="primary-button primary-button--dark" data-spelling-tense-advance="${currentFamilyWord.id}">${escapeHtml(spelling.tenseTransfer.completed ? "Finish the set" : "Next word")}</button>`
-                  : `<button type="button" class="primary-button primary-button--dark" data-spelling-tense-submit="${currentFamilyWord.id}">Check form</button>`}
+                  : `<button type="button" class="primary-button primary-button--dark" data-spelling-tense-submit="${currentFamilyWord.id}">Check answer</button>`}
               </div>
             </section>
           ` : ""}
@@ -12118,50 +12134,6 @@ function renderSpelling() {
   host.querySelectorAll("[data-spelling-tense-option]").forEach((button) => {
     button.addEventListener("click", () => {
       selectSpellingTenseOption(subject, button.dataset.spellingTenseWord, button.dataset.spellingTenseOption);
-      render();
-    });
-    button.addEventListener("dragstart", (event) => {
-      event.dataTransfer?.setData("text/plain", button.dataset.spellingTenseOption || "");
-      event.dataTransfer?.setData("application/x-spelling-word", button.dataset.spellingTenseWord || "");
-      event.dataTransfer.effectAllowed = "move";
-    });
-  });
-
-  host.querySelectorAll("[data-spelling-tense-slot]").forEach((slot) => {
-    slot.addEventListener("click", () => {
-      placeSelectedSpellingTenseOption(subject, slot.dataset.spellingTenseWord, slot.dataset.spellingTenseSlot);
-      render();
-    });
-    slot.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        placeSelectedSpellingTenseOption(subject, slot.dataset.spellingTenseWord, slot.dataset.spellingTenseSlot);
-        render();
-      }
-    });
-    slot.addEventListener("dragover", (event) => {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = "move";
-      slot.classList.add("is-drag-over");
-    });
-    slot.addEventListener("dragleave", () => {
-      slot.classList.remove("is-drag-over");
-    });
-    slot.addEventListener("drop", (event) => {
-      event.preventDefault();
-      slot.classList.remove("is-drag-over");
-      const optionValue = event.dataTransfer?.getData("text/plain") || "";
-      const wordId = slot.dataset.spellingTenseWord || "";
-      const slotId = slot.dataset.spellingTenseSlot || "";
-      assignSpellingTensePlacement(subject, wordId, slotId, optionValue);
-      render();
-    });
-  });
-
-  host.querySelectorAll("[data-spelling-tense-clear]").forEach((button) => {
-    button.addEventListener("click", (event) => {
-      event.stopPropagation();
-      clearSpellingTensePlacement(subject, button.dataset.spellingTenseWord, button.dataset.spellingTenseClear);
       render();
     });
   });
