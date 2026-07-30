@@ -4,7 +4,7 @@ const authTokenStorageKey = "paperpanda-session-token";
 const subjectsStorageKey = "paperpanda-subjects-by-account";
 const settingsStorageKey = "studylift-settings";
 const uiVersionStorageKey = "paperpanda-ui-version";
-const currentUiVersion = "2026-07-30-writing-and-tense-race-fixes";
+const currentUiVersion = "2026-07-30-writing-launchpad-and-stage5-fix";
 const previewDatabaseName = "paperpanda-assets";
 const previewStoreName = "document-previews";
 const settingsAssetStoreName = "settings-assets";
@@ -2984,6 +2984,11 @@ function renderSubjectFocusLaunchpad() {
     const drillIn = () => {
       const nextArea = card.dataset.focusArea;
       if (!nextArea) {
+        return;
+      }
+      if (nextArea === "writing" && subject.id !== "english") {
+        state.selectedSubjectId = "english";
+        openSubjectsWorkspace("writing");
         return;
       }
       state.activeSubjectTab = nextArea;
