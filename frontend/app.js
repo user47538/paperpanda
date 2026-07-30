@@ -4,7 +4,7 @@ const authTokenStorageKey = "paperpanda-session-token";
 const subjectsStorageKey = "paperpanda-subjects-by-account";
 const settingsStorageKey = "studylift-settings";
 const uiVersionStorageKey = "paperpanda-ui-version";
-const currentUiVersion = "2026-07-30-spelling-shell-trim";
+const currentUiVersion = "2026-07-30-writing-and-tense-race-fixes";
 const previewDatabaseName = "paperpanda-assets";
 const previewStoreName = "document-previews";
 const settingsAssetStoreName = "settings-assets";
@@ -552,104 +552,104 @@ const SPELLING_TENSE_IDS = ["past", "present", "future"];
 const SPELLING_CHALLENGE_MODE_ORDER = ["looks-right", "dictation", "root-word", "missing-letter"];
 const SPELLING_TENSE_PROMPTS = {
   believe: {
-    past: "Yesterday, they believed the strongest explanation straight away.",
-    present: "Today, they believe the strongest explanation straight away.",
-    future: "Tomorrow, they will believe the strongest explanation straight away."
+    past: "They believed the strongest explanation straight away.",
+    present: "They believe the strongest explanation straight away.",
+    future: "They will believe the strongest explanation straight away."
   },
   describe: {
-    past: "Yesterday, they described the image with precise detail.",
-    present: "Today, they describe the image with precise detail.",
-    future: "Tomorrow, they will describe the image with precise detail."
+    past: "They described the image with precise detail.",
+    present: "They describe the image with precise detail.",
+    future: "They will describe the image with precise detail."
   },
   decide: {
-    past: "Yesterday, they decided which example proved the point best.",
-    present: "Today, they decide which example proves the point best.",
-    future: "Tomorrow, they will decide which example proves the point best."
+    past: "They decided which example proved the point best.",
+    present: "They decide which example proves the point best.",
+    future: "They will decide which example proves the point best."
   },
   imagine: {
-    past: "Yesterday, they imagined a stronger ending for the story.",
-    present: "Today, they imagine a stronger ending for the story.",
-    future: "Tomorrow, they will imagine a stronger ending for the story."
+    past: "They imagined a stronger ending for the story.",
+    present: "They imagine a stronger ending for the story.",
+    future: "They will imagine a stronger ending for the story."
   },
   measure: {
-    past: "Yesterday, they measured the fabric before cutting it.",
-    present: "Today, they measure the fabric before cutting it.",
-    future: "Tomorrow, they will measure the fabric before cutting it."
+    past: "They measured the fabric before cutting it.",
+    present: "They measure the fabric before cutting it.",
+    future: "They will measure the fabric before cutting it."
   },
   notice: {
-    past: "Yesterday, they noticed the spelling pattern quickly.",
-    present: "Today, they notice the spelling pattern quickly.",
-    future: "Tomorrow, they will notice the spelling pattern quickly."
+    past: "They noticed the spelling pattern quickly.",
+    present: "They notice the spelling pattern quickly.",
+    future: "They will notice the spelling pattern quickly."
   },
   remember: {
-    past: "Yesterday, they remembered the rule during the test.",
-    present: "Today, they remember the rule during the test.",
-    future: "Tomorrow, they will remember the rule during the test."
+    past: "They remembered the rule during the test.",
+    present: "They remember the rule during the test.",
+    future: "They will remember the rule during the test."
   },
   appear: {
-    past: "Yesterday, they appeared on stage with calm confidence.",
-    present: "Today, they appear on stage with calm confidence.",
-    future: "Tomorrow, they will appear on stage with calm confidence."
+    past: "They appeared on stage with calm confidence.",
+    present: "They appear on stage with calm confidence.",
+    future: "They will appear on stage with calm confidence."
   },
   separate: {
-    past: "Yesterday, they separated the facts from the opinions.",
-    present: "Today, they separate the facts from the opinions.",
-    future: "Tomorrow, they will separate the facts from the opinions."
+    past: "They separated the facts from the opinions.",
+    present: "They separate the facts from the opinions.",
+    future: "They will separate the facts from the opinions."
   },
   achieve: {
-    past: "Yesterday, they achieved their goal through steady practice.",
-    present: "Today, they achieve their goal through steady practice.",
-    future: "Tomorrow, they will achieve their goal through steady practice."
+    past: "They achieved their goal through steady practice.",
+    present: "They achieve their goal through steady practice.",
+    future: "They will achieve their goal through steady practice."
   },
   compare: {
-    past: "Yesterday, they compared the two paragraphs carefully.",
-    present: "Today, they compare the two paragraphs carefully.",
-    future: "Tomorrow, they will compare the two paragraphs carefully."
+    past: "They compared the two paragraphs carefully.",
+    present: "They compare the two paragraphs carefully.",
+    future: "They will compare the two paragraphs carefully."
   },
   complete: {
-    past: "Yesterday, they completed the task before lunch.",
-    present: "Today, they complete the task before lunch.",
-    future: "Tomorrow, they will complete the task before lunch."
+    past: "They completed the task before lunch.",
+    present: "They complete the task before lunch.",
+    future: "They will complete the task before lunch."
   },
   consider: {
-    past: "Yesterday, they considered every option before answering.",
-    present: "Today, they consider every option before answering.",
-    future: "Tomorrow, they will consider every option before answering."
+    past: "They considered every option before answering.",
+    present: "They consider every option before answering.",
+    future: "They will consider every option before answering."
   },
   continue: {
-    past: "Yesterday, they continued the draft after the break.",
-    present: "Today, they continue the draft after the break.",
-    future: "Tomorrow, they will continue the draft after the break."
+    past: "They continued the draft after the break.",
+    present: "They continue the draft after the break.",
+    future: "They will continue the draft after the break."
   },
   discover: {
-    past: "Yesterday, they discovered a better piece of evidence.",
-    present: "Today, they discover a better piece of evidence.",
-    future: "Tomorrow, they will discover a better piece of evidence."
+    past: "They discovered a better piece of evidence.",
+    present: "They discover a better piece of evidence.",
+    future: "They will discover a better piece of evidence."
   },
   improve: {
-    past: "Yesterday, they improved the paragraph with one clear change.",
-    present: "Today, they improve the paragraph with one clear change.",
-    future: "Tomorrow, they will improve the paragraph with one clear change."
+    past: "They improved the paragraph with one clear change.",
+    present: "They improve the paragraph with one clear change.",
+    future: "They will improve the paragraph with one clear change."
   },
   include: {
-    past: "Yesterday, they included a quote in the response.",
-    present: "Today, they include a quote in the response.",
-    future: "Tomorrow, they will include a quote in the response."
+    past: "They included a quote in the response.",
+    present: "They include a quote in the response.",
+    future: "They will include a quote in the response."
   },
   observe: {
-    past: "Yesterday, they observed the pattern in the results.",
-    present: "Today, they observe the pattern in the results.",
-    future: "Tomorrow, they will observe the pattern in the results."
+    past: "They observed the pattern in the results.",
+    present: "They observe the pattern in the results.",
+    future: "They will observe the pattern in the results."
   },
   prepare: {
-    past: "Yesterday, they prepared the notes for the lesson.",
-    present: "Today, they prepare the notes for the lesson.",
-    future: "Tomorrow, they will prepare the notes for the lesson."
+    past: "They prepared the notes for the lesson.",
+    present: "They prepare the notes for the lesson.",
+    future: "They will prepare the notes for the lesson."
   },
   deliver: {
-    past: "Yesterday, they delivered the speech with confidence.",
-    present: "Today, they deliver the speech with confidence.",
-    future: "Tomorrow, they will deliver the speech with confidence."
+    past: "They delivered the speech with confidence.",
+    present: "They deliver the speech with confidence.",
+    future: "They will deliver the speech with confidence."
   }
 };
 const SPELLING_INTERVENTION_LIBRARY = {
@@ -3127,10 +3127,6 @@ function renderFocusAskFab() {
 
 function renderFocusMode() {
   const askOpen = state.focusMode && state.currentView === "subjects" && state.focusAskOpen;
-  if (state.focusMode && state.currentView === "subjects" && !state.focusArea && !askOpen && getSelectedSubject()?.id === "spelling") {
-    state.activeSubjectTab = "spelling";
-    state.focusArea = "spelling";
-  }
   const showLaunchpad = state.focusMode && state.currentView === "subjects" && !state.focusArea && !askOpen;
   const drilledIn = state.focusMode && state.currentView === "subjects" && Boolean(state.focusArea) && !askOpen;
   const readerDrilled = drilledIn && state.focusArea === "reader";
@@ -4903,6 +4899,22 @@ function getSpellingStageId(subject) {
   return "repeat-check";
 }
 
+function getSpellingNextStageAfterCelebration(subject, celebrationStageId = "") {
+  const normalizedStageId = String(celebrationStageId || "");
+  const completionMap = getSpellingStageCompletionMap(subject);
+  if (normalizedStageId === "diagnostic") {
+    return SPELLING_MIDDLE_STAGE_IDS.find((stageId) => !completionMap[stageId]) || SPELLING_MIDDLE_STAGE_IDS[0] || "repeat-check";
+  }
+  if (SPELLING_MIDDLE_STAGE_IDS.includes(normalizedStageId)) {
+    return SPELLING_MIDDLE_STAGE_IDS.find((stageId) => !completionMap[stageId]) || "repeat-check";
+  }
+  return "repeat-check";
+}
+
+function getSpellingStageActionLabel(stageId) {
+  return SPELLING_STAGE_LABELS[String(stageId || "")] || "next stage";
+}
+
 function canOpenSpellingStage(subject, stageId) {
   const normalizedStageId = String(stageId || "");
   if (!SPELLING_STAGE_ORDER.includes(normalizedStageId)) {
@@ -5096,6 +5108,8 @@ function setSpellingHomeTab(subject, tabId) {
     return;
   }
   spelling.homeTab = String(tabId);
+  spelling.celebrationStageId = "";
+  spelling.sessionCompletionReady = false;
   persistSubjects();
 }
 
@@ -5134,13 +5148,9 @@ function continueSpellingStage(subject) {
     persistSubjects();
     return;
   }
-  let nextStageId = "";
-  if (celebrationStageId === "diagnostic") {
-    nextStageId = SPELLING_MIDDLE_STAGE_IDS.find((stageId) => !completionMap[stageId]) || SPELLING_MIDDLE_STAGE_IDS[0];
-  } else if (SPELLING_MIDDLE_STAGE_IDS.includes(celebrationStageId)) {
-    nextStageId = SPELLING_MIDDLE_STAGE_IDS.find((stageId) => !completionMap[stageId]) || "repeat-check";
-  } else {
-    nextStageId = "repeat-check";
+  let nextStageId = getSpellingNextStageAfterCelebration(subject, celebrationStageId);
+  if (celebrationStageId === "repeat-check" && !SPELLING_STAGE_ORDER.every((stageId) => completionMap[stageId])) {
+    nextStageId = getSpellingStageId(subject);
   }
   spelling.celebrationStageId = "";
   spelling.sessionCompletionReady = false;
@@ -5297,37 +5307,43 @@ function setupSpellingPaddockInteractions(subject, host) {
   };
 }
 
-function getSpellingCelebrationCopy(stageId) {
+function getSpellingCelebrationCopy(subject, stageId) {
   if (stageId === "diagnostic") {
+    const nextStageId = getSpellingNextStageAfterCelebration(subject, stageId);
     return {
       eyebrow: "Ribbon earned",
       title: "Stage 1 complete",
-      body: "The spelling profile is ready. Continue to the sentence check so the follow-up words can be narrowed to the patterns that still look uncertain.",
-      action: "Continue to stage 2"
+      body: "The spelling profile is ready. Continue to the next spelling activity so the follow-up words can be narrowed to the patterns that still need attention.",
+      action: `Continue to ${getSpellingStageActionLabel(nextStageId)}`
     };
   }
   if (stageId === "looks-right") {
+    const nextStageId = getSpellingNextStageAfterCelebration(subject, stageId);
     return {
       eyebrow: "Ribbon earned",
       title: "Stage 2 complete",
       body: "The words that still look unstable have been identified. Continue to the next stage to rehearse them one at a time through word-family sentences.",
-      action: "Continue to stage 3"
+      action: `Continue to ${getSpellingStageActionLabel(nextStageId)}`
     };
   }
   if (stageId === "word-families") {
+    const nextStageId = getSpellingNextStageAfterCelebration(subject, stageId);
     return {
       eyebrow: "Ribbon earned",
       title: "Stage 3 complete",
-      body: "Those family clues held. Continue to the final stage to sort the same key word across yesterday, today, and tomorrow.",
-      action: "Continue to stage 4"
+      body: "Those family clues held. Continue to the next spelling activity to check how the word changes across tense.",
+      action: `Continue to ${getSpellingStageActionLabel(nextStageId)}`
     };
   }
   if (stageId === "tense-transfer") {
+    const nextStageId = getSpellingNextStageAfterCelebration(subject, stageId);
     return {
       eyebrow: "Ribbon earned",
       title: "Stage 4 complete",
-      body: "The tense check is complete. Continue to the final spelling check so you can compare the first dictation with what changed after the lesson.",
-      action: "Continue to stage 5"
+      body: nextStageId === "repeat-check"
+        ? "The tense check is complete. Continue to the final spelling check so you can compare the first dictation with what changed after the lesson."
+        : "The tense check is complete. Continue to the next open spelling activity before the final check unlocks.",
+      action: `Continue to ${getSpellingStageActionLabel(nextStageId)}`
     };
   }
   return {
@@ -12239,7 +12255,7 @@ function renderSpelling() {
   let stageBody = "";
 
   if (showingCelebration) {
-    const celebrationCopy = getSpellingCelebrationCopy(stageId);
+    const celebrationCopy = getSpellingCelebrationCopy(subject, stageId);
     stageBody = stageId === "diagnostic"
       ? `
         <article class="ss-stage-panel">
@@ -12514,6 +12530,10 @@ function renderSpelling() {
       followUpWords.length,
       completedTenseCount + (currentFamilyAnswer?.awaitingAdvance ? 1 : 0)
     );
+    const horseProgressIndex = Math.min(displayTenseProgress, Math.max(0, SPELLING_UNIT_SEED.followUpWordCount - 1));
+    const horseProgressRatio = SPELLING_UNIT_SEED.followUpWordCount > 1
+      ? horseProgressIndex / (SPELLING_UNIT_SEED.followUpWordCount - 1)
+      : 0;
     const incorrectTenseCount = followUpWords.filter((entry) => ensureSpellingTenseAnswer(spelling, entry.id).feedbackKind === "incorrect").length;
     const hayRemaining = Math.max(0, SPELLING_UNIT_SEED.followUpWordCount - incorrectTenseCount);
     const currentTenseIndex = currentFamilyWord ? Math.max(0, followUpWords.findIndex((entry) => entry.id === currentFamilyWord.id)) : 0;
@@ -12563,7 +12583,7 @@ function renderSpelling() {
                   ${Array.from({ length: SPELLING_UNIT_SEED.followUpWordCount }, (_, index) => `
                     <span class="ss-tense-race__tile${index < displayTenseProgress ? " is-complete" : ""}${index === Math.min(displayTenseProgress, SPELLING_UNIT_SEED.followUpWordCount - 1) ? " is-current" : ""}"></span>
                   `).join("")}
-                  <img class="ss-tense-race__horse" src="${escapeHtml(raceHorseMeta.image)}" alt="${escapeHtml(raceHorseMeta.label)}" style="--horse-progress:${escapeHtml(String(Math.min(displayTenseProgress, SPELLING_UNIT_SEED.followUpWordCount - 1)))};" />
+                  <img class="ss-tense-race__horse" src="${escapeHtml(raceHorseMeta.image)}" alt="${escapeHtml(raceHorseMeta.label)}" style="--horse-progress-ratio:${escapeHtml(String(horseProgressRatio))};" />
                   <div class="ss-tense-race__stable">
                     <img src="/horses/Stables.png" alt="Stable" />
                     <div class="ss-tense-race__hay" aria-label="${escapeHtml(`${hayRemaining} hay bag${hayRemaining === 1 ? "" : "s"} left`)}">
