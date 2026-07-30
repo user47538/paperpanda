@@ -12258,14 +12258,15 @@ function renderSpelling() {
   const stageScoreSummary = getSpellingStageScoreSummary(spelling);
   const overallScorePercent = getSpellingOverallScorePercent(spelling);
   const ownedHorseMeta = getSpellingOwnedHorseMeta(spelling);
-  const homeTab = String(spelling.homeTab || "stable");
+  let homeTab = String(spelling.homeTab || "stable");
 
   if (stageId === "repeat-check" && spelling.repeatCheck.completed && !showingCelebration && !spelling.sessionCompletionReady) {
     spelling.homeTab = "stable";
     spelling.selectedStageId = "";
+    spelling.celebrationStageId = "";
+    spelling.sessionCompletionReady = false;
     persistSubjects({ skipRemoteSync: true });
-    renderSpelling();
-    return;
+    homeTab = "stable";
   }
 
   if (spelling.challenge.active || (spelling.challenge.completed && spelling.challenge.lastCompletedWeekKey === currentWeekKey())) {
