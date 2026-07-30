@@ -6877,6 +6877,20 @@ input[type="date"] {
   border-bottom: 1px solid rgba(46, 42, 51, 0.08);
 }
 
+.ss-progress-row {
+  width: 100%;
+  background: transparent;
+  border-left: 0;
+  border-right: 0;
+  border-top: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ss-progress-row:disabled {
+  cursor: default;
+}
+
 .ss-progress-row:last-child,
 .ss-backlog-row:last-child {
   border-bottom: 0;

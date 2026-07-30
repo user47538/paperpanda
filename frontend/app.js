@@ -471,7 +471,8 @@ const FOCUS_AREAS = [
   { id: "assessments", icon: "🎯", label: "Assessments", blurb: "Tests & due dates" }
 ];
 
-const SPELLING_STAGE_ORDER = ["diagnostic", "looks-right", "word-families", "tense-transfer"];
+const SPELLING_STAGE_ORDER = ["diagnostic", "looks-right", "word-families", "tense-transfer", "repeat-check"];
+const SPELLING_MIDDLE_STAGE_IDS = ["looks-right", "word-families", "tense-transfer"];
 const SPELLING_FLASHCARD_EXPOSURE_COUNT = 2;
 const SPELLING_FLASHCARDS_VERSION = 5;
 const SPELLING_TENSE_TRANSFER_VERSION = 5;
@@ -480,7 +481,8 @@ const SPELLING_STAGE_LABELS = {
   diagnostic: "Stage 1",
   "looks-right": "Stage 2",
   "word-families": "Stage 3",
-  "tense-transfer": "Stage 4"
+  "tense-transfer": "Stage 4",
+  "repeat-check": "Stage 5"
 };
 const SPELLING_FOCUS_LABELS = {
   "over-articulation": "Over-articulation and hidden sounds",
@@ -492,7 +494,7 @@ const SPELLING_UNIT_SEED = {
   id: "spelling-progression",
   title: "Spelling Stables",
   intro:
-    "Run a four-stage spelling session built from the words that still need attention, then earn ribbons and grow the stable.",
+    "Run a five-stage spelling session built from the words that still need attention, then earn ribbons and grow the stable.",
   diagnosticTargetCount: 10,
   followUpWordCount: 10,
   reviewDays: ["Day 1", "Day 3", "Day 7", "Day 14", "Day 30"]
@@ -4315,6 +4317,12 @@ function createDefaultSpellingState(subjectId = "") {
       currentWordId: "",
       completed: false
     },
+    repeatCheck: {
+      currentIndex: 0,
+      currentInput: "",
+      responses: {},
+      completed: false
+    },
     homeTab: "stable",
     selectedStageId: "",
     celebrationStageId: "",
@@ -4347,6 +4355,7 @@ function normaliseSpellingState(spelling, subjectId = "") {
   const looksRight = next.looksRight && typeof next.looksRight === "object" ? next.looksRight : {};
   const flashcards = next.flashcards && typeof next.flashcards === "object" ? next.flashcards : {};
   const tenseTransfer = next.tenseTransfer && typeof next.tenseTransfer === "object" ? next.tenseTransfer : {};
+  const repeatCheck = next.repeatCheck && typeof next.repeatCheck === "object" ? next.repeatCheck : {};
   const challenge = next.challenge && typeof next.challenge === "object" ? next.challenge : {};
   const isCurrentFlashcardsVersion = Number(flashcards.version || 0) === SPELLING_FLASHCARDS_VERSION;
   const isCurrentTenseTransferVersion = Number(tenseTransfer.version || 0) === SPELLING_TENSE_TRANSFER_VERSION;
@@ -4461,6 +4470,27 @@ function normaliseSpellingState(spelling, subjectId = "") {
       currentWordId: isCurrentTenseTransferVersion ? String(tenseTransfer.currentWordId || "") : "",
       completed: isCurrentTenseTransferVersion ? Boolean(tenseTransfer.completed) : false
     },
+    repeatCheck: {
+      ...base.repeatCheck,
+      ...repeatCheck,
+      currentIndex: Math.min(
+        SPELLING_UNIT_SEED.diagnosticTargetCount,
+        Math.max(0, Number(repeatCheck.currentIndex || 0))
+      ),
+      currentInput: String(repeatCheck.currentInput || ""),
+      responses: repeatCheck.responses && typeof repeatCheck.responses === "object" && !Array.isArray(repeatCheck.responses)
+        ? Object.fromEntries(
+            Object.entries(repeatCheck.responses).map(([wordId, entry]) => [
+              wordId,
+              {
+                attempt: String(entry?.attempt || ""),
+                correct: Boolean(entry?.correct)
+              }
+            ])
+          )
+        : {},
+      completed: Boolean(repeatCheck.completed)
+    },
     homeTab: ["session", "stable", "progress", "review"].includes(String(next.homeTab || "")) ? String(next.homeTab || "") : "stable",
     selectedStageId: SPELLING_STAGE_ORDER.includes(String(next.selectedStageId || "")) ? String(next.selectedStageId || "") : "",
     celebrationStageId: SPELLING_STAGE_ORDER.includes(String(next.celebrationStageId || "")) ? String(next.celebrationStageId || "") : "",
@@ -4544,7 +4574,8 @@ function getSpellingStageCompletionMap(subject) {
     diagnostic: Boolean(spelling.diagnostic.completed),
     "looks-right": Boolean(spelling.looksRight.completed),
     "word-families": Boolean(spelling.flashcards.completed),
-    "tense-transfer": Boolean(spelling.tenseTransfer.completed)
+    "tense-transfer": Boolean(spelling.tenseTransfer.completed),
+    "repeat-check": Boolean(spelling.repeatCheck.completed)
   };
 }
 
@@ -4579,6 +4610,7 @@ function getSpellingStageScoreSummary(spelling) {
   const looksRightCorrect = followUpWords.filter((entry) => spelling.looksRight.answers[entry.id] === entry.word).length;
   const flashcardCorrect = flashcardWords.filter((entry) => ensureSpellingFlashcardCard(spelling, entry.id).feedbackKind === "correct").length;
   const tenseCorrect = followUpWords.filter((entry) => ensureSpellingTenseAnswer(spelling, entry.id).feedbackKind === "correct").length;
+  const repeatCorrect = diagnosticWords.filter((wordEntry) => spelling.repeatCheck.responses[wordEntry.id]?.correct).length;
 
   return {
     diagnostic: {
@@ -4600,6 +4632,11 @@ function getSpellingStageScoreSummary(spelling) {
       label: "Stage 4",
       correct: tenseCorrect,
       total: followUpWords.length
+    },
+    "repeat-check": {
+      label: "Stage 5",
+      correct: repeatCorrect,
+      total: diagnosticWords.length
     }
   };
 }
@@ -4698,7 +4735,35 @@ function getSpellingOwnedHorseMeta(spelling) {
 
 function getSpellingStageId(subject) {
   const completionMap = getSpellingStageCompletionMap(subject);
-  return SPELLING_STAGE_ORDER.find((stageId) => !completionMap[stageId]) || SPELLING_STAGE_ORDER[SPELLING_STAGE_ORDER.length - 1];
+  if (!completionMap.diagnostic) {
+    return "diagnostic";
+  }
+  const firstMiddleIncomplete = SPELLING_MIDDLE_STAGE_IDS.find((stageId) => !completionMap[stageId]);
+  if (firstMiddleIncomplete) {
+    return firstMiddleIncomplete;
+  }
+  if (!completionMap["repeat-check"]) {
+    return "repeat-check";
+  }
+  return "repeat-check";
+}
+
+function canOpenSpellingStage(subject, stageId) {
+  const normalizedStageId = String(stageId || "");
+  if (!SPELLING_STAGE_ORDER.includes(normalizedStageId)) {
+    return false;
+  }
+  const completionMap = getSpellingStageCompletionMap(subject);
+  if (normalizedStageId === "diagnostic") {
+    return true;
+  }
+  if (SPELLING_MIDDLE_STAGE_IDS.includes(normalizedStageId)) {
+    return completionMap.diagnostic;
+  }
+  if (normalizedStageId === "repeat-check") {
+    return completionMap.diagnostic && SPELLING_MIDDLE_STAGE_IDS.every((candidateStageId) => completionMap[candidateStageId]);
+  }
+  return false;
 }
 
 function getSpellingDiagnosticWordCount(spelling) {
@@ -4801,6 +4866,12 @@ function resetSpellingProgressForNewAttempt(spelling) {
     currentWordId: "",
     completed: false
   };
+  spelling.repeatCheck = {
+    currentIndex: 0,
+    currentInput: "",
+    responses: {},
+    completed: false
+  };
   spelling.homeTab = "stable";
   spelling.selectedStageId = "";
   spelling.celebrationStageId = "";
@@ -4857,10 +4928,8 @@ function ensureSpellingSessionState(subject) {
 
 function getSpellingVisibleStageId(subject) {
   const spelling = getSubjectSpellingState(subject);
-  const unlockedStageIndex = Math.min(getSpellingCompletedActivityCount(subject), SPELLING_STAGE_ORDER.length - 1);
   const selectedStageId = String(spelling.selectedStageId || "");
-  const selectedStageIndex = SPELLING_STAGE_ORDER.indexOf(selectedStageId);
-  if (selectedStageIndex >= 0 && selectedStageIndex <= unlockedStageIndex) {
+  if (selectedStageId && canOpenSpellingStage(subject, selectedStageId)) {
     return selectedStageId;
   }
   return getSpellingStageId(subject);
@@ -4877,12 +4946,7 @@ function setSpellingHomeTab(subject, tabId) {
 
 function setSpellingSelectedStage(subject, stageId) {
   const spelling = getSubjectSpellingState(subject);
-  if (!SPELLING_STAGE_ORDER.includes(stageId)) {
-    return;
-  }
-  const unlockedStageIndex = Math.min(getSpellingCompletedActivityCount(subject), SPELLING_STAGE_ORDER.length - 1);
-  const nextStageIndex = SPELLING_STAGE_ORDER.indexOf(stageId);
-  if (nextStageIndex > unlockedStageIndex) {
+  if (!canOpenSpellingStage(subject, stageId)) {
     return;
   }
   spelling.homeTab = "session";
@@ -4907,18 +4971,22 @@ function continueSpellingStage(subject) {
   const spelling = getSubjectSpellingState(subject);
   spelling.homeTab = "session";
   const celebrationStageId = String(spelling.celebrationStageId || "");
-  const celebrationStageIndex = SPELLING_STAGE_ORDER.indexOf(celebrationStageId);
-  if (celebrationStageId === "tense-transfer" && SPELLING_STAGE_ORDER.every((stageId) => getSpellingStageCompletionMap(subject)[stageId])) {
+  const completionMap = getSpellingStageCompletionMap(subject);
+  if (celebrationStageId === "repeat-check" && SPELLING_STAGE_ORDER.every((stageId) => completionMap[stageId])) {
     spelling.celebrationStageId = "";
-    spelling.selectedStageId = "tense-transfer";
+    spelling.selectedStageId = "repeat-check";
     spelling.sessionCompletionReady = true;
     persistSubjects();
     return;
   }
-  const nextStageId =
-    celebrationStageIndex >= 0 && celebrationStageIndex < SPELLING_STAGE_ORDER.length - 1
-      ? SPELLING_STAGE_ORDER[celebrationStageIndex + 1]
-      : SPELLING_STAGE_ORDER[SPELLING_STAGE_ORDER.length - 1];
+  let nextStageId = "";
+  if (celebrationStageId === "diagnostic") {
+    nextStageId = SPELLING_MIDDLE_STAGE_IDS.find((stageId) => !completionMap[stageId]) || SPELLING_MIDDLE_STAGE_IDS[0];
+  } else if (SPELLING_MIDDLE_STAGE_IDS.includes(celebrationStageId)) {
+    nextStageId = SPELLING_MIDDLE_STAGE_IDS.find((stageId) => !completionMap[stageId]) || "repeat-check";
+  } else {
+    nextStageId = "repeat-check";
+  }
   spelling.celebrationStageId = "";
   spelling.sessionCompletionReady = false;
   spelling.selectedStageId = nextStageId;
@@ -5099,10 +5167,18 @@ function getSpellingCelebrationCopy(stageId) {
       action: "Continue to stage 4"
     };
   }
+  if (stageId === "tense-transfer") {
+    return {
+      eyebrow: "Ribbon earned",
+      title: "Stage 4 complete",
+      body: "The tense check is complete. Continue to the final spelling check so you can compare the first dictation with what changed after the lesson.",
+      action: "Continue to stage 5"
+    };
+  }
   return {
     eyebrow: "Final ribbon",
-    title: "Program complete",
-    body: "All four stages are complete. Continue to log this session and reset back to the beginning for the next spelling round.",
+    title: "Stage 5 complete",
+    body: "All five stages are complete. Continue to review the session summary, compare the two dictation checks, and then reset for the next spelling round.",
     action: "Continue"
   };
 }
@@ -5118,6 +5194,14 @@ function getSpellingDiagnosticCurrentWord(spelling) {
 
 function getSpellingDiagnosticCorrectCount(spelling) {
   return getSpellingAttemptWords(spelling).filter((wordEntry) => spelling.diagnostic.responses[wordEntry.id]?.correct).length;
+}
+
+function getSpellingRepeatCurrentWord(spelling) {
+  return getSpellingAttemptWords(spelling)[spelling.repeatCheck.currentIndex] || null;
+}
+
+function getSpellingRepeatCorrectCount(spelling) {
+  return getSpellingAttemptWords(spelling).filter((wordEntry) => spelling.repeatCheck.responses[wordEntry.id]?.correct).length;
 }
 
 function buildSpellingFocusSummaryFromResponses(responses, spelling = null) {
@@ -5362,6 +5446,12 @@ function finaliseSpellingDiagnostic(subject) {
     currentWordId: "",
     completed: false
   };
+  spelling.repeatCheck = {
+    currentIndex: 0,
+    currentInput: "",
+    responses: {},
+    completed: false
+  };
   const topFocuses = getSpellingTopFocuses(spelling, 2).map((entry) => SPELLING_FOCUS_LABELS[entry.id] || entry.id);
   celebrateSpellingStage(
     subject,
@@ -5369,6 +5459,25 @@ function finaliseSpellingDiagnostic(subject) {
     topFocuses.length
       ? `Diagnostic complete. The strongest follow-up needs are ${topFocuses.join(" and ").toLowerCase()}.`
       : "Diagnostic complete. The follow-up stages are ready."
+  );
+}
+
+function finaliseSpellingRepeatCheck(subject) {
+  const spelling = getSubjectSpellingState(subject);
+  spelling.repeatCheck.completed = true;
+  const initialScore = getSpellingDiagnosticCorrectCount(spelling);
+  const repeatScore = getSpellingRepeatCorrectCount(spelling);
+  const overallScorePercent = getSpellingOverallScorePercent(spelling);
+  spelling.lastOverallScorePercent = overallScorePercent;
+  const unlockedHorse = overallScorePercent > 50 ? unlockSpellingPaddockHorse(spelling) : "";
+  const unlockedHorseMeta = getSpellingPaddockHorseMeta(unlockedHorse);
+  recordCompletedSpellingAttempt(subject);
+  celebrateSpellingStage(
+    subject,
+    "repeat-check",
+    unlockedHorse
+      ? `Final spelling check complete. You moved from ${initialScore}/${SPELLING_UNIT_SEED.diagnosticTargetCount} to ${repeatScore}/${SPELLING_UNIT_SEED.diagnosticTargetCount}. ${unlockedHorseMeta?.name || "A new horse"} has been added to the paddock.`
+      : `Final spelling check complete. You moved from ${initialScore}/${SPELLING_UNIT_SEED.diagnosticTargetCount} to ${repeatScore}/${SPELLING_UNIT_SEED.diagnosticTargetCount}.`
   );
 }
 
@@ -5419,6 +5528,12 @@ function resetSpellingActivity(subject, activityId) {
       currentWordId: "",
       completed: false
     };
+    spelling.repeatCheck = {
+      currentIndex: 0,
+      currentInput: "",
+      responses: {},
+      completed: false
+    };
     spelling.focusSummary = [];
     spelling.currentAttemptId = createId();
     spelling.challenge.active = false;
@@ -5450,6 +5565,12 @@ function resetSpellingActivity(subject, activityId) {
       currentWordId: "",
       completed: false
     };
+    spelling.repeatCheck = {
+      currentIndex: 0,
+      currentInput: "",
+      responses: {},
+      completed: false
+    };
     spelling.coachMessage = "Choose the spelling that looks right, then use the rule note before moving on.";
   } else if (activityId === "word-families") {
     spelling.flashcards = {
@@ -5464,6 +5585,12 @@ function resetSpellingActivity(subject, activityId) {
       currentWordId: "",
       completed: false
     };
+    spelling.repeatCheck = {
+      currentIndex: 0,
+      currentInput: "",
+      responses: {},
+      completed: false
+    };
     spelling.coachMessage = "Tap the key word, listen to the family sentences, then write the root from memory.";
   } else if (activityId === "tense-transfer") {
     spelling.tenseTransfer = {
@@ -5472,7 +5599,21 @@ function resetSpellingActivity(subject, activityId) {
       currentWordId: "",
       completed: false
     };
+    spelling.repeatCheck = {
+      currentIndex: 0,
+      currentInput: "",
+      responses: {},
+      completed: false
+    };
     spelling.coachMessage = "Read the sentence, choose the tense, and help the horse reach the stable.";
+  } else if (activityId === "repeat-check") {
+    spelling.repeatCheck = {
+      currentIndex: 0,
+      currentInput: "",
+      responses: {},
+      completed: false
+    };
+    spelling.coachMessage = "Listen again to the same ten words and compare them with the first spelling check.";
   } else {
     subject.spelling = createDefaultSpellingState(subject.id);
   }
@@ -5560,6 +5701,42 @@ function submitSpellingDiagnosticWord(subject, attemptOverride = null) {
     const nextWord = getSpellingDiagnosticCurrentWord(spelling);
     spelling.coachMessage = nextWord
       ? `Saved. Word ${spelling.diagnostic.currentIndex + 1} of ${diagnosticWordCount} is ready.`
+      : spelling.coachMessage;
+  }
+
+  persistSubjects();
+}
+
+function submitSpellingRepeatWord(subject, attemptOverride = null) {
+  const spelling = getSubjectSpellingState(subject);
+  const wordEntry = getSpellingRepeatCurrentWord(spelling);
+  const diagnosticWordCount = getSpellingDiagnosticWordCount(spelling);
+  if (!wordEntry) {
+    return;
+  }
+  const attempt = String(
+    attemptOverride !== null && attemptOverride !== undefined
+      ? attemptOverride
+      : spelling.repeatCheck.currentInput || ""
+  ).trim();
+  if (!attempt) {
+    spelling.coachMessage = "Type the word before moving to the next item.";
+    persistSubjects();
+    return;
+  }
+  spelling.repeatCheck.responses[wordEntry.id] = {
+    attempt,
+    correct: normalizeSpellingAttempt(attempt) === normalizeSpellingAttempt(wordEntry.word)
+  };
+  spelling.repeatCheck.currentInput = "";
+  spelling.repeatCheck.currentIndex += 1;
+
+  if (spelling.repeatCheck.currentIndex >= diagnosticWordCount) {
+    finaliseSpellingRepeatCheck(subject);
+  } else {
+    const nextWord = getSpellingRepeatCurrentWord(spelling);
+    spelling.coachMessage = nextWord
+      ? `Saved. Word ${spelling.repeatCheck.currentIndex + 1} of ${diagnosticWordCount} is ready.`
       : spelling.coachMessage;
   }
 
@@ -5833,7 +6010,7 @@ function buildSpellingSessionProgressCard(
   subject,
   spelling,
   currentStageId = getSpellingStageId(subject),
-  subtitle = "Earn 4 ribbons to win a horse."
+  subtitle = "Earn 5 ribbons to win a horse."
 ) {
   const completionMap = getSpellingStageCompletionMap(subject);
   return `
@@ -5845,15 +6022,21 @@ function buildSpellingSessionProgressCard(
           .map((stageId, index) => {
             const isComplete = completionMap[stageId];
             const isCurrent = !isComplete && currentStageId === stageId;
-            const status = isComplete ? "Earned" : isCurrent ? "In progress" : "Locked";
+            const isOpenable = canOpenSpellingStage(subject, stageId);
+            const status = isComplete ? "Earned" : isCurrent ? "In progress" : isOpenable ? "Ready" : "Locked";
             return `
-              <article class="ss-progress-row${isComplete ? " is-complete" : isCurrent ? " is-current" : ""}">
+              <button
+                type="button"
+                class="ss-progress-row${isComplete ? " is-complete" : isCurrent ? " is-current" : ""}"
+                data-spelling-open-stage="${escapeHtml(stageId)}"
+                ${isOpenable ? "" : "disabled"}
+              >
                 <span class="ss-progress-token">${isComplete ? "✓" : index + 1}</span>
                 <div class="ss-progress-copy">
                   <strong>${escapeHtml(SPELLING_STAGE_LABELS[stageId])}</strong>
                   <span>${escapeHtml(status)}</span>
                 </div>
-              </article>
+              </button>
             `;
           })
           .join("")}
@@ -5893,8 +6076,8 @@ function buildSpellingStableMiniCard(spelling) {
 function buildSpellingOneRibbonCard() {
   return `
     <section class="ss-side-card ss-side-card--accent">
-      <p class="eyebrow">One ribbon to go</p>
-      <h4>Finish Tenses to win a new horse for your stable.</h4>
+      <p class="eyebrow">Two stages to go</p>
+      <h4>Finish tenses, then the final spelling check, to win a new horse for your stable.</h4>
     </section>
   `;
 }
@@ -5918,6 +6101,13 @@ function buildSpellingStageSidebar(subject, spelling, stageId) {
     return `
       ${buildSpellingSessionProgressCard(subject, spelling, stageId)}
       ${buildSpellingOneRibbonCard()}
+    `;
+  }
+
+  if (stageId === "tense-transfer") {
+    return `
+      ${buildSpellingSessionProgressCard(subject, spelling, stageId, "One final check — then a new horse.")}
+      ${buildSpellingHorsePreviewCard(spelling)}
     `;
   }
 
@@ -5965,7 +6155,7 @@ function buildSpellingHorsePreviewCard(spelling) {
         <img src="${escapeHtml(nextHorse.image)}" alt="${escapeHtml(nextHorse.name)}" />
       </div>
       <strong>${escapeHtml(`${nextHorse.name} is waiting`)}</strong>
-      <span>${escapeHtml(`Earn the 4th ribbon to add this ${nextHorse.label} to your stable.`)}</span>
+      <span>${escapeHtml(`Earn the 5th ribbon to add this ${nextHorse.label} to your stable.`)}</span>
     </section>
   `;
 }
@@ -6254,17 +6444,10 @@ function advanceSpellingTenseTransfer(subject, wordId) {
   spelling.tenseTransfer.currentWordId = nextWord?.id || "";
   spelling.tenseTransfer.completed = isSpellingTenseTransferComplete(spelling);
   if (spelling.tenseTransfer.completed) {
-    const overallScorePercent = getSpellingOverallScorePercent(spelling);
-    spelling.lastOverallScorePercent = overallScorePercent;
-    const unlockedHorse = overallScorePercent > 50 ? unlockSpellingPaddockHorse(spelling) : "";
-    const unlockedHorseMeta = getSpellingPaddockHorseMeta(unlockedHorse);
-    recordCompletedSpellingAttempt(subject);
     celebrateSpellingStage(
       subject,
       "tense-transfer",
-      unlockedHorse
-        ? `Final stage complete. Overall score ${overallScorePercent}%. ${unlockedHorseMeta?.name || "A new horse"} has been added to the paddock.`
-        : `Final stage complete. Overall score ${overallScorePercent}%.`
+      "Stage 4 complete. The final spelling check is ready so you can compare the two dictation rounds."
     );
     return;
   }
@@ -11822,10 +12005,9 @@ function renderSpelling() {
           ` : ""}
         </article>
       `;
-  } else {
+  } else if (stageId === "tense-transfer") {
     const currentFamilyWord = getSpellingTenseCurrentWord(spelling);
     const currentFamilyAnswer = currentFamilyWord ? ensureSpellingTenseAnswer(spelling, currentFamilyWord.id) : null;
-    const earnedHorseMeta = getSpellingPaddockHorseMeta(spelling.lastUnlockedHorseId || spelling.paddockHorses[spelling.paddockHorses.length - 1]);
     const completedTenseCount = followUpWords.filter((entry) => ensureSpellingTenseAnswer(spelling, entry.id).completed).length;
     const displayTenseProgress = Math.min(
       followUpWords.length,
@@ -11836,48 +12018,7 @@ function renderSpelling() {
     const currentTenseIndex = currentFamilyWord ? Math.max(0, followUpWords.findIndex((entry) => entry.id === currentFamilyWord.id)) : 0;
     const currentTensePrompt = currentFamilyWord ? getSpellingTensePrompt(spelling, currentFamilyWord) : null;
     const raceHorseMeta = SPELLING_PADDOCK_HORSES[(spelling.paddockHorses || []).length] || getSpellingOwnedHorseMeta(spelling)[0] || SPELLING_PADDOCK_HORSES[0];
-    stageBody = spelling.sessionCompletionReady
-      ? `
-        <article class="ss-stage-panel">
-          <div class="ss-stage-panel__head">
-            <div>
-              <p class="eyebrow">Session complete</p>
-              <h4>Four-stage summary</h4>
-            </div>
-            <span class="ss-stage-badge is-complete">Program complete</span>
-          </div>
-          <p class="ss-stage-copy">${escapeHtml(`Overall score: ${overallScorePercent}%. ${overallScorePercent > 50 ? `${earnedHorseMeta?.label || "A new horse"} earned for the paddock.` : "No horse earned this time."}`)}</p>
-          ${overallScorePercent > 50 && earnedHorseMeta ? `
-            <article class="ss-earned-horse-card">
-              <img class="spelling-horse-card__image" src="${escapeHtml(earnedHorseMeta.image)}" alt="${escapeHtml(earnedHorseMeta.name)}" />
-              <div class="spelling-horse-card__copy">
-                <strong>${escapeHtml(`${earnedHorseMeta.name} · ${earnedHorseMeta.label}`)}</strong>
-                <span>${escapeHtml(getSpellingHorseRankLabel((spelling.paddockHorses || []).length))}</span>
-              </div>
-            </article>
-          ` : ""}
-          <div class="ss-review-list">
-            ${Object.entries(stageScoreSummary)
-              .map(([stageKey, stageScore]) => `
-                <article class="ss-review-row${getSpellingStageScorePercent(spelling, stageKey) >= 50 ? " is-correct" : " is-incorrect"}">
-                  <div>
-                    <strong>${escapeHtml(stageScore.label)}</strong>
-                    <span>${escapeHtml(`${stageScore.correct}/${stageScore.total} · ${getSpellingStageScorePercent(spelling, stageKey)}%`)}</span>
-                  </div>
-                  <span class="ss-review-mark">${getSpellingStageScorePercent(spelling, stageKey) >= 50 ? "✓" : "✕"}</span>
-                </article>
-              `)
-              .join("")}
-          </div>
-          <div class="spelling-review-card__days">
-            ${SPELLING_UNIT_SEED.reviewDays.map((dayLabel) => `<span class="is-done">${escapeHtml(dayLabel)}</span>`).join("")}
-          </div>
-          <div class="spelling-stage-actions spelling-stage-actions--centered">
-            <button type="button" class="primary-button primary-button--dark" data-spelling-finish-session="true">${escapeHtml(overallScorePercent > 50 && earnedHorseMeta ? "Add to your stable" : "Continue")}</button>
-          </div>
-        </article>
-      `
-      : spelling.tenseTransfer.completed
+    stageBody = spelling.tenseTransfer.completed
       ? `
         <article class="ss-stage-panel">
           <div class="ss-stage-panel__head">
@@ -11894,42 +12035,15 @@ function renderSpelling() {
           </div>
           <div class="ss-review-list">
             ${followUpWords.map((entry) => `
-              <article class="ss-review-row is-correct">
+              <article class="ss-review-row${ensureSpellingTenseAnswer(spelling, entry.id).feedbackKind === "correct" ? " is-correct" : " is-incorrect"}">
                 <div>
                   <strong>${escapeHtml(entry.word)}</strong>
                   <span>${escapeHtml(`${entry.tense?.past || ""} · ${entry.tense?.present || ""} · ${entry.tense?.future || ""}`)}</span>
                 </div>
-                <span class="ss-review-mark">✓</span>
+                <span class="ss-review-mark">${ensureSpellingTenseAnswer(spelling, entry.id).feedbackKind === "correct" ? "✓" : "✕"}</span>
               </article>
             `).join("")}
           </div>
-          <section class="ss-stage-panel ss-stage-panel--nested">
-            <p class="eyebrow">Complete</p>
-            <h4>All four ribbons earned</h4>
-            <p class="ss-stage-copy">${escapeHtml(`Overall score: ${overallScorePercent}%. ${overallScorePercent > 50 ? `${earnedHorseMeta?.label || "A new horse"} has been added to the paddock.` : "Keep practising to earn a new horse next time."}`)}</p>
-            ${overallScorePercent > 50 && earnedHorseMeta ? `
-              <article class="ss-earned-horse-card">
-                <img class="spelling-horse-card__image" src="${escapeHtml(earnedHorseMeta.image)}" alt="${escapeHtml(earnedHorseMeta.name)}" />
-                <div class="spelling-horse-card__copy">
-                  <strong>${escapeHtml(`${earnedHorseMeta.name} · ${earnedHorseMeta.label}`)}</strong>
-                  <span>${escapeHtml(getSpellingHorseRankLabel((spelling.paddockHorses || []).length))}</span>
-                </div>
-              </article>
-            ` : ""}
-            <div class="ss-review-list">
-              ${Object.entries(stageScoreSummary)
-                .map(([stageKey, stageScore]) => `
-                  <article class="ss-review-row${getSpellingStageScorePercent(spelling, stageKey) >= 50 ? " is-correct" : " is-incorrect"}">
-                    <div>
-                      <strong>${escapeHtml(stageScore.label)}</strong>
-                      <span>${escapeHtml(`${stageScore.correct}/${stageScore.total} · ${getSpellingStageScorePercent(spelling, stageKey)}%`)}</span>
-                    </div>
-                    <span class="ss-review-mark">${getSpellingStageScorePercent(spelling, stageKey) >= 50 ? "✓" : "✕"}</span>
-                  </article>
-                `)
-                .join("")}
-            </div>
-          </section>
           <div class="spelling-stage-actions">
             <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="tense-transfer">Reset stage</button>
           </div>
@@ -11987,6 +12101,126 @@ function renderSpelling() {
               </div>
             </section>
           ` : ""}
+        </article>
+      `;
+  } else {
+    const earnedHorseMeta = getSpellingPaddockHorseMeta(spelling.lastUnlockedHorseId || spelling.paddockHorses[spelling.paddockHorses.length - 1]);
+    const repeatWord = getSpellingRepeatCurrentWord(spelling);
+    const repeatCompletedCount = Object.keys(spelling.repeatCheck.responses || {}).length;
+    stageBody = spelling.sessionCompletionReady
+      ? `
+        <article class="ss-stage-panel">
+          <div class="ss-stage-panel__head">
+            <div>
+              <p class="eyebrow">Session complete</p>
+              <h4>Five-stage summary</h4>
+            </div>
+            <span class="ss-stage-badge is-complete">Program complete</span>
+          </div>
+          <p class="ss-stage-copy">${escapeHtml(`Overall score: ${overallScorePercent}%. You moved from ${getSpellingDiagnosticCorrectCount(spelling)}/${attemptWords.length} in stage 1 to ${getSpellingRepeatCorrectCount(spelling)}/${attemptWords.length} in stage 5.${overallScorePercent > 50 ? ` ${earnedHorseMeta?.label || "A new horse"} earned for the paddock.` : ""}`)}</p>
+          ${overallScorePercent > 50 && earnedHorseMeta ? `
+            <article class="ss-earned-horse-card">
+              <img class="spelling-horse-card__image" src="${escapeHtml(earnedHorseMeta.image)}" alt="${escapeHtml(earnedHorseMeta.name)}" />
+              <div class="spelling-horse-card__copy">
+                <strong>${escapeHtml(`${earnedHorseMeta.name} · ${earnedHorseMeta.label}`)}</strong>
+                <span>${escapeHtml(getSpellingHorseRankLabel((spelling.paddockHorses || []).length))}</span>
+              </div>
+            </article>
+          ` : ""}
+          <div class="ss-review-list">
+            ${Object.entries(stageScoreSummary)
+              .map(([stageKey, stageScore]) => `
+                <article class="ss-review-row${getSpellingStageScorePercent(spelling, stageKey) >= 50 ? " is-correct" : " is-incorrect"}">
+                  <div>
+                    <strong>${escapeHtml(stageScore.label)}</strong>
+                    <span>${escapeHtml(`${stageScore.correct}/${stageScore.total} · ${getSpellingStageScorePercent(spelling, stageKey)}%`)}</span>
+                  </div>
+                  <span class="ss-review-mark">${getSpellingStageScorePercent(spelling, stageKey) >= 50 ? "✓" : "✕"}</span>
+                </article>
+              `)
+              .join("")}
+          </div>
+          <div class="spelling-review-card__days">
+            ${SPELLING_UNIT_SEED.reviewDays.map((dayLabel) => `<span class="is-done">${escapeHtml(dayLabel)}</span>`).join("")}
+          </div>
+          <div class="spelling-stage-actions spelling-stage-actions--centered">
+            <button type="button" class="primary-button primary-button--dark" data-spelling-finish-session="true">${escapeHtml(overallScorePercent > 50 && earnedHorseMeta ? "Add to your stable" : "Continue")}</button>
+          </div>
+        </article>
+      `
+      : spelling.repeatCheck.completed
+      ? `
+        <article class="ss-stage-panel">
+          <div class="ss-stage-panel__head">
+            <div>
+              <p class="eyebrow">Complete</p>
+              <h4>Stage 5 review</h4>
+            </div>
+            <span class="ss-stage-badge is-complete">Ribbon earned</span>
+          </div>
+          <p class="ss-stage-copy">${escapeHtml(`The final spelling check is complete. You moved from ${getSpellingDiagnosticCorrectCount(spelling)}/${attemptWords.length} to ${getSpellingRepeatCorrectCount(spelling)}/${attemptWords.length}.`)}</p>
+          <div class="ss-stage-progress">
+            <span>${escapeHtml(`${stageScoreSummary["repeat-check"].correct}/${stageScoreSummary["repeat-check"].total} correct`)}</span>
+            <span>${escapeHtml(`${getSpellingStageScorePercent(spelling, "repeat-check")}% score`)}</span>
+          </div>
+          <div class="ss-review-list">
+            ${attemptWords.map((wordEntry) => {
+              const diagnosticResponse = spelling.diagnostic.responses[wordEntry.id] || {};
+              const repeatResponse = spelling.repeatCheck.responses[wordEntry.id] || {};
+              const repeatCorrect = Boolean(repeatResponse.correct);
+              return `
+                <article class="ss-review-row${repeatCorrect ? " is-correct" : " is-incorrect"}">
+                  <div>
+                    <strong>${escapeHtml(wordEntry.word)}</strong>
+                    <span>${escapeHtml(`Stage 1: ${diagnosticResponse.attempt || "No answer"} · Stage 5: ${repeatResponse.attempt || "No answer"}`)}</span>
+                  </div>
+                  <span class="ss-review-mark">${repeatCorrect ? "✓" : "✕"}</span>
+                </article>
+              `;
+            }).join("")}
+          </div>
+          <div class="spelling-stage-actions">
+            <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="repeat-check">Reset stage</button>
+          </div>
+        </article>
+      `
+      : `
+        <article class="ss-stage-panel ss-stage-panel--diagnostic">
+          <div class="ss-stage-panel__head ss-stage-panel__head--compact">
+            <p class="eyebrow">Final check</p>
+            <span class="ss-stage-counter">${escapeHtml(`Word ${Math.min(spelling.repeatCheck.currentIndex + 1, attemptWords.length)} of ${attemptWords.length}`)}</span>
+          </div>
+          <div class="spelling-diagnostic-dots spelling-diagnostic-dots--large" aria-label="Final spelling check progress">
+            ${attemptWords
+              .map((_, index) => `
+                <span class="spelling-diagnostic-dot${index < spelling.repeatCheck.currentIndex ? " is-complete" : ""}${index === spelling.repeatCheck.currentIndex ? " is-current" : ""}"></span>
+              `)
+              .join("")}
+          </div>
+          <div class="ss-audio-actions">
+            <button type="button" class="primary-button primary-button--dark" data-spelling-play-repeat="true">Hear the word</button>
+            <button type="button" class="ghost-button ghost-button--light" data-spelling-play-repeat-sentence="true">Hear it in a sentence</button>
+          </div>
+          <label class="spelling-input-label" for="spelling-repeat-input">Type your spelling</label>
+          <input
+            id="spelling-repeat-input"
+            class="reader-editor spelling-inline-input spelling-inline-input--hero"
+            type="text"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+            value="${escapeHtml(spelling.repeatCheck.currentInput)}"
+            placeholder="Type the spelling"
+          />
+          <div class="ss-status-note ss-status-note--soft">
+            <span class="ss-status-dot"></span>
+            <p>Repeat the same ten words so we can compare this round with the first check.</p>
+          </div>
+          <div class="spelling-stage-actions spelling-stage-actions--footer">
+            <button type="button" class="primary-button primary-button--dark" data-spelling-submit-repeat="true">
+              ${repeatCompletedCount >= attemptWords.length - 1 ? "Finish stage" : "Next word"}
+            </button>
+          </div>
         </article>
       `;
   }
@@ -12150,6 +12384,48 @@ function renderSpelling() {
       advanceSpellingTenseTransfer(subject, button.dataset.spellingTenseAdvance);
       render();
     });
+  });
+
+  host.querySelector("[data-spelling-play-repeat]")?.addEventListener("click", () => {
+    const input = host.querySelector("#spelling-repeat-input");
+    spelling.repeatCheck.currentInput = input?.value || spelling.repeatCheck.currentInput;
+    persistSubjects({ skipRemoteSync: true });
+    speakSpellingDiagnosticWord(getSpellingRepeatCurrentWord(getSubjectSpellingState(subject)));
+  });
+
+  host.querySelector("[data-spelling-play-repeat-sentence]")?.addEventListener("click", () => {
+    const input = host.querySelector("#spelling-repeat-input");
+    spelling.repeatCheck.currentInput = input?.value || spelling.repeatCheck.currentInput;
+    persistSubjects({ skipRemoteSync: true });
+    speakSpellingDiagnosticSentence(getSpellingRepeatCurrentWord(getSubjectSpellingState(subject)));
+  });
+
+  host.querySelector("#spelling-repeat-input")?.addEventListener("input", (event) => {
+    spelling.repeatCheck.currentInput = event.target.value;
+    persistSubjects({ skipRemoteSync: true });
+  });
+
+  host.querySelector("#spelling-repeat-input")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      submitSpellingRepeatWord(subject, event.currentTarget.value);
+      render();
+      if (!getSubjectSpellingState(subject).repeatCheck.completed) {
+        speakSpellingDiagnosticWord(getSpellingRepeatCurrentWord(getSubjectSpellingState(subject)));
+      }
+    }
+  });
+
+  host.querySelector("#spelling-repeat-input")?.addEventListener("blur", () => {
+    persistSubjects();
+  });
+
+  host.querySelector("[data-spelling-submit-repeat]")?.addEventListener("click", () => {
+    submitSpellingRepeatWord(subject, host.querySelector("#spelling-repeat-input")?.value || "");
+    render();
+    if (!getSubjectSpellingState(subject).repeatCheck.completed) {
+      speakSpellingDiagnosticWord(getSpellingRepeatCurrentWord(getSubjectSpellingState(subject)));
+    }
   });
 }
 
