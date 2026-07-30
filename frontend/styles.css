@@ -6623,6 +6623,7 @@ input[type="date"] {
   --wood2: #dabb8c;
   --iron: #34302e;
   --brass: #ecd790;
+  position: relative;
   font-family: var(--font-lexend);
   background: var(--bg);
   color: var(--ink);
@@ -6696,6 +6697,9 @@ input[type="date"] {
 }
 
 .ss-surface-tabs {
+  position: relative;
+  z-index: 6;
+  isolation: isolate;
   display: flex;
   flex-wrap: wrap;
   gap: 24px;
@@ -6713,6 +6717,8 @@ input[type="date"] {
   font-size: 15px;
   font-weight: 700;
   cursor: pointer;
+  pointer-events: auto;
+  touch-action: manipulation;
 }
 
 .ss-surface-tab::after {
