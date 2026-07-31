@@ -32,13 +32,16 @@ const configuredOrigins = String(process.env.FRONTEND_ORIGIN || "")
   .map((origin) => origin.trim())
   .filter(Boolean);
 const allowedOrigins = new Set(configuredOrigins);
+const fallbackFrontendOrigins = new Set([
+  "https://paperpanda-gg1z.onrender.com"
+]);
 
 function isAllowedOrigin(origin) {
   if (!origin) {
     return true;
   }
 
-  if (allowedOrigins.has(origin)) {
+  if (allowedOrigins.has(origin) || fallbackFrontendOrigins.has(origin)) {
     return true;
   }
 
@@ -90,7 +93,7 @@ app.use(
       return;
     }
 
-    callback(new Error(`Origin not allowed by CORS: ${requestOrigin}`));
+    callback(null, { origin: false });
   })
 );
 app.use(express.json({ limit: "10mb" }));
