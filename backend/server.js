@@ -843,7 +843,7 @@ app.post("/api/writing/illustrations", async (request, response) => {
     const where = String(openingAnswers.where || "the setting").trim();
     const want = String(openingAnswers.want || "their goal").trim();
 
-    const options = await Promise.all(
+    const results = await Promise.allSettled(
       prompts.map(async (prompt) => {
         const fullPrompt = [
           "Create a warm, detailed children's picture-book illustration.",
@@ -862,8 +862,28 @@ app.post("/api/writing/illustrations", async (request, response) => {
         return { prompt, imageUrl };
       })
     );
+    const options = results.map((result, index) => {
+      if (result.status === "fulfilled") {
+        return result.value;
+      }
+      return {
+        prompt: prompts[index],
+        imageUrl: ""
+      };
+    });
+    const failedCount = options.filter((option) => !String(option.imageUrl || "").trim()).length;
+    const partialFailure = failedCount > 0 && failedCount < options.length;
+    const allFailed = failedCount === options.length;
 
-    response.json({ options });
+    response.json({
+      options,
+      partialFailure,
+      error: allFailed
+        ? "Illustration generation failed."
+        : partialFailure
+          ? "Some illustration options could not be generated."
+          : ""
+    });
   } catch (error) {
     response.status(500).json({
       error: error instanceof Error ? error.message : "Illustration generation failed."
