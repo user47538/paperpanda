@@ -32,7 +32,7 @@ function resolveDefaultApiBaseUrl() {
     return `${protocol}//${hostname}:3001`;
   }
 
-  return "";
+  return "https://paperpanda.onrender.com";
 }
 
 const API_BASE_URL = resolveDefaultApiBaseUrl();
