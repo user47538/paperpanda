@@ -2769,6 +2769,8 @@ input[type="date"] {
 }
 
 .reading-viewer__header {
+  position: relative;
+  z-index: 12;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2837,6 +2839,8 @@ input[type="date"] {
 }
 
 .reading-viewer__body {
+  position: relative;
+  z-index: 1;
   padding: 0 18px 18px;
 }
 
@@ -5128,6 +5132,8 @@ input[type="date"] {
 }
 
 .focus-back {
+  position: relative;
+  z-index: 14;
   border: 0;
   border-radius: 999px;
   background: #1B1825;
@@ -6699,7 +6705,7 @@ input[type="date"] {
 
 .ss-surface-tabs {
   position: relative;
-  z-index: 6;
+  z-index: 16;
   isolation: isolate;
   display: flex;
   flex-wrap: wrap;
@@ -7085,6 +7091,7 @@ input[type="date"] {
   left: 50%;
   transform: translateX(-50%);
   z-index: 2;
+  pointer-events: none;
   min-height: 36px;
   display: inline-flex;
   align-items: center;
