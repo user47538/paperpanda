@@ -2421,15 +2421,16 @@ input[type="date"] {
 }
 
 .ghost-button--light {
-  background: rgba(255,255,255,0.08);
-  color: var(--card);
-  box-shadow: none;
+  background: #fff;
+  color: #6e5a86;
+  border: 1px solid rgba(110, 90, 134, 0.18);
+  box-shadow: var(--shadow-sm);
 }
 
 .ghost-button--light:hover {
-  background: rgba(255,255,255,0.14);
-  color: var(--card);
-  box-shadow: none;
+  background: #f7f3fb;
+  color: #5a4870;
+  box-shadow: var(--shadow-md);
 }
 
 .ask-toolbar {
@@ -7845,6 +7846,7 @@ input[type="date"] {
 .ghost-button--light {
   background: #fff;
   border-color: rgba(110, 90, 134, 0.18);
+  color: #6e5a86;
 }
 
 .ss-stage-panel__head--compact {
@@ -8509,7 +8511,7 @@ input[type="date"] {
 
 .ws-illustration-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 20px;
 }
 

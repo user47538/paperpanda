@@ -829,7 +829,7 @@ app.post("/api/writing/illustrations", async (request, response) => {
     const previousSectionText = String(request.body?.previousSectionText || "").trim();
     const openingAnswers = request.body?.openingAnswers && typeof request.body.openingAnswers === "object" ? request.body.openingAnswers : {};
     const prompts = Array.isArray(request.body?.prompts)
-      ? request.body.prompts.map((prompt) => String(prompt || "").trim()).filter(Boolean).slice(0, 3)
+      ? request.body.prompts.map((prompt) => String(prompt || "").trim()).filter(Boolean).slice(0, 2)
       : [];
 
     if (!sectionText) {
