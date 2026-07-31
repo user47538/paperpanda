@@ -4314,19 +4314,28 @@ function saveStoredSubjectsMap(subjectsByAccount) {
 }
 
 function saveStoredSubjectsMapForAccount(storedSubjectsMap, accountKey, subjects) {
-  const nextMap = storedSubjectsMap && typeof storedSubjectsMap === "object" ? storedSubjectsMap : {};
+  const nextMap = storedSubjectsMap && typeof storedSubjectsMap === "object" ? { ...storedSubjectsMap } : {};
+  const fullSubjects = createPersistableSubjects(subjects);
+  const fallbackSubjects = createQuotaFallbackSubjects(subjects);
   try {
-    nextMap[accountKey] = createPersistableSubjects(subjects);
+    nextMap[accountKey] = fullSubjects;
     saveStoredSubjectsMap(nextMap);
     return "full";
   } catch (primaryError) {
     try {
-      nextMap[accountKey] = createQuotaFallbackSubjects(subjects);
+      nextMap[accountKey] = fallbackSubjects;
       saveStoredSubjectsMap(nextMap);
       return "fallback";
     } catch (fallbackError) {
-      console.error("Subject store quota fallback failed.", fallbackError);
-      return "failed";
+      try {
+        saveStoredSubjectsMap({
+          [accountKey]: fallbackSubjects
+        });
+        return "pruned-fallback";
+      } catch (prunedFallbackError) {
+        console.error("Subject store quota fallback failed.", prunedFallbackError);
+        return "failed";
+      }
     }
   }
 }
@@ -7116,6 +7125,9 @@ function persistSubjects({ skipRemoteSync = false } = {}) {
   if (persistResult === "fallback" && elements?.uploadStatus) {
     elements.uploadStatus.textContent =
       "Large document previews will stay available in this session, but only a lighter saved version will persist after refresh.";
+  } else if (persistResult === "pruned-fallback" && elements?.uploadStatus) {
+    elements.uploadStatus.textContent =
+      "This device cleared older local cached accounts to free space. Your current account stays available and cloud-synced.";
   } else if (persistResult === "failed" && elements?.uploadStatus) {
     elements.uploadStatus.textContent =
       "Browser storage is full. Your latest changes will stay available until refresh, but they could not be saved persistently.";
