@@ -4313,6 +4313,24 @@ function saveStoredSubjectsMap(subjectsByAccount) {
   window.localStorage.setItem(subjectsStorageKey, JSON.stringify(subjectsByAccount));
 }
 
+function saveStoredSubjectsMapForAccount(storedSubjectsMap, accountKey, subjects) {
+  const nextMap = storedSubjectsMap && typeof storedSubjectsMap === "object" ? storedSubjectsMap : {};
+  try {
+    nextMap[accountKey] = createPersistableSubjects(subjects);
+    saveStoredSubjectsMap(nextMap);
+    return "full";
+  } catch (primaryError) {
+    try {
+      nextMap[accountKey] = createQuotaFallbackSubjects(subjects);
+      saveStoredSubjectsMap(nextMap);
+      return "fallback";
+    } catch (fallbackError) {
+      console.error("Subject store quota fallback failed.", fallbackError);
+      return "failed";
+    }
+  }
+}
+
 function hydrateStoredSubject(subject, index) {
   const subjectSeedEntry = resolveSubjectSeedEntry(subject, index);
   const resolvedSubjectId = String(subject?.id || subjectSeedEntry?.id || "");
@@ -7094,25 +7112,13 @@ function persistSubjects({ skipRemoteSync = false } = {}) {
   const accountKey = normaliseAccountKey(state.currentUserEmail);
   const storedSubjectsMap = loadStoredSubjectsMap();
   const persistableSubjects = createPersistableSubjects(state.subjects);
-
-  try {
-    storedSubjectsMap[accountKey] = persistableSubjects;
-    saveStoredSubjectsMap(storedSubjectsMap);
-  } catch (primaryError) {
-    try {
-      storedSubjectsMap[accountKey] = createQuotaFallbackSubjects(state.subjects);
-      saveStoredSubjectsMap(storedSubjectsMap);
-      if (elements?.uploadStatus) {
-        elements.uploadStatus.textContent =
-          "Large document previews will stay available in this session, but only a lighter saved version will persist after refresh.";
-      }
-    } catch (fallbackError) {
-      console.error("Subject store quota fallback failed.", fallbackError);
-      if (elements?.uploadStatus) {
-        elements.uploadStatus.textContent =
-          "Browser storage is full. Your latest changes will stay available until refresh, but they could not be saved persistently.";
-      }
-    }
+  const persistResult = saveStoredSubjectsMapForAccount(storedSubjectsMap, accountKey, state.subjects);
+  if (persistResult === "fallback" && elements?.uploadStatus) {
+    elements.uploadStatus.textContent =
+      "Large document previews will stay available in this session, but only a lighter saved version will persist after refresh.";
+  } else if (persistResult === "failed" && elements?.uploadStatus) {
+    elements.uploadStatus.textContent =
+      "Browser storage is full. Your latest changes will stay available until refresh, but they could not be saved persistently.";
   }
 
   if (!skipRemoteSync) {
@@ -7228,8 +7234,7 @@ function restoreSubjectsForAccount(account, subjectsOverride = null, { skipRemot
   const storedSubjectsMap = loadStoredSubjectsMap();
   const resolvedSubjects = buildResolvedSubjectsFromStore(account, subjectsOverride ?? storedSubjectsMap[accountKey]);
   state.subjects = resolvedSubjects;
-  storedSubjectsMap[accountKey] = createPersistableSubjects(state.subjects);
-  saveStoredSubjectsMap(storedSubjectsMap);
+  saveStoredSubjectsMapForAccount(storedSubjectsMap, accountKey, state.subjects);
 
   if (!state.subjects.some((subject) => subject.id === state.selectedSubjectId)) {
     state.selectedSubjectId = state.subjects[0]?.id || "";
@@ -14921,9 +14926,8 @@ async function saveAccountSettings() {
       const currentKey = normaliseAccountKey(currentEmail);
       const nextKey = normaliseAccountKey(nextEmail);
       if (storedSubjectsMap[currentKey]) {
-        storedSubjectsMap[nextKey] = storedSubjectsMap[currentKey];
         delete storedSubjectsMap[currentKey];
-        saveStoredSubjectsMap(storedSubjectsMap);
+        saveStoredSubjectsMapForAccount(storedSubjectsMap, nextKey, state.subjects);
       }
     }
     applyAuthenticatedAccount(payload.account, {
