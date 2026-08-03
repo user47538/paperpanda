@@ -5130,10 +5130,8 @@ function ensureSpellingSessionState(subject) {
       inputValue: "",
       lastCompletedWeekKey: spelling.challenge.lastCompletedWeekKey || ""
     };
-    persistSubjects();
   } else if (attemptComplete && weeklyAttempts.length < 4) {
     spelling.coachMessage = spelling.coachMessage || "This spelling set is complete. Start the next set from the stable when you are ready.";
-    persistSubjects({ skipRemoteSync: true });
   }
 }
 
