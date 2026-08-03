@@ -12366,12 +12366,17 @@ function renderSpelling() {
   const ownedHorseMeta = getSpellingOwnedHorseMeta(spelling);
   let homeTab = String(spelling.homeTab || "stable");
 
-  if (stageId === "repeat-check" && spelling.repeatCheck.completed && !showingCelebration && !spelling.sessionCompletionReady) {
+  if (
+    homeTab === "session" &&
+    stageId === "repeat-check" &&
+    spelling.repeatCheck.completed &&
+    !showingCelebration &&
+    !spelling.sessionCompletionReady
+  ) {
     spelling.homeTab = "stable";
     spelling.selectedStageId = "";
     spelling.celebrationStageId = "";
     spelling.sessionCompletionReady = false;
-    persistSubjects({ skipRemoteSync: true });
     homeTab = "stable";
   }
 
