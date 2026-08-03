@@ -5152,7 +5152,7 @@ function openSpellingSession(subject) {
     spelling.sessionPreparedKey = currentSpellingSessionKey;
   }
 
-  const stageId = getSpellingStageId(subject);
+  const stageId = getSpellingVisibleStageId(subject);
   if (canOpenSpellingStage(subject, stageId)) {
     setSpellingSelectedStage(subject, stageId);
     return;
@@ -5175,14 +5175,12 @@ function setSpellingHomeTab(subject, tabId) {
   }
   if (
     spelling.homeTab === String(tabId) &&
-    !spelling.selectedStageId &&
     !spelling.celebrationStageId &&
     !spelling.sessionCompletionReady
   ) {
     return;
   }
   spelling.homeTab = String(tabId);
-  spelling.selectedStageId = "";
   spelling.celebrationStageId = "";
   spelling.sessionCompletionReady = false;
 }
@@ -5202,6 +5200,7 @@ function setSpellingSelectedStage(subject, stageId) {
   spelling.homeTab = "session";
   spelling.selectedStageId = stageId;
   spelling.celebrationStageId = "";
+  spelling.sessionCompletionReady = false;
 }
 
 function bindSpellingNavigationInteractions(subject, host) {
