@@ -5209,32 +5209,29 @@ function bindSpellingNavigationInteractions(subject, host) {
     return;
   }
 
-  root.addEventListener("click", (event) => {
-    const homeTabButton = event.target.closest("[data-spelling-home-tab]");
-    if (homeTabButton?.dataset.spellingHomeTab) {
+  root.querySelectorAll("[data-spelling-home-tab]").forEach((button) => {
+    button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      setSpellingHomeTab(subject, homeTabButton.dataset.spellingHomeTab);
+      setSpellingHomeTab(subject, button.dataset.spellingHomeTab);
       render();
-      return;
-    }
+    });
+  });
 
-    const beginSessionButton = event.target.closest("[data-spelling-begin-session]");
-    if (beginSessionButton) {
-      event.preventDefault();
-      event.stopPropagation();
-      setSpellingHomeTab(subject, "session");
-      render();
-      return;
-    }
+  root.querySelector("[data-spelling-begin-session]")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setSpellingHomeTab(subject, "session");
+    render();
+  });
 
-    const openStageButton = event.target.closest("[data-spelling-open-stage]");
-    if (openStageButton?.dataset.spellingOpenStage) {
+  root.querySelectorAll("[data-spelling-open-stage]").forEach((button) => {
+    button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      setSpellingSelectedStage(subject, openStageButton.dataset.spellingOpenStage);
+      setSpellingSelectedStage(subject, button.dataset.spellingOpenStage);
       render();
-    }
+    });
   });
 }
 
