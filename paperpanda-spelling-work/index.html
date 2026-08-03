@@ -1,0 +1,798 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PaperPanda Student Portal</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <section class="landing-panel" id="landing-panel">
+        <div class="landing-copy">
+          <div class="brand-lockup">
+            <img src="/paperpanda-logo.svg" alt="PaperPanda panda" class="brand-lockup__logo" />
+            <div class="brand-lockup__copy">
+              <span class="brand-lockup__name">PAPERPANDA</span>
+            </div>
+          </div>
+          <h1>SMART. SORTED. STUDYING.</h1>
+          <p class="landing-summary">
+            Upload class documents, listen to instructions, ask for guidance, and keep every
+            assessment linked to the notes that matter.
+          </p>
+          <div class="feature-marquee">
+            <span>Read or listen to documents</span>
+            <span>Track assessment dates</span>
+            <span>Get subject-specific guidance</span>
+          </div>
+        </div>
+
+        <div class="signin-card" id="signin-form">
+          <p class="signin-card__eyebrow" id="signin-eyebrow">Student account</p>
+          <h2 id="signin-title">Create your account</h2>
+          <div class="signin-mode-row">
+            <button type="button" class="ghost-button signin-mode-button signin-mode-button--active" id="signin-mode-create-button">Create account</button>
+            <button type="button" class="ghost-button signin-mode-button" id="signin-mode-login-button">Sign in</button>
+          </div>
+          <label id="student-name-wrap">
+            Student name
+            <input type="text" id="student-name" placeholder="e.g. Mia Chen" />
+          </label>
+          <label id="student-grade-wrap">
+            School year
+            <select id="student-grade">
+              <option value="7">Year 7</option>
+              <option value="8">Year 8</option>
+              <option value="9">Year 9</option>
+              <option value="10">Year 10</option>
+              <option value="11">Year 11</option>
+              <option value="12">HSC / Year 12</option>
+            </select>
+          </label>
+          <label>
+            School email
+            <input type="text" id="student-email" placeholder="name@school.edu.au" />
+          </label>
+          <label>
+            Password
+            <input type="password" id="student-password" placeholder="Enter password" />
+          </label>
+          <label id="student-password-confirm-wrap">
+            Confirm password
+            <input type="password" id="student-password-confirm" placeholder="Confirm password" />
+          </label>
+          <button type="button" class="primary-button" id="open-dashboard-button">Create account</button>
+          <p class="signin-note" id="signin-note">
+            Create an account first, then sign in with your school email and password.
+          </p>
+          <div class="upload-status" id="signin-status"></div>
+        </div>
+      </section>
+
+      <main class="app-shell hidden" id="app-shell">
+        <header class="topbar">
+          <div class="topbar__brand-block">
+            <div class="brand-lockup brand-lockup--topbar">
+              <img src="/paperpanda-logo.svg" alt="PaperPanda panda" class="brand-lockup__logo brand-lockup__logo--small" />
+              <div class="brand-lockup__copy">
+                <span class="brand-lockup__name brand-lockup__name--topbar">PaperPanda</span>
+                <span class="brand-lockup__tag" id="app-brand-tag"></span>
+              </div>
+            </div>
+            <h2 id="welcome-heading"></h2>
+          </div>
+          <div class="topbar__actions">
+            <button type="button" class="focus-toggle" id="focus-mode-toggle" aria-pressed="false">
+              <span class="focus-toggle__label">✨ Focus mode</span>
+              <span class="focus-toggle__switch" aria-hidden="true"><span class="focus-toggle__knob"></span></span>
+            </button>
+            <button type="button" class="topbar-link-button" id="nav-home-button">Home</button>
+            <button type="button" class="topbar-link-button" id="nav-subjects-button">Subjects</button>
+            <button type="button" class="topbar-link-button" id="nav-settings-button">Settings</button>
+            <button type="button" class="topbar-link-button" id="signout-button">Sign out</button>
+          </div>
+        </header>
+
+        <section class="home-view" id="home-view">
+          <section class="hero-band hero-band--home" id="home-hero">
+            <div class="hero-band__copy">
+              <p class="eyebrow" id="home-hero-date">Wednesday · 28 May 2026</p>
+              <h1 id="home-hero-title">Hey Mia. <span>3 things</span></h1>
+              <p class="hero-band__subtitle" id="home-hero-subtitle">today — and 6 days until Cell Biology.</p>
+            </div>
+            <div class="hero-band__actions">
+              <button type="button" class="ghost-button" id="open-upcoming-from-hero-button">Calendar</button>
+              <button type="button" class="primary-button primary-button--dark" id="open-upload-modal-button">+ Upload</button>
+            </div>
+          </section>
+
+          <section class="focus-home-next-card hidden" id="focus-home-next-card" aria-label="Next thing due"></section>
+
+          <div class="home-stage">
+            <section class="home-stage__main">
+              <section class="home-section">
+                <div class="focus-home-subject-heading hidden" id="focus-home-subject-heading">
+                  <h3>Pick a subject</h3>
+                  <span id="focus-home-subject-summary">Choose one subject to keep moving.</span>
+                </div>
+                <div class="home-subject-grid" id="home-subject-grid"></div>
+              </section>
+
+              <section class="home-continue-card" id="home-continue-reading-card">
+                <div class="home-continue-card__copy">
+                  <p class="eyebrow">Continue reading</p>
+                  <h3 id="home-current-doc-title">Choose a subject to continue reading.</h3>
+                  <p class="home-continue-card__meta" id="home-current-doc-meta">Upload class notes and they will appear here.</p>
+                  <div class="home-progress-row">
+                    <div class="progress-meter progress-meter--wide">
+                      <span class="progress-meter__bar" id="home-current-doc-progress"></span>
+                    </div>
+                    <span class="home-progress-label" id="home-current-doc-progress-label">0% read</span>
+                  </div>
+                  <div class="home-continue-card__actions">
+                    <button type="button" class="primary-button primary-button--dark" id="home-listen-current-button">Listen from here</button>
+                    <button type="button" class="ghost-button" id="home-open-current-button">Open reader</button>
+                  </div>
+                </div>
+                <div class="home-continue-card__visual" id="home-current-doc-visual">
+                  <div class="home-continue-card__art">
+                    <span class="home-continue-card__pause">❚❚</span>
+                    <span class="home-continue-card__time" id="home-current-doc-duration">1:24 / 3:18</span>
+                  </div>
+                </div>
+              </section>
+
+              <section class="home-section">
+                <div class="section-heading section-heading--between">
+                  <div>
+                    <p class="eyebrow">Today's homework</p>
+                  </div>
+                  <span class="section-pill" id="home-homework-count-pill">0 left</span>
+                </div>
+                <div class="home-homework-grid" id="home-homework-list"></div>
+              </section>
+
+              <section class="home-section home-section--customise">
+                <div class="section-heading section-heading--between">
+                  <div>
+                    <p class="eyebrow">Customise</p>
+                  </div>
+                  <button type="button" class="ghost-button ghost-button--small" id="enter-subjects-button">Open subjects</button>
+                </div>
+                <div class="home-customise-panel">
+                  <input type="file" id="background-upload" class="upload-panel__input upload-panel__input--hidden" accept="image/*" />
+                  <div class="background-controls">
+                    <button type="button" class="ghost-button ghost-button--small" id="change-background-button">Change background</button>
+                    <button type="button" class="ghost-button ghost-button--small" id="remove-background-button">Remove background</button>
+                    <label class="upload-option">
+                      <input type="checkbox" id="background-home-checkbox" checked />
+                      <span>Home</span>
+                    </label>
+                    <label class="upload-option">
+                      <input type="checkbox" id="background-subjects-checkbox" />
+                      <span>Subjects</span>
+                    </label>
+                  </div>
+                  <div class="home-customise-panel__fields">
+                    <label class="upload-field">
+                      <span class="upload-field__label">Background colour</span>
+                      <input type="color" id="background-colour-input" value="#fbf7f0" />
+                    </label>
+                    <label class="upload-field">
+                      <span class="upload-field__label">Heading colour</span>
+                      <input type="color" id="heading-colour-input" value="#111111" />
+                    </label>
+                  </div>
+                  <div class="home-actions">
+                    <button type="button" class="ghost-button ghost-button--small" id="clear-background-colour-button">Reset background colour</button>
+                    <button type="button" class="ghost-button ghost-button--small" id="clear-heading-colour-button">Reset heading colour</button>
+                    <button type="button" class="ghost-button ghost-button--small" id="open-upload-modal-secondary">Open upload</button>
+                  </div>
+                </div>
+              </section>
+            </section>
+
+            <aside class="home-stage__dock">
+              <section class="ask-card ask-card--home" id="home-ask-card">
+                <div class="ask-card__voice-row">
+                  <img src="/paperpanda-logo.svg" alt="PaperPanda" class="ask-card__avatar" />
+                  <div class="ask-card__voice-copy">
+                    <p class="eyebrow">Ask Panda</p>
+                    <h3>Ask Panda</h3>
+                    <p class="helper-text">Hold space anywhere to talk.</p>
+                  </div>
+                  <button type="button" class="ask-card__mic-button" id="home-ask-mic-button">🎙</button>
+                </div>
+                <div class="ask-card__wave" aria-hidden="true">
+                  <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+                </div>
+                <div class="ask-card__prompt" id="home-ask-prompt">Good morning. Want me to start with your reading or homework?</div>
+                <div class="ask-card__quick-actions">
+                  <button type="button" class="ask-quick-action" id="home-ask-read-button">▶ Read me today's homework</button>
+                  <button type="button" class="ask-quick-action" id="home-ask-quiz-button">🎯 Quiz me on yesterday</button>
+                </div>
+              </section>
+
+              <button type="button" class="home-next-card" id="upcoming-assessments-button">
+                <div class="home-next-card__eyebrow">Next up</div>
+                <div class="home-next-card__count">
+                  <strong id="home-next-up-count">0</strong>
+                  <span>days</span>
+                </div>
+                <h3 id="home-next-up-title">No upcoming assessment yet</h3>
+                <p id="home-next-up-meta">Open the calendar to review due dates.</p>
+                <span class="home-next-card__cta" id="upcoming-next-due">Open task</span>
+                <span class="home-next-card__summary" id="upcoming-assessment-summary">Open a due-date summary for the next 14 days.</span>
+                <span class="hidden" id="upcoming-assessment-count">0 due in the next fortnight</span>
+              </button>
+
+            </aside>
+          </div>
+        </section>
+
+        <div class="focus-fab hidden" id="focus-ask-fab">
+          <button type="button" class="focus-fab__pill" id="focus-ask-button">
+            <span class="focus-fab__dot"></span>
+            <span id="focus-ask-label">Ask Panda</span>
+          </button>
+          <button type="button" class="focus-fab__avatar" id="focus-ask-avatar-button" aria-label="Ask Panda">
+            <img src="/paperpanda-logo.svg" alt="PaperPanda" />
+          </button>
+        </div>
+
+        <section class="settings-view hidden" id="settings-view">
+            <section class="home-grid">
+              <section class="home-card">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Settings</p>
+                  <h3>Account</h3>
+                </div>
+              </div>
+              <label class="upload-field">
+                <span class="upload-field__label">Student name</span>
+                <input type="text" id="settings-name" />
+              </label>
+              <label class="upload-field">
+                <span class="upload-field__label">School email</span>
+                <input type="text" id="settings-email" />
+              </label>
+              <label class="upload-field">
+                <span class="upload-field__label">School year</span>
+                <select id="settings-grade" class="upload-select">
+                  <option value="7">Year 7</option>
+                  <option value="8">Year 8</option>
+                  <option value="9">Year 9</option>
+                  <option value="10">Year 10</option>
+                  <option value="11">Year 11</option>
+                  <option value="12">HSC / Year 12</option>
+                </select>
+              </label>
+                <div class="upload-submit-row">
+                  <button type="button" class="primary-button" id="save-account-settings-button">Save account</button>
+                </div>
+              </section>
+
+              <section class="home-card">
+                <div class="section-heading">
+                  <div>
+                    <p class="eyebrow">Customise</p>
+                    <h3>Subject pandas</h3>
+                  </div>
+                </div>
+                <div class="subject-icon-settings" id="settings-subject-icons"></div>
+                <div class="upload-submit-row">
+                  <button type="button" class="primary-button" id="save-subject-icons-button">Save subject pandas</button>
+                </div>
+              </section>
+
+              <section class="home-card">
+                <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Security</p>
+                  <h3>Password</h3>
+                </div>
+              </div>
+              <label class="upload-field">
+                <span class="upload-field__label">Current password</span>
+                <input type="password" id="settings-current-password" />
+              </label>
+              <label class="upload-field">
+                <span class="upload-field__label">New password</span>
+                <input type="password" id="settings-new-password" />
+              </label>
+              <label class="upload-field">
+                <span class="upload-field__label">Confirm new password</span>
+                <input type="password" id="settings-confirm-password" />
+              </label>
+              <div class="upload-submit-row">
+                <button type="button" class="primary-button" id="save-password-settings-button">Update password</button>
+              </div>
+              <div class="upload-status" id="settings-status"></div>
+            </section>
+          </section>
+        </section>
+
+        <section class="workspace-grid hidden" id="subjects-view">
+          <section class="workspace-main">
+            <section class="hero-band hero-band--subjects" id="subjects-hero">
+              <div class="hero-band__copy">
+                <p class="eyebrow" id="subjects-hero-date">Wednesday · 28 May 2026</p>
+                <h1 id="subjects-hero-title">Hey Mia. <span>14 pages</span></h1>
+                <p class="hero-band__subtitle" id="subjects-hero-subtitle">to finish in Cell Biology — Lesson 4.</p>
+              </div>
+              <div class="hero-band__actions">
+                <button type="button" class="primary-button primary-button--dark" id="subject-hero-upload-button">+ Upload</button>
+              </div>
+            </section>
+
+            <section class="focus-launchpad hidden" id="subject-focus-launchpad" aria-label="Choose an area"></section>
+
+            <section class="subject-panel subject-panel--row">
+              <div class="subject-list subject-list--row" id="subject-list"></div>
+            </section>
+
+            <div class="subject-header" id="subject-header"></div>
+
+            <section class="reading-viewer">
+              <div class="reading-viewer__header">
+                <button type="button" class="focus-back hidden" id="focus-back-button">← All areas</button>
+                <div class="reading-viewer__tabs" id="subject-tabs">
+                  <button type="button" class="viewer-tab is-active" data-viewer-tab="reader">
+                    Reader <span class="vt-ct" id="tab-count-reader">0</span>
+                  </button>
+                  <button type="button" class="viewer-tab" data-viewer-tab="homework">
+                    Homework <span class="vt-ct" id="tab-count-homework">0</span>
+                  </button>
+                  <button type="button" class="viewer-tab" data-viewer-tab="spelling">
+                    Spelling <span class="vt-ct" id="tab-count-spelling">0</span>
+                  </button>
+                  <button type="button" class="viewer-tab" data-viewer-tab="watch">
+                    Watch <span class="vt-ct" id="tab-count-watch">0</span>
+                  </button>
+                  <button type="button" class="viewer-tab" data-viewer-tab="assessments">
+                    Assessments <span class="vt-ct" id="tab-count-assessments">0</span>
+                  </button>
+                </div>
+                <div class="reading-viewer__meta" id="reading-viewer-meta">Year 7</div>
+              </div>
+
+              <div class="reading-viewer__body">
+                <section class="viewer-panel viewer-panel--reader" id="viewer-panel-reader">
+                  <div class="reader-layout">
+                    <section class="documents-card" id="documents-section">
+                      <div class="section-heading section-heading--stacked">
+                        <div>
+                          <h3>Resources</h3>
+                        </div>
+                      </div>
+                      <div class="documents-table-wrap">
+                        <table class="documents-table">
+                          <thead>
+                            <tr>
+                              <th>Select</th>
+                              <th>Added</th>
+                              <th>Title</th>
+                              <th>Type</th>
+                              <th>Read</th>
+                              <th>Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody id="documents-body"></tbody>
+                        </table>
+                      </div>
+                      <div class="documents-footer">
+                        <div class="documents-bulk-actions">
+                          <button type="button" class="ghost-button" id="documents-select-all-button">Select all</button>
+                          <button type="button" class="ghost-button ghost-button--danger" id="documents-delete-selected-button">Delete selected</button>
+                        </div>
+                        <button type="button" class="ghost-button hidden" id="documents-toggle-button">Show all documents</button>
+                      </div>
+                    </section>
+
+                    <section class="reader-card" id="reader-section">
+                      <div class="section-heading section-heading--reader">
+                        <div>
+                          <p class="eyebrow">Read and listen</p>
+                          <h3 id="reader-title">Document reader</h3>
+                        </div>
+                      </div>
+                      <div class="reader-content" id="reader-content">
+                        Choose a document from the table to read it here.
+                      </div>
+                    </section>
+                  </div>
+                </section>
+
+                <section class="viewer-panel hidden" id="viewer-panel-homework">
+                  <section class="homework-workspace" id="homework-section">
+                    <div id="practice-list" class="practice-list"></div>
+                    <aside class="homework-sidebar">
+                      <section class="task-stack-card">
+                        <div class="section-heading section-heading--between section-heading--compact">
+                          <div>
+                            <p class="eyebrow">This week</p>
+                            <h3>Up next this week</h3>
+                          </div>
+                          <span class="section-pill" id="subject-homework-upcoming-count">0</span>
+                        </div>
+                        <div id="subject-homework-upcoming-list" class="subject-side-list"></div>
+                      </section>
+
+                      <section class="revision-builder-card">
+                        <div class="section-heading section-heading--between section-heading--compact">
+                          <div>
+                            <p class="eyebrow">Revision</p>
+                            <h3>Create a test</h3>
+                          </div>
+                          <span class="section-pill" id="subject-revision-grade-pill">Year 7</span>
+                        </div>
+                        <p class="helper-text" id="revision-grade-copy">
+                          PaperPanda is using the selected school year to build this revision test.
+                        </p>
+                        <label class="upload-field">
+                          <span class="upload-field__label">Topic</span>
+                          <select id="revision-subject-select" class="upload-select"></select>
+                        </label>
+                        <label class="upload-field" id="revision-topic-wrap">
+                          <span class="upload-field__label">Focus</span>
+                          <select id="revision-topic-select" class="upload-select"></select>
+                        </label>
+                        <label class="upload-field hidden" id="revision-text-wrap">
+                          <span class="upload-field__label">English text / novel / film</span>
+                          <input type="text" id="revision-text-input" placeholder="e.g. The Giver or persuasive speeches" />
+                        </label>
+                        <div class="revision-notes-card">
+                          <div class="revision-notes-card__label">Notes to include</div>
+                          <select id="revision-notes-select" class="upload-select upload-select--notes" multiple></select>
+                        </div>
+                        <div class="revision-chip-row" id="revision-skills"></div>
+                        <div class="revision-summary" id="revision-summary">
+                          Select a subject to load the curriculum overview and tested skills.
+                        </div>
+                        <div class="upload-submit-row">
+                          <button type="button" class="primary-button" id="create-revision-test-button">Create test</button>
+                        </div>
+                        <div class="upload-status" id="revision-status"></div>
+                      </section>
+                    </aside>
+                  </section>
+                </section>
+
+                <section class="viewer-panel hidden" id="viewer-panel-spelling">
+                  <section class="spelling-workspace" id="spelling-section"></section>
+                </section>
+
+                <section class="viewer-panel hidden" id="viewer-panel-watch">
+                  <section class="watch-workspace" id="watch-section">
+                    <div class="watch-workspace__feature">
+                      <div class="section-heading section-heading--between">
+                        <div>
+                          <p class="eyebrow">Watch</p>
+                        </div>
+                        <div class="modal__actions">
+                          <button type="button" class="ghost-button" id="watch-add-link-button">Add link</button>
+                          <button type="button" class="ghost-button" id="watch-rescan-button">Rescan links</button>
+                        </div>
+                      </div>
+                      <div class="upload-status" id="watch-status"></div>
+                      <div id="watch-list" class="practice-list"></div>
+                      <div class="documents-footer">
+                        <button type="button" class="ghost-button hidden" id="watch-toggle-button">Load more</button>
+                      </div>
+                    </div>
+                  </section>
+                </section>
+
+                <section class="viewer-panel hidden" id="viewer-panel-assessments">
+                  <section class="assessment-workspace" id="assessments-section">
+                    <section class="assessment-workspace__hero" id="subject-assessment-hero">
+                      <div class="assessment-workspace__count">
+                        <strong id="subject-next-assessment-days">0</strong>
+                        <span>days</span>
+                      </div>
+                      <div class="assessment-workspace__hero-copy">
+                        <p class="eyebrow">Assessment focus</p>
+                        <h3 id="subject-next-assessment-title">No active assessment yet</h3>
+                        <p id="subject-next-assessment-meta">Attach notes and track upcoming due dates here.</p>
+                      </div>
+                    </section>
+                    <section class="assessment-card">
+                      <div class="section-heading">
+                        <div>
+                          <p class="eyebrow">Deadlines</p>
+                          <h3>Assessment Schedule</h3>
+                        </div>
+                      </div>
+                      <div id="assessment-list" class="assessment-list"></div>
+                    </section>
+                  </section>
+                </section>
+              </div>
+            </section>
+          </section>
+
+          <aside class="workspace-dock">
+            <section class="saved-tests card-stack-card">
+              <div class="section-heading section-heading--stacked section-heading--compact">
+                <div>
+                  <p class="eyebrow">Revision</p>
+                </div>
+              </div>
+              <div class="saved-tests__list" id="saved-tests-list"></div>
+            </section>
+
+            <aside class="ask-card">
+              <div class="ask-card__voice-row ask-card__voice-row--subject">
+                <img src="/paperpanda-logo.svg" alt="PaperPanda" class="ask-card__avatar" />
+                <div class="ask-card__voice-copy">
+                  <p class="eyebrow">Support</p>
+                  <h3>Ask Panda</h3>
+                  <p class="helper-text">Ask about the current subject or what you're reading.</p>
+                </div>
+                <button type="button" class="ask-card__mic-button" id="ask-mic-button">🎙</button>
+              </div>
+              <div class="ask-card__wave" aria-hidden="true">
+                <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+              </div>
+              <p class="helper-text helper-text--tiny hidden" id="ai-connection-status"></p>
+              <div class="ask-context" id="ask-context">No document selected for Ask yet.</div>
+              <div class="ask-response ask-response--card" id="ask-response">
+                Pick a subject and ask a question to see guided support here.
+              </div>
+              <textarea
+                id="ask-input"
+                rows="5"
+                placeholder="Example: Can you explain what I should focus on for this history source analysis?"
+              ></textarea>
+              <div class="ask-toolbar">
+                <button type="button" class="primary-button primary-button--full" id="ask-button">
+                  Get guidance
+                </button>
+                <button type="button" class="ghost-button ghost-button--light" id="ask-listen-button">
+                  Listen
+                </button>
+              </div>
+            </aside>
+            <section class="dock-context-card" id="dock-context-card">
+              <div class="section-heading section-heading--stacked section-heading--compact">
+                <div>
+                  <p class="eyebrow">Context</p>
+                  <h3 id="dock-context-title">Linked here from notes</h3>
+                </div>
+              </div>
+              <div id="dock-context-body" class="dock-context-body"></div>
+            </section>
+          </aside>
+        </section>
+      </main>
+
+      <section class="task-view hidden" id="task-view">
+        <div class="task-modal">
+          <div class="task-modal__surface">
+            <div class="task-modal__body" id="task-source-content">Select a task to work on it here.</div>
+            <div class="task-modal__footer">
+              <div class="upload-status" id="task-work-status"></div>
+              <div class="reader-actions task-modal__footer-actions">
+                <button type="button" class="ghost-button" id="save-task-work-button">Save draft</button>
+                <button type="button" class="ghost-button" id="save-task-files-button">Save to files</button>
+                <button type="button" class="primary-button" id="close-task-view-button">Back to subjects</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="task-view hidden" id="revision-view">
+        <header class="topbar">
+          <div class="topbar__brand-block">
+            <div class="brand-lockup brand-lockup--topbar">
+              <img src="/paperpanda-logo.svg" alt="PaperPanda panda" class="brand-lockup__logo brand-lockup__logo--small" />
+              <div class="brand-lockup__copy">
+                <span class="brand-lockup__name brand-lockup__name--topbar">PaperPanda</span>
+                <span class="brand-lockup__tag">Revision test</span>
+              </div>
+            </div>
+            <h2 id="revision-view-title">Revision test</h2>
+          </div>
+          <div class="topbar__actions">
+            <button type="button" class="ghost-button" id="close-revision-view-button">Back to home</button>
+          </div>
+        </header>
+        <div class="task-view__shell task-view__shell--single">
+          <section class="reader-card reader-card--wide reader-card--revision">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Revision test</p>
+                <h3 id="revision-test-heading">Generated test</h3>
+              </div>
+            </div>
+            <div class="revision-test-meta-block" id="revision-test-meta"></div>
+            <div class="revision-generated-test revision-generated-test--interactive" id="revision-test-content">
+              Create a test from the home page to work on it here.
+            </div>
+            <div class="reader-actions reader-actions--revision">
+              <button type="button" class="primary-button" id="submit-revision-test-button">Submit test</button>
+              <button type="button" class="ghost-button" id="save-revision-test-button">Save test</button>
+            </div>
+            <div class="upload-status" id="revision-test-status"></div>
+            <div class="revision-feedback hidden" id="revision-feedback"></div>
+          </section>
+        </div>
+      </section>
+
+      <div class="modal hidden" id="upcoming-modal" aria-hidden="true">
+        <button type="button" class="modal__scrim" id="close-upcoming-scrim" aria-label="Close upcoming assessments summary"></button>
+        <section class="modal__panel" role="dialog" aria-modal="true" aria-labelledby="upcoming-modal-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Next 14 days</p>
+              <h3 id="upcoming-modal-title">Upcoming assessments</h3>
+            </div>
+            <button type="button" class="ghost-button" id="close-upcoming-button">Close</button>
+          </div>
+          <p class="helper-text" id="upcoming-modal-summary">
+            This summary shows assessments due in the next fortnight.
+          </p>
+          <div class="modal__actions">
+            <button type="button" class="ghost-button" id="set-term-dates-button">Set term dates</button>
+            <button type="button" class="ghost-button" id="toggle-upcoming-mode-button">View all assessments for the year</button>
+          </div>
+          <div id="upcoming-modal-list" class="assessment-list"></div>
+        </section>
+      </div>
+
+      <div class="modal hidden" id="upload-modal" aria-hidden="true">
+        <button type="button" class="modal__scrim" id="close-upload-scrim" aria-label="Close upload documents"></button>
+        <section class="modal__panel" role="dialog" aria-modal="true" aria-labelledby="upload-modal-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Upload</p>
+              <h3 id="upload-modal-title">Upload documents</h3>
+            </div>
+            <button type="button" class="ghost-button" id="close-upload-button">Close</button>
+          </div>
+
+          <label class="upload-field">
+            <span class="upload-field__label">Subject</span>
+            <select id="upload-subject-select" class="upload-select"></select>
+          </label>
+
+          <label class="upload-panel upload-panel--compact" id="upload-panel">
+            <span class="upload-panel__title">Upload</span>
+            <input
+              type="file"
+              id="document-upload"
+              class="upload-panel__input upload-panel__input--hidden"
+              multiple
+              accept=".txt,.md,.csv,.pdf,.docx,.pptx,.gdoc,.gslides"
+            />
+          </label>
+          <p class="helper-text helper-text--tiny">Supports txt, pdf, docx, pptx, gdoc and gslides.</p>
+
+          <div class="pending-upload" id="pending-upload"></div>
+
+          <div class="upload-options upload-options--types">
+            <label class="upload-option">
+              <input type="checkbox" id="upload-class-notes" />
+              <span>Class Notes</span>
+            </label>
+            <label class="upload-option">
+              <input type="checkbox" id="upload-assessment" />
+              <span>Assessment</span>
+            </label>
+            <label class="upload-option">
+              <input type="checkbox" id="upload-homework" />
+              <span>Homework</span>
+            </label>
+            <label class="upload-option">
+              <input type="checkbox" id="upload-watch" />
+              <span>Watch</span>
+            </label>
+          </div>
+
+          <label class="upload-field upload-field--hidden" id="upload-due-date-wrap">
+            <span class="upload-field__label">Assessment due date</span>
+            <input type="date" id="upload-due-date" />
+          </label>
+
+          <label class="upload-field upload-field--hidden" id="upload-assessment-task-wrap">
+            <span class="upload-field__label">Attach to assessment task</span>
+            <select id="upload-assessment-task-select" class="upload-select"></select>
+          </label>
+
+          <label class="upload-field upload-field--hidden" id="upload-watch-url-wrap">
+            <span class="upload-field__label">YouTube link</span>
+            <input type="url" id="upload-watch-url" placeholder="https://www.youtube.com/watch?v=..." />
+          </label>
+
+          <label class="upload-field upload-field--hidden" id="upload-watch-title-wrap">
+            <span class="upload-field__label">Watch title</span>
+            <input type="text" id="upload-watch-title" placeholder="Video title" />
+          </label>
+
+          <div class="upload-submit-row">
+            <input
+              type="file"
+              id="assessment-schedule-upload"
+              class="upload-panel__input upload-panel__input--hidden"
+              accept=".pdf,application/pdf"
+            />
+            <button type="button" class="ghost-button" id="upload-assessment-schedule-button">Upload assessment schedule</button>
+            <button type="button" class="primary-button" id="process-upload-button">Submit</button>
+            <button type="button" class="ghost-button" id="clear-upload-button">Clear</button>
+          </div>
+          <div class="upload-status" id="upload-status"></div>
+        </section>
+      </div>
+
+      <div class="modal hidden" id="attach-notes-modal" aria-hidden="true">
+        <button type="button" class="modal__scrim" id="close-attach-notes-scrim" aria-label="Close attach notes"></button>
+        <section class="modal__panel modal__panel--wide" role="dialog" aria-modal="true" aria-labelledby="attach-notes-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Assessment support</p>
+              <h3 id="attach-notes-title">Attach notes</h3>
+            </div>
+            <button type="button" class="ghost-button" id="close-attach-notes-button">Close</button>
+          </div>
+          <p class="helper-text" id="attach-notes-summary">
+            Select the whole documents you want linked to this task.
+          </p>
+          <div id="attach-notes-list" class="attach-notes-list"></div>
+        </section>
+      </div>
+
+      <div class="modal hidden" id="edit-assessment-modal" aria-hidden="true">
+        <button type="button" class="modal__scrim" id="close-edit-assessment-scrim" aria-label="Close edit assessment"></button>
+        <section class="modal__panel" role="dialog" aria-modal="true" aria-labelledby="edit-assessment-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Assessment</p>
+              <h3 id="edit-assessment-title">Edit assessment</h3>
+            </div>
+            <button type="button" class="ghost-button" id="close-edit-assessment-button">Close</button>
+          </div>
+
+          <label class="upload-field">
+            <span class="upload-field__label">Assessment name</span>
+            <input type="text" id="edit-assessment-name" />
+          </label>
+
+          <div class="edit-assessment-grid">
+            <label class="upload-field">
+              <span class="upload-field__label">Task number</span>
+              <input type="text" id="edit-assessment-task-number" />
+            </label>
+
+            <label class="upload-field">
+              <span class="upload-field__label">Weighting</span>
+              <input type="text" id="edit-assessment-weighting" />
+            </label>
+          </div>
+
+          <div class="edit-assessment-grid">
+            <label class="upload-field">
+              <span class="upload-field__label">Distribution date</span>
+              <input type="text" id="edit-assessment-distribution-date" />
+            </label>
+
+            <label class="upload-field">
+              <span class="upload-field__label">Due date</span>
+              <input type="text" id="edit-assessment-due-date" />
+            </label>
+          </div>
+
+          <div class="upload-submit-row">
+            <button type="button" class="primary-button" id="save-edit-assessment-button">Save</button>
+            <button type="button" class="ghost-button" id="cancel-edit-assessment-button">Cancel</button>
+          </div>
+          <div class="upload-status" id="edit-assessment-status"></div>
+        </section>
+      </div>
+    </div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+  </html>
