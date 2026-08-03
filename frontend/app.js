@@ -5210,7 +5210,27 @@ function bindSpellingNavigationInteractions(subject, host) {
   }
 
   root.querySelectorAll("[data-spelling-home-tab]").forEach((button) => {
+    let pointerHandled = false;
+    if (button.dataset.spellingHomeTab === "session") {
+      button.addEventListener("pointerdown", (event) => {
+        if (event.button !== undefined && event.button !== 0) {
+          return;
+        }
+        pointerHandled = true;
+        event.preventDefault();
+        event.stopPropagation();
+        activateSpellingSession(subject);
+        render();
+        queueMicrotask(() => {
+          pointerHandled = false;
+        });
+      });
+    }
     button.addEventListener("click", (event) => {
+      if (pointerHandled) {
+        pointerHandled = false;
+        return;
+      }
       event.preventDefault();
       event.stopPropagation();
       setSpellingHomeTab(subject, button.dataset.spellingHomeTab);
