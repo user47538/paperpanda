@@ -5169,35 +5169,39 @@ function setSpellingSelectedStage(subject, stageId) {
   persistSubjects();
 }
 
-function handleSpellingNavigationAction(eventTarget) {
-  const subject = getSelectedSubject();
-  if (!subject || state.activeSubjectTab !== "spelling") {
-    return false;
+function bindSpellingNavigationInteractions(subject, host) {
+  const root = host?.querySelector(".ss-root");
+  if (!root) {
+    return;
   }
 
-  const homeTabButton = eventTarget.closest("[data-spelling-home-tab]");
-  if (homeTabButton?.dataset.spellingHomeTab) {
-    setSpellingHomeTab(subject, homeTabButton.dataset.spellingHomeTab);
-    return true;
-  }
+  root.addEventListener("click", (event) => {
+    const homeTabButton = event.target.closest("[data-spelling-home-tab]");
+    if (homeTabButton?.dataset.spellingHomeTab) {
+      event.preventDefault();
+      event.stopPropagation();
+      setSpellingHomeTab(subject, homeTabButton.dataset.spellingHomeTab);
+      render();
+      return;
+    }
 
-  const beginSessionButton = eventTarget.closest("[data-spelling-begin-session]");
-  if (beginSessionButton) {
-    setSpellingHomeTab(subject, "session");
-    return true;
-  }
+    const beginSessionButton = event.target.closest("[data-spelling-begin-session]");
+    if (beginSessionButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      setSpellingHomeTab(subject, "session");
+      render();
+      return;
+    }
 
-  const openStageButton = eventTarget.closest("[data-spelling-open-stage]");
-  if (openStageButton?.dataset.spellingOpenStage) {
-    setSpellingSelectedStage(subject, openStageButton.dataset.spellingOpenStage);
-    return true;
-  }
-
-  return false;
-}
-
-function bindSpellingNavigationInteractions() {
-  return;
+    const openStageButton = event.target.closest("[data-spelling-open-stage]");
+    if (openStageButton?.dataset.spellingOpenStage) {
+      event.preventDefault();
+      event.stopPropagation();
+      setSpellingSelectedStage(subject, openStageButton.dataset.spellingOpenStage);
+      render();
+    }
+  });
 }
 
 function celebrateSpellingStage(subject, stageId, coachMessage) {
@@ -15357,15 +15361,6 @@ elements.subjectTabs?.querySelectorAll("[data-viewer-tab]").forEach((button) => 
     }
     render();
   });
-});
-elements.spellingSection?.addEventListener("click", (event) => {
-  if (!handleSpellingNavigationAction(event.target)) {
-    return;
-  }
-  event.preventDefault();
-  event.stopPropagation();
-  state.focusAskOpen = false;
-  render();
 });
 elements.focusBackButton?.addEventListener("click", () => {
   state.focusAskOpen = false;
