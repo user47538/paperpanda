@@ -5144,21 +5144,33 @@ function getSpellingVisibleStageId(subject) {
   return getSpellingStageId(subject);
 }
 
+function openSpellingSession(subject) {
+  const spelling = getSubjectSpellingState(subject);
+  const attemptComplete = SPELLING_STAGE_ORDER.every((stageId) => getSpellingStageCompletionMap(subject)[stageId]);
+  if (attemptComplete) {
+    resetSpellingProgressForNewAttempt(spelling);
+    spelling.sessionPreparedKey = currentSpellingSessionKey;
+  }
+
+  const stageId = getSpellingStageId(subject);
+  if (canOpenSpellingStage(subject, stageId)) {
+    setSpellingSelectedStage(subject, stageId);
+    return;
+  }
+
+  spelling.homeTab = "session";
+  spelling.selectedStageId = "";
+  spelling.celebrationStageId = "";
+  spelling.sessionCompletionReady = false;
+}
+
 function setSpellingHomeTab(subject, tabId) {
   const spelling = getSubjectSpellingState(subject);
   if (!["session", "stable", "progress", "review"].includes(String(tabId || ""))) {
     return;
   }
   if (String(tabId) === "session") {
-    const attemptComplete = SPELLING_STAGE_ORDER.every((stageId) => getSpellingStageCompletionMap(subject)[stageId]);
-    if (attemptComplete) {
-      resetSpellingProgressForNewAttempt(spelling);
-      spelling.sessionPreparedKey = currentSpellingSessionKey;
-    }
-    spelling.homeTab = "session";
-    spelling.selectedStageId = getSpellingStageId(subject);
-    spelling.celebrationStageId = "";
-    spelling.sessionCompletionReady = false;
+    openSpellingSession(subject);
     return;
   }
   if (
