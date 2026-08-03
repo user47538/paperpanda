@@ -5149,6 +5149,15 @@ function setSpellingHomeTab(subject, tabId) {
   if (!["session", "stable", "progress", "review"].includes(String(tabId || ""))) {
     return;
   }
+  if (String(tabId) === "session") {
+    const attemptComplete = SPELLING_STAGE_ORDER.every((stageId) => getSpellingStageCompletionMap(subject)[stageId]);
+    if (attemptComplete && !spelling.sessionCompletionReady && !spelling.celebrationStageId) {
+      resetSpellingProgressForNewAttempt(spelling);
+      spelling.sessionPreparedKey = currentSpellingSessionKey;
+      spelling.homeTab = "session";
+      return;
+    }
+  }
   if (
     spelling.homeTab === String(tabId) &&
     !spelling.selectedStageId &&
@@ -12363,20 +12372,6 @@ function renderSpelling() {
   const overallScorePercent = getSpellingOverallScorePercent(spelling);
   const ownedHorseMeta = getSpellingOwnedHorseMeta(spelling);
   let homeTab = String(spelling.homeTab || "stable");
-
-  if (
-    homeTab === "session" &&
-    stageId === "repeat-check" &&
-    spelling.repeatCheck.completed &&
-    !showingCelebration &&
-    !spelling.sessionCompletionReady
-  ) {
-    spelling.homeTab = "stable";
-    spelling.selectedStageId = "";
-    spelling.celebrationStageId = "";
-    spelling.sessionCompletionReady = false;
-    homeTab = "stable";
-  }
 
   if (spelling.challenge.active || (spelling.challenge.completed && spelling.challenge.lastCompletedWeekKey === currentWeekKey())) {
     const currentChallengeItem = getSpellingChallengeCurrentItem(spelling);
