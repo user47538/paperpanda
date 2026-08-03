@@ -5144,7 +5144,7 @@ function getSpellingVisibleStageId(subject) {
   return getSpellingStageId(subject);
 }
 
-function openSpellingSession(subject) {
+function activateSpellingSession(subject) {
   const spelling = getSubjectSpellingState(subject);
   const attemptComplete = SPELLING_STAGE_ORDER.every((stageId) => getSpellingStageCompletionMap(subject)[stageId]);
   if (attemptComplete) {
@@ -5152,14 +5152,14 @@ function openSpellingSession(subject) {
     spelling.sessionPreparedKey = currentSpellingSessionKey;
   }
 
-  const stageId = getSpellingVisibleStageId(subject);
-  if (canOpenSpellingStage(subject, stageId)) {
-    setSpellingSelectedStage(subject, stageId);
-    return;
-  }
-
   spelling.homeTab = "session";
-  spelling.selectedStageId = "";
+  const visibleStageId = getSpellingVisibleStageId(subject);
+  const fallbackStageId = getSpellingStageId(subject);
+  spelling.selectedStageId = canOpenSpellingStage(subject, visibleStageId)
+    ? visibleStageId
+    : canOpenSpellingStage(subject, fallbackStageId)
+      ? fallbackStageId
+      : "diagnostic";
   spelling.celebrationStageId = "";
   spelling.sessionCompletionReady = false;
 }
@@ -5170,7 +5170,7 @@ function setSpellingHomeTab(subject, tabId) {
     return;
   }
   if (String(tabId) === "session") {
-    openSpellingSession(subject);
+    activateSpellingSession(subject);
     return;
   }
   if (
@@ -5221,7 +5221,7 @@ function bindSpellingNavigationInteractions(subject, host) {
   root.querySelector("[data-spelling-begin-session]")?.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    setSpellingHomeTab(subject, "session");
+    activateSpellingSession(subject);
     render();
   });
 
