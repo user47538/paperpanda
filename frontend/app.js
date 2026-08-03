@@ -5211,8 +5211,14 @@ function getActiveSpellingSubject() {
   return subject;
 }
 
-function getSpellingNavigationAction(eventTarget) {
-  const target = eventTarget instanceof Element ? eventTarget : null;
+function getSpellingNavigationAction(eventOrTarget) {
+  let target = null;
+  if (eventOrTarget && typeof eventOrTarget.composedPath === "function") {
+    target = eventOrTarget.composedPath().find((node) => node instanceof Element) || null;
+  } else {
+    const rawTarget = eventOrTarget instanceof Event ? eventOrTarget.target : eventOrTarget;
+    target = rawTarget instanceof Element ? rawTarget : rawTarget?.parentElement || null;
+  }
   if (!target) {
     return null;
   }
@@ -15432,7 +15438,7 @@ elements.spellingSection?.addEventListener("click", (event) => {
   if (!subject) {
     return;
   }
-  const action = getSpellingNavigationAction(event.target);
+  const action = getSpellingNavigationAction(event);
   if (!action) {
     return;
   }
