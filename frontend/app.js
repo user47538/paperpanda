@@ -5154,9 +5154,12 @@ function setSpellingHomeTab(subject, tabId) {
     if (attemptComplete) {
       resetSpellingProgressForNewAttempt(spelling);
       spelling.sessionPreparedKey = currentSpellingSessionKey;
-      spelling.homeTab = "session";
-      return;
     }
+    spelling.homeTab = "session";
+    spelling.selectedStageId = getSpellingStageId(subject);
+    spelling.celebrationStageId = "";
+    spelling.sessionCompletionReady = false;
+    return;
   }
   if (
     spelling.homeTab === String(tabId) &&
