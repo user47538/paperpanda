@@ -5203,56 +5203,79 @@ function setSpellingSelectedStage(subject, stageId) {
   spelling.sessionCompletionReady = false;
 }
 
+function getActiveSpellingSubject() {
+  const subject = getSelectedSubject();
+  if (!subject || state.activeSubjectTab !== "spelling") {
+    return null;
+  }
+  return subject;
+}
+
+function getSpellingNavigationAction(eventTarget) {
+  const target = eventTarget instanceof Element ? eventTarget : null;
+  if (!target) {
+    return null;
+  }
+
+  const homeTabButton = target.closest("[data-spelling-home-tab]");
+  if (homeTabButton?.dataset.spellingHomeTab) {
+    return {
+      type: "home-tab",
+      button: homeTabButton,
+      value: homeTabButton.dataset.spellingHomeTab
+    };
+  }
+
+  const beginSessionButton = target.closest("[data-spelling-begin-session]");
+  if (beginSessionButton) {
+    return {
+      type: "begin-session",
+      button: beginSessionButton,
+      value: "session"
+    };
+  }
+
+  const openStageButton = target.closest("[data-spelling-open-stage]");
+  if (openStageButton?.dataset.spellingOpenStage) {
+    return {
+      type: "open-stage",
+      button: openStageButton,
+      value: openStageButton.dataset.spellingOpenStage
+    };
+  }
+
+  return null;
+}
+
+function applySpellingNavigationAction(subject, action) {
+  if (!subject || !action) {
+    return false;
+  }
+
+  if (action.type === "home-tab") {
+    setSpellingHomeTab(subject, action.value);
+    return true;
+  }
+
+  if (action.type === "begin-session") {
+    activateSpellingSession(subject);
+    return true;
+  }
+
+  if (action.type === "open-stage") {
+    setSpellingSelectedStage(subject, action.value);
+    return true;
+  }
+
+  return false;
+}
+
 function bindSpellingNavigationInteractions(subject, host) {
   const root = host?.querySelector(".ss-root");
   if (!root) {
     return;
   }
-
-  root.querySelectorAll("[data-spelling-home-tab]").forEach((button) => {
-    let pointerHandled = false;
-    if (button.dataset.spellingHomeTab === "session") {
-      button.addEventListener("pointerdown", (event) => {
-        if (event.button !== undefined && event.button !== 0) {
-          return;
-        }
-        pointerHandled = true;
-        event.preventDefault();
-        event.stopPropagation();
-        activateSpellingSession(subject);
-        render();
-        queueMicrotask(() => {
-          pointerHandled = false;
-        });
-      });
-    }
-    button.addEventListener("click", (event) => {
-      if (pointerHandled) {
-        pointerHandled = false;
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      setSpellingHomeTab(subject, button.dataset.spellingHomeTab);
-      render();
-    });
-  });
-
-  root.querySelector("[data-spelling-begin-session]")?.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    activateSpellingSession(subject);
-    render();
-  });
-
-  root.querySelectorAll("[data-spelling-open-stage]").forEach((button) => {
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      setSpellingSelectedStage(subject, button.dataset.spellingOpenStage);
-      render();
-    });
-  });
+  root.dataset.spellingNavigationReady = subject.id;
 }
 
 function celebrateSpellingStage(subject, stageId, coachMessage) {
@@ -15404,6 +15427,22 @@ elements.subjectTabs?.querySelectorAll("[data-viewer-tab]").forEach((button) => 
     render();
   });
 });
+elements.spellingSection?.addEventListener("click", (event) => {
+  const subject = getActiveSpellingSubject();
+  if (!subject) {
+    return;
+  }
+  const action = getSpellingNavigationAction(event.target);
+  if (!action) {
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  if (!applySpellingNavigationAction(subject, action)) {
+    return;
+  }
+  render();
+}, true);
 elements.focusBackButton?.addEventListener("click", () => {
   state.focusAskOpen = false;
   state.focusArea = null;
