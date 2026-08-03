@@ -5151,7 +5151,7 @@ function setSpellingHomeTab(subject, tabId) {
   }
   if (String(tabId) === "session") {
     const attemptComplete = SPELLING_STAGE_ORDER.every((stageId) => getSpellingStageCompletionMap(subject)[stageId]);
-    if (attemptComplete && !spelling.sessionCompletionReady && !spelling.celebrationStageId) {
+    if (attemptComplete) {
       resetSpellingProgressForNewAttempt(spelling);
       spelling.sessionPreparedKey = currentSpellingSessionKey;
       spelling.homeTab = "session";
