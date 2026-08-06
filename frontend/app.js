@@ -8355,15 +8355,26 @@ async function requestApi(endpoint, payload, expectBlob = false, options = {}) {
     "Content-Type": "application/json",
     ...(options.headers || {})
   };
+  const timeoutMs = Math.max(1_000, Number(options.timeoutMs || 0) || 0);
+  const abortController = timeoutMs ? new AbortController() : null;
+  const timeoutHandle = abortController ? setTimeout(() => abortController.abort(), timeoutMs) : null;
   let response;
   try {
     response = await window.fetch(`${API_BASE_URL}${endpoint}`, {
       method: options.method || "POST",
       headers,
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal: abortController?.signal
     });
   } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(options.timeoutMessage || "The request timed out.");
+    }
     throw error instanceof Error ? error : new Error("Backend request failed.");
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
   }
 
   if (!response.ok) {
@@ -12370,6 +12381,9 @@ async function loadWritingIllustrations(subject, { force = false } = {}) {
             prompt: writing.illustrationStyle.prompt
           }
         : null
+    }, false, {
+      timeoutMs: 70_000,
+      timeoutMessage: "Illustration generation took too long. Try again."
     });
     const generatedOptions = Array.isArray(payload?.options) ? payload.options : [];
     section.illustrationOptions = baseOptions.map((option, index) => ({

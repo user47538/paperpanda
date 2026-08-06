@@ -28,6 +28,9 @@ const openAiWritingImageFormat = ["jpeg", "png", "webp"].includes(String(process
   ? String(process.env.OPENAI_WRITING_IMAGE_FORMAT || "jpeg").trim().toLowerCase()
   : "jpeg";
 const openAiWritingImageCompression = Math.max(40, Math.min(95, Number(process.env.OPENAI_WRITING_IMAGE_COMPRESSION || 70) || 70));
+const openAiJsonTimeoutMs = Math.max(5_000, Number(process.env.OPENAI_JSON_TIMEOUT_MS || 35_000) || 35_000);
+const openAiSpeechTimeoutMs = Math.max(5_000, Number(process.env.OPENAI_SPEECH_TIMEOUT_MS || 35_000) || 35_000);
+const openAiImageTimeoutMs = Math.max(5_000, Number(process.env.OPENAI_IMAGE_TIMEOUT_MS || 25_000) || 25_000);
 const writingImageSectionTextLimit = 420;
 const writingImagePreviousTextLimit = 220;
 const upload = multer({
@@ -223,16 +226,29 @@ function normaliseStudyQuiz(quiz) {
   };
 }
 
-async function callOpenAiJson(endpoint, payload) {
+async function callOpenAiJson(endpoint, payload, { timeoutMs = openAiJsonTimeoutMs, timeoutLabel = "OpenAI request" } = {}) {
   requireOpenAiKey();
-  const response = await fetch(`https://api.openai.com/v1/${endpoint}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${openAiApiKey}`
-    },
-    body: JSON.stringify(payload)
-  });
+  const abortController = new AbortController();
+  const timeoutHandle = setTimeout(() => abortController.abort(), timeoutMs);
+  let response;
+  try {
+    response = await fetch(`https://api.openai.com/v1/${endpoint}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${openAiApiKey}`
+      },
+      body: JSON.stringify(payload),
+      signal: abortController.signal
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`${timeoutLabel} timed out.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
 
   if (!response.ok) {
     let message = "OpenAI request failed.";
@@ -253,14 +269,27 @@ async function callOpenAiJson(endpoint, payload) {
 
 async function callOpenAiSpeech(payload) {
   requireOpenAiKey();
-  const response = await fetch("https://api.openai.com/v1/audio/speech", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${openAiApiKey}`
-    },
-    body: JSON.stringify(payload)
-  });
+  const abortController = new AbortController();
+  const timeoutHandle = setTimeout(() => abortController.abort(), openAiSpeechTimeoutMs);
+  let response;
+  try {
+    response = await fetch("https://api.openai.com/v1/audio/speech", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${openAiApiKey}`
+      },
+      body: JSON.stringify(payload),
+      signal: abortController.signal
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error("OpenAI speech request timed out.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
 
   if (!response.ok) {
     let message = "OpenAI speech request failed.";
@@ -293,7 +322,10 @@ async function generateOpenAiImage(prompt) {
   if (openAiWritingImageFormat !== "png") {
     requestPayload.output_compression = openAiWritingImageCompression;
   }
-  const payload = await callOpenAiJson("images/generations", requestPayload);
+  const payload = await callOpenAiJson("images/generations", requestPayload, {
+    timeoutMs: openAiImageTimeoutMs,
+    timeoutLabel: "OpenAI image generation"
+  });
   const imageRecord = Array.isArray(payload?.data) ? payload.data[0] : null;
   if (imageRecord?.b64_json) {
     return `data:image/${openAiWritingImageFormat};base64,${imageRecord.b64_json}`;
