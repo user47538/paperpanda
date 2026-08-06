@@ -5550,6 +5550,12 @@ input[type="date"] {
   gap: 12px;
 }
 
+.spelling-stage-selector {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
 .spelling-level {
   display: grid;
   gap: 8px;
@@ -5566,6 +5572,49 @@ input[type="date"] {
 .spelling-level.is-current {
   border-color: rgba(109, 79, 18, 0.28);
   box-shadow: 0 12px 24px rgba(109, 79, 18, 0.1);
+}
+
+.spelling-stage-button {
+  display: grid;
+  gap: 8px;
+  text-align: left;
+  padding: 16px;
+  border-radius: 20px;
+  border: 1px solid var(--spelling-line);
+  background: rgba(255, 255, 255, 0.5);
+  color: var(--spelling-ink);
+  cursor: pointer;
+}
+
+.spelling-stage-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.spelling-stage-button.is-current {
+  border-color: rgba(109, 79, 18, 0.28);
+  box-shadow: 0 12px 24px rgba(109, 79, 18, 0.1);
+  background: linear-gradient(180deg, #fff7e7, #f6ead3);
+}
+
+.spelling-stage-button.is-complete {
+  background: linear-gradient(180deg, #eef7f0, #e0f0e5);
+}
+
+.spelling-stage-button__meta,
+.spelling-stage-button__status,
+.spelling-card__attempts,
+.spelling-progress-word span,
+.spelling-progress-word__metrics span,
+.spelling-assessment-row__score {
+  color: var(--spelling-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.spelling-stage-button strong {
+  font-size: 16px;
+  line-height: 1.25;
 }
 
 .spelling-level__step {
@@ -5639,6 +5688,61 @@ input[type="date"] {
 
 .spelling-card__header {
   margin-bottom: 14px;
+}
+
+.spelling-assessment-grid,
+.spelling-progress-list {
+  display: grid;
+  gap: 14px;
+}
+
+.spelling-assessment-grid {
+  margin: 18px 0;
+}
+
+.spelling-assessment-row,
+.spelling-progress-word {
+  display: grid;
+  gap: 10px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(72, 54, 24, 0.12);
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.spelling-assessment-row {
+  grid-template-columns: minmax(120px, 180px) minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.spelling-assessment-row.is-complete {
+  border-color: rgba(37, 107, 74, 0.2);
+  background: #dff1e6;
+}
+
+.spelling-assessment-row.is-checked {
+  border-color: rgba(180, 123, 40, 0.28);
+}
+
+.spelling-assessment-row__word {
+  font-weight: 700;
+  color: var(--spelling-ink);
+}
+
+.spelling-assessment-input {
+  width: 100%;
+  min-height: 48px;
+  border-radius: 14px;
+  border: 1px solid rgba(72, 54, 24, 0.12);
+  background: #fffdf8;
+  color: var(--spelling-ink);
+  padding: 12px 14px;
+  font: inherit;
+}
+
+.spelling-assessment-input:focus {
+  outline: 2px solid rgba(109, 143, 101, 0.35);
+  outline-offset: 1px;
 }
 
 .spelling-card__status {
@@ -5805,6 +5909,28 @@ input[type="date"] {
   font-weight: 600;
 }
 
+.spelling-comparison-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.spelling-progress-list {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.spelling-progress-word strong {
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.spelling-progress-word__metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .spelling-textarea {
   margin-top: 16px;
   min-height: 130px;
@@ -5858,6 +5984,7 @@ input[type="date"] {
   }
 
   .spelling-level-rail,
+  .spelling-stage-selector,
   .spelling-grid,
   .spelling-bucket-grid {
     grid-template-columns: 1fr;
@@ -5883,6 +6010,10 @@ input[type="date"] {
   .spelling-tag-row {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .spelling-assessment-row {
+    grid-template-columns: 1fr;
   }
 
   .spelling-tag-word {
