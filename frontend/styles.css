@@ -8027,12 +8027,17 @@ input[type="date"] {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
+  align-content: start;
+  padding-bottom: 6px;
 }
 
 .ss-stable-mini-scroll {
-  max-height: 286px;
+  height: 364px;
+  max-height: 364px;
   overflow-y: auto;
-  padding-right: 4px;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 0 4px 8px 0;
   scrollbar-gutter: stable;
 }
 
