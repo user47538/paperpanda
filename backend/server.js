@@ -304,6 +304,52 @@ async function generateOpenAiImage(prompt) {
   throw new Error("OpenAI image generation returned no image.");
 }
 
+async function generateWritingIllustrationOptions(prompts, buildPrompt) {
+  const initialResults = await Promise.allSettled(
+    prompts.map(async (prompt) => ({ prompt, imageUrl: await generateOpenAiImage(buildPrompt(prompt)) }))
+  );
+
+  const options = initialResults.map((result, index) => {
+    if (result.status === "fulfilled") {
+      return result.value;
+    }
+    return {
+      prompt: prompts[index],
+      imageUrl: ""
+    };
+  });
+
+  const failedIndexes = options.reduce((indexes, option, index) => {
+    if (!String(option.imageUrl || "").trim()) {
+      indexes.push(index);
+    }
+    return indexes;
+  }, []);
+
+  if (!failedIndexes.length) {
+    return options;
+  }
+
+  const retryResults = await Promise.allSettled(
+    failedIndexes.map(async (failedIndex) => ({
+      failedIndex,
+      prompt: prompts[failedIndex],
+      imageUrl: await generateOpenAiImage(buildPrompt(prompts[failedIndex]))
+    }))
+  );
+
+  retryResults.forEach((result) => {
+    if (result.status === "fulfilled") {
+      options[result.value.failedIndex] = {
+        prompt: result.value.prompt,
+        imageUrl: result.value.imageUrl
+      };
+    }
+  });
+
+  return options;
+}
+
 function extractPdfPageText(items) {
   let currentLine = "";
   let previousY = null;
@@ -878,38 +924,24 @@ app.post("/api/writing/illustrations", async (request, response) => {
     const want = String(openingAnswers.want || "their goal").trim();
     const clippedPreviousSectionText = clipText(previousSectionText, writingImagePreviousTextLimit);
     const clippedSectionText = clipText(sectionText, writingImageSectionTextLimit);
-
-    const results = await Promise.allSettled(
-      prompts.map(async (prompt) => {
-        const fullPrompt = [
-          "Create a warm, detailed children's picture-book illustration.",
-          "No words, labels, speech bubbles, borders, or watermarks.",
-          "Use a soft storybook style with clear characters and readable scene composition.",
-          storyTitle ? `Story title: ${storyTitle}.` : "",
-          `Section ${sectionNumber}.`,
-          `Main character: ${who}.`,
-          `Setting: ${where}.`,
-          `Goal: ${want}.`,
-          styleGuide?.label ? `Keep the established book style: ${styleGuide.label}.` : "",
-          styleGuide?.brief ? `Style notes: ${styleGuide.brief}` : "",
-          styleGuide?.prompt ? `Reference style direction from the chosen book image: ${styleGuide.prompt}` : "",
-          clippedPreviousSectionText ? `Previous section summary: ${clippedPreviousSectionText}` : "",
-          `Current section text: ${clippedSectionText}`,
-          `Scene direction: ${prompt}`
-        ].filter(Boolean).join(" ");
-        const imageUrl = await generateOpenAiImage(fullPrompt);
-        return { prompt, imageUrl };
-      })
-    );
-    const options = results.map((result, index) => {
-      if (result.status === "fulfilled") {
-        return result.value;
-      }
-      return {
-        prompt: prompts[index],
-        imageUrl: ""
-      };
-    });
+    const buildPrompt = (prompt) =>
+      [
+        "Create a children's picture-book illustration.",
+        "No words, labels, speech bubbles, borders, or watermarks.",
+        "Keep the scene clear, readable, and strongly composed for a child reader.",
+        storyTitle ? `Story title: ${storyTitle}.` : "",
+        `Section ${sectionNumber}.`,
+        `Main character: ${who}.`,
+        `Setting: ${where}.`,
+        `Goal: ${want}.`,
+        styleGuide?.label ? `Keep the established book style: ${styleGuide.label}.` : "",
+        styleGuide?.brief ? `Style notes: ${styleGuide.brief}` : "",
+        styleGuide?.prompt ? `Reference style direction from the chosen book image: ${styleGuide.prompt}` : "",
+        clippedPreviousSectionText ? `Previous section summary: ${clippedPreviousSectionText}` : "",
+        `Current section text: ${clippedSectionText}`,
+        `Scene direction: ${prompt}`
+      ].filter(Boolean).join(" ");
+    const options = await generateWritingIllustrationOptions(prompts, buildPrompt);
     const failedCount = options.filter((option) => !String(option.imageUrl || "").trim()).length;
     const partialFailure = failedCount > 0 && failedCount < options.length;
     const allFailed = failedCount === options.length;

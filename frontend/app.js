@@ -478,26 +478,26 @@ const WRITING_STUDIO_STYLE_VARIANTS = [
   {
     id: "watercolour",
     label: "Watercolour storybook",
-    description: "Soft washes, glowing light, and dreamy picture-book scenery.",
-    promptLead: "Use a soft watercolor storybook style with glowing light, gentle brush textures, and dreamy scenery."
+    description: "Soft painted washes, warm light, and gentle dreamy scenery.",
+    promptLead: "Use a delicate watercolor picture-book style with soft painted washes, glowing warm light, airy edges, and poetic scenery."
   },
   {
-    id: "collage",
-    label: "Cut-paper collage",
-    description: "Layered paper shapes, bold edges, and playful handcrafted textures.",
-    promptLead: "Use a bold cut-paper collage style with layered shapes, crisp edges, and playful handcrafted textures."
+    id: "paper-cut",
+    label: "Paper-cut collage",
+    description: "Layered torn paper, bold flat shapes, and handmade collage texture.",
+    promptLead: "Use a handcrafted cut-paper collage style with layered torn paper, flat graphic shapes, visible paper grain, and playful handmade texture."
   },
   {
-    id: "pencil",
-    label: "Coloured-pencil sketchbook",
-    description: "Visible pencil texture, warm shading, and a hand-drawn sketchbook feel.",
-    promptLead: "Use a coloured-pencil sketchbook style with visible pencil texture, warm shading, and hand-drawn detail."
+    id: "ink-print",
+    label: "Vintage ink print",
+    description: "Limited colours, bold ink lines, and a classic old-book print feel.",
+    promptLead: "Use a vintage ink-and-print illustration style with bold etched linework, limited colour blocks, textured paper, and a classic old-book feel."
   },
   {
-    id: "gouache",
-    label: "Bold gouache adventure",
-    description: "Rich painted colour, high contrast, and a dramatic modern picture-book look.",
-    promptLead: "Use a bold gouache picture-book style with rich painted colour, strong contrast, and dramatic composition."
+    id: "stop-motion",
+    label: "Miniature stop-motion",
+    description: "Felt-and-clay diorama look with tactile props and cinematic lighting.",
+    promptLead: "Make it look like a miniature stop-motion story set with felt-and-clay characters, tactile handmade props, shallow depth of field, and cinematic lighting."
   }
 ];
 const WRITING_STUDIO_TYPOS = {
@@ -12107,7 +12107,7 @@ function buildWritingIllustrationOptions(writing, sectionIndex) {
         styleId: style.id,
         styleLabel: style.label,
         styleBrief: style.description,
-        prompt: `${style.promptLead} Show ${focusWord} as ${sceneSummary}`
+        prompt: `${style.promptLead} Make the composition and materials unmistakably different from the other style options. Show ${focusWord} as ${sceneSummary}`
       })
     );
   }
