@@ -4699,8 +4699,12 @@ function normaliseSpellingState(spelling, subjectId = "") {
       ? next.completedAttempts
           .map((entry) => ({
             attemptId: String(entry?.attemptId || ""),
+            instanceNumber: Math.max(1, Number(entry?.instanceNumber || 0) || 0),
             weekKey: String(entry?.weekKey || ""),
             completedAt: String(entry?.completedAt || ""),
+            stageOneCorrect: Math.max(0, Number(entry?.stageOneCorrect || 0) || 0),
+            stageFiveCorrect: Math.max(0, Number(entry?.stageFiveCorrect || 0) || 0),
+            overallScorePercent: Math.max(0, Math.min(100, Number(entry?.overallScorePercent || 0) || 0)),
             wordIds: Array.isArray(entry?.wordIds)
               ? entry.wordIds.map((value) => String(value || "")).filter((value) => SPELLING_INTERVENTION_LIBRARY[value]).slice(0, SPELLING_UNIT_SEED.followUpWordCount)
               : [],
@@ -5028,24 +5032,48 @@ function shuffleSpellingWordIds(wordIds = []) {
   return shuffled;
 }
 
-function buildSpellingAttemptWordIds(previousWordIds = []) {
+function buildSpellingAttemptWordIds(completedAttempts = [], currentWordIds = []) {
   const wordIds = [...SPELLING_DEFAULT_FOLLOW_UP_WORD_IDS];
   if (!wordIds.length) {
     return [];
   }
-  const previousSet = new Set(
-    (Array.isArray(previousWordIds) ? previousWordIds : [])
+  const usageCounts = new Map(wordIds.map((wordId) => [wordId, 0]));
+  (Array.isArray(completedAttempts) ? completedAttempts : []).forEach((attempt) => {
+    (attempt?.wordIds || []).forEach((wordId) => {
+      const normalizedWordId = String(wordId || "");
+      if (!usageCounts.has(normalizedWordId)) {
+        return;
+      }
+      usageCounts.set(normalizedWordId, (usageCounts.get(normalizedWordId) || 0) + 1);
+    });
+  });
+  const currentSet = new Set(
+    (Array.isArray(currentWordIds) ? currentWordIds : [])
       .map((value) => String(value || ""))
       .filter((value) => SPELLING_INTERVENTION_LIBRARY[value])
   );
-  const preferredPool = shuffleSpellingWordIds(wordIds.filter((wordId) => !previousSet.has(wordId)));
-  const fallbackPool = shuffleSpellingWordIds(wordIds.filter((wordId) => previousSet.has(wordId)));
-  return [...preferredPool, ...fallbackPool].slice(0, Math.min(SPELLING_UNIT_SEED.followUpWordCount, wordIds.length));
+  const buckets = new Map();
+  wordIds.forEach((wordId) => {
+    const usageCount = usageCounts.get(wordId) || 0;
+    if (!buckets.has(usageCount)) {
+      buckets.set(usageCount, []);
+    }
+    buckets.get(usageCount).push(wordId);
+  });
+  const nextPool = [...buckets.keys()]
+    .sort((left, right) => left - right)
+    .flatMap((usageCount) => {
+      const bucket = buckets.get(usageCount) || [];
+      const unusedCurrentWords = shuffleSpellingWordIds(bucket.filter((wordId) => !currentSet.has(wordId)));
+      const currentWords = shuffleSpellingWordIds(bucket.filter((wordId) => currentSet.has(wordId)));
+      return [...unusedCurrentWords, ...currentWords];
+    });
+  return nextPool.slice(0, Math.min(SPELLING_UNIT_SEED.followUpWordCount, wordIds.length));
 }
 
-function assignRandomSpellingAttemptWordIds(spelling, previousWordIds = []) {
+function assignRandomSpellingAttemptWordIds(spelling, currentWordIds = []) {
   spelling.attemptPoolOffset = 0;
-  spelling.followUpWordIds = buildSpellingAttemptWordIds(previousWordIds);
+  spelling.followUpWordIds = buildSpellingAttemptWordIds(spelling.completedAttempts || [], currentWordIds);
 }
 
 function getSpellingAttemptWords(spelling) {
@@ -5162,7 +5190,6 @@ function ensureSpellingSessionState(subject) {
 
   spelling.sessionPreparedKey = currentSpellingSessionKey;
   const weekKey = currentWeekKey();
-  spelling.completedAttempts = (spelling.completedAttempts || []).slice(-16);
   const weeklyAttempts = getWeeklyCompletedSpellingAttempts(spelling, weekKey);
 
   if (weeklyAttempts.length >= 4 && spelling.challenge.lastCompletedWeekKey !== weekKey) {
@@ -5906,12 +5933,19 @@ function recordCompletedSpellingAttempt(subject) {
     return;
   }
   const attemptWords = getSpellingAttemptWords(spelling);
+  const stageOneCorrect = getSpellingDiagnosticCorrectCount(spelling);
+  const stageFiveCorrect = getSpellingRepeatCorrectCount(spelling);
+  const overallScorePercent = getSpellingOverallScorePercent(spelling);
   spelling.completedAttempts = [
     ...(spelling.completedAttempts || []),
     {
       attemptId: spelling.currentAttemptId,
+      instanceNumber: (spelling.completedAttempts || []).length + 1,
       weekKey: currentWeekKey(),
       completedAt: new Date().toISOString(),
+      stageOneCorrect,
+      stageFiveCorrect,
+      overallScorePercent,
       wordIds: [...spelling.followUpWordIds].slice(0, SPELLING_UNIT_SEED.followUpWordCount),
       wordResults: attemptWords.map((wordEntry) => {
         const stageOneAttempt = String(spelling.diagnostic.responses[wordEntry.id]?.attempt || "");
@@ -5926,7 +5960,7 @@ function recordCompletedSpellingAttempt(subject) {
         };
       })
     }
-  ].slice(-16);
+  ];
 }
 
 function resetSpellingActivity(subject, activityId) {
@@ -6405,7 +6439,9 @@ function buildSpellingPaddockMarkup(spelling) {
           <h4>The stalls</h4>
           <span>Tap a horse to send it out · tap it again in the paddock to bring it back</span>
         </div>
-        <div class="ss-stall-grid">${stallMarkup}</div>
+        <div class="ss-stall-grid-wrap">
+          <div class="ss-stall-grid">${stallMarkup}</div>
+        </div>
       </div>
     </section>
   `;
@@ -6477,28 +6513,54 @@ function buildSpellingSessionProgressCard(
 }
 
 function buildSpellingStableMiniCard(spelling) {
-  const owned = getSpellingOwnedHorseMeta(spelling).slice(0, 3);
+  const owned = getSpellingOwnedHorseMeta(spelling);
   return `
     <section class="ss-side-card">
       <div class="ss-side-card__head">
         <h4>Your stable</h4>
         <span>${escapeHtml(`${(spelling.paddockHorses || []).length} / ${SPELLING_PADDOCK_HORSES.length}`)}</span>
       </div>
-      <div class="ss-stable-mini-grid">
-        ${owned.length
-          ? owned
-              .map(
-                (horse) => `
-                  <article class="ss-stable-mini-card">
-                    <div class="ss-stable-mini-art">
-                      <img src="${escapeHtml(horse.image)}" alt="${escapeHtml(horse.label)}" />
-                    </div>
-                    <strong>${escapeHtml(horse.label)}</strong>
-                  </article>
-                `
-              )
-              .join("")
-          : '<p class="ss-stage-copy">Finish a full set to add your first horse.</p>'}
+      <div class="ss-stable-mini-scroll">
+        <div class="ss-stable-mini-grid">
+          ${owned.length
+            ? owned
+                .map(
+                  (horse) => `
+                    <article class="ss-stable-mini-card">
+                      <div class="ss-stable-mini-art">
+                        <img src="${escapeHtml(horse.image)}" alt="${escapeHtml(horse.label)}" />
+                      </div>
+                      <strong>${escapeHtml(horse.label)}</strong>
+                    </article>
+                  `
+                )
+                .join("")
+            : '<p class="ss-stage-copy">Finish a full set to add your first horse.</p>'}
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function buildSpellingInstanceOverviewCard(spelling) {
+  const overview = getSpellingInstanceOverview(spelling);
+  return `
+    <section class="ss-side-card">
+      <p class="eyebrow">Instance overview</p>
+      <h4>Completed five-stage runs</h4>
+      <div class="ss-focus-row">
+        <article class="ss-focus-card">
+          <strong>${escapeHtml(String(overview.instanceCount))}</strong>
+          <span>instances logged</span>
+        </article>
+        <article class="ss-focus-card">
+          <strong>${escapeHtml(String(overview.uniqueWordCount))}</strong>
+          <span>unique words covered</span>
+        </article>
+        <article class="ss-focus-card">
+          <strong>${escapeHtml(`${overview.averageStageFiveAccuracy}%`)}</strong>
+          <span>average stage 5 accuracy</span>
+        </article>
       </div>
     </section>
   `;
@@ -6626,7 +6688,8 @@ function buildSpellingStableHome(subject, spelling) {
 }
 
 function buildSpellingProgressHome(subject, spelling) {
-  const stageScoreSummary = getSpellingStageScoreSummary(spelling);
+  const instanceRows = getSpellingCompletedInstanceRows(spelling);
+  const overview = getSpellingInstanceOverview(spelling);
   const wordProgressRows = getSpellingWordProgressRows(spelling);
   return `
     <div class="ss-home-panel">
@@ -6635,30 +6698,61 @@ function buildSpellingProgressHome(subject, spelling) {
           <div class="ss-stage-panel__head">
             <div>
               <p class="eyebrow">Progress</p>
-              <h4>Stage results so far</h4>
+              <h4>Completed spelling instances</h4>
             </div>
-            <span class="ss-stage-badge">${escapeHtml(`${getSpellingOverallScorePercent(spelling)}% overall`)}</span>
+            <span class="ss-stage-badge">${escapeHtml(`${overview.instanceCount} logged`)}</span>
           </div>
-          <div class="ss-review-list">
-            ${Object.entries(stageScoreSummary)
-              .map(([stageKey, stageScore]) => `
-                <article class="ss-review-row${getSpellingStageScorePercent(spelling, stageKey) >= 50 ? " is-correct" : " is-incorrect"}">
-                  <div>
-                    <strong>${escapeHtml(stageScore.label)}</strong>
-                    <span>${escapeHtml(`${stageScore.correct}/${stageScore.total} · ${getSpellingStageScorePercent(spelling, stageKey)}%`)}</span>
-                  </div>
-                  <span class="ss-review-mark">${getSpellingStageScorePercent(spelling, stageKey) >= 50 ? "✓" : "✕"}</span>
-                </article>
-              `)
-              .join("")}
+          <p class="ss-stage-copy">
+            ${escapeHtml(
+              instanceRows.length
+                ? "Each instance is one full five-stage spelling run. Review each completed set and every word checked in that run."
+                : "Finish one full five-stage spelling instance to start the progress log."
+            )}
+          </p>
+          <div class="ss-instance-list">
+            ${instanceRows.length
+              ? instanceRows
+                  .map((instanceRow) => `
+                    <article class="ss-instance-card">
+                      <div class="ss-instance-card__head">
+                        <div>
+                          <strong>${escapeHtml(`Instance ${instanceRow.instanceNumber}`)}</strong>
+                          <span>${escapeHtml(instanceRow.completedLabel)}</span>
+                        </div>
+                        <span class="ss-stage-badge">${escapeHtml(`${instanceRow.overallScorePercent}% overall`)}</span>
+                      </div>
+                      <p class="ss-stage-copy">${escapeHtml(`10 words · Stage 1: ${instanceRow.stageOneCorrect}/10 · Stage 5: ${instanceRow.stageFiveCorrect}/10 · Avg change: ${instanceRow.improvement > 0 ? "+" : ""}${instanceRow.improvement}%`)}</p>
+                      <div class="ss-review-list">
+                        ${instanceRow.wordResults
+                          .map((result) => {
+                            const improvement = result.stageFiveAccuracy - result.stageOneAccuracy;
+                            const ratingClass = result.stageFiveAccuracy >= 80 ? "is-correct" : result.stageFiveAccuracy >= 50 ? "" : "is-incorrect";
+                            return `
+                              <article class="ss-review-row ${ratingClass}">
+                                <div>
+                                  <strong>${escapeHtml(result.word)}</strong>
+                                  <span>${escapeHtml(`Stage 1: ${result.stageOneAccuracy}% · Stage 5: ${result.stageFiveAccuracy}% · Change: ${improvement > 0 ? "+" : ""}${improvement}%`)}</span>
+                                  <span>${escapeHtml(`Stage 1 attempt: ${result.stageOneAttempt || "No answer"} · Stage 5 attempt: ${result.stageFiveAttempt || "No answer"}`)}</span>
+                                </div>
+                                <span class="ss-review-mark">${escapeHtml(`${result.stageFiveAccuracy}%`)}</span>
+                              </article>
+                            `;
+                          })
+                          .join("")}
+                      </div>
+                    </article>
+                  `)
+                  .join("")
+              : '<p class="ss-stage-copy">No completed instances yet.</p>'}
           </div>
         </article>
         <article class="ss-stage-panel">
           <div class="ss-stage-panel__head">
             <div>
               <p class="eyebrow">Word accuracy</p>
-              <h4>Compared from stage 1 to stage 5</h4>
+              <h4>All words used across completed instances</h4>
             </div>
+            <span class="ss-stage-badge">${escapeHtml(`${overview.loggedWordCount} logged words`)}</span>
           </div>
           <div class="ss-review-list">
             ${wordProgressRows.length
@@ -6667,7 +6761,7 @@ function buildSpellingProgressHome(subject, spelling) {
                     <article class="ss-review-row ${escapeHtml(row.ratingClass)}">
                       <div>
                         <strong>${escapeHtml(row.word)}</strong>
-                        <span>${escapeHtml(`${row.attempts} attempt${row.attempts === 1 ? "" : "s"} · Stage 5 accuracy: ${row.stageFiveAccuracy}% · Change: ${row.improvement > 0 ? "+" : ""}${row.improvement}%`)}</span>
+                        <span>${escapeHtml(`${row.attempts} instance${row.attempts === 1 ? "" : "s"} · Stage 5 accuracy: ${row.stageFiveAccuracy}% · Change: ${row.improvement > 0 ? "+" : ""}${row.improvement}%`)}</span>
                         <span>${escapeHtml(`Latest stage 1: ${row.stageOneAttempt} · Latest stage 5: ${row.stageFiveAttempt}`)}</span>
                       </div>
                       <span class="ss-review-mark">${escapeHtml(row.rating)}</span>
@@ -6679,7 +6773,7 @@ function buildSpellingProgressHome(subject, spelling) {
         </article>
       </div>
       <aside class="ss-side">
-        ${buildSpellingSessionProgressCard(subject, spelling)}
+        ${buildSpellingInstanceOverviewCard(spelling)}
         ${buildSpellingHorsePreviewCard(spelling)}
       </aside>
     </div>
@@ -12246,23 +12340,6 @@ function getSpellingWordProgressRows(spelling) {
     (attempt.wordResults || []).forEach(appendWordResult);
   });
 
-  const currentAttemptWords = getSpellingAttemptWords(spelling);
-  currentAttemptWords.forEach((wordEntry) => {
-    const stageOneAttempt = String(spelling.diagnostic.responses[wordEntry.id]?.attempt || "");
-    const stageFiveAttempt = String(spelling.repeatCheck.responses[wordEntry.id]?.attempt || "");
-    if (!stageOneAttempt && !stageFiveAttempt) {
-      return;
-    }
-    appendWordResult({
-      wordId: wordEntry.id,
-      word: wordEntry.word,
-      stageOneAttempt,
-      stageOneAccuracy: calculateSpellingWordAccuracy(wordEntry.word, stageOneAttempt),
-      stageFiveAttempt,
-      stageFiveAccuracy: calculateSpellingWordAccuracy(wordEntry.word, stageFiveAttempt)
-    });
-  });
-
   return Array.from(aggregateByWordId.values())
     .map((entry) => {
       const stageFiveAccuracy = entry.stageFiveAccuracies.length
@@ -12287,6 +12364,79 @@ function getSpellingWordProgressRows(spelling) {
       };
     })
     .sort((left, right) => left.word.localeCompare(right.word));
+}
+
+function getSpellingCompletedInstanceRows(spelling) {
+  return (spelling.completedAttempts || [])
+    .map((attempt, index) => {
+      const completedAt = String(attempt?.completedAt || "");
+      const completedAtDate = completedAt ? new Date(completedAt) : null;
+      const wordResults = Array.isArray(attempt.wordResults)
+        ? attempt.wordResults
+            .map((result) => ({
+              wordId: String(result?.wordId || ""),
+              word: String(result?.word || ""),
+              stageOneAttempt: String(result?.stageOneAttempt || "No answer"),
+              stageFiveAttempt: String(result?.stageFiveAttempt || "No answer"),
+              stageOneAccuracy: Math.max(0, Math.min(100, Number(result?.stageOneAccuracy || 0) || 0)),
+              stageFiveAccuracy: Math.max(0, Math.min(100, Number(result?.stageFiveAccuracy || 0) || 0))
+            }))
+            .filter((result) => result.wordId && result.word)
+        : [];
+      const stageOneAverage = wordResults.length
+        ? Math.round(wordResults.reduce((sum, result) => sum + result.stageOneAccuracy, 0) / wordResults.length)
+        : 0;
+      const stageFiveAverage = wordResults.length
+        ? Math.round(wordResults.reduce((sum, result) => sum + result.stageFiveAccuracy, 0) / wordResults.length)
+        : 0;
+      const derivedStageOneCorrect = wordResults.filter((result) => result.stageOneAccuracy === 100).length;
+      const derivedStageFiveCorrect = wordResults.filter((result) => result.stageFiveAccuracy === 100).length;
+      return {
+        attemptId: String(attempt?.attemptId || ""),
+        instanceNumber: Math.max(1, Number(attempt?.instanceNumber || index + 1) || index + 1),
+        completedAt,
+        completedLabel: completedAtDate && !Number.isNaN(completedAtDate.getTime())
+          ? new Intl.DateTimeFormat("en-AU", {
+              day: "numeric",
+              month: "short",
+              year: "numeric"
+            }).format(completedAtDate)
+          : "Saved instance",
+        wordResults,
+        stageOneCorrect: Math.max(0, Number(attempt?.stageOneCorrect || derivedStageOneCorrect) || 0),
+        stageFiveCorrect: Math.max(0, Number(attempt?.stageFiveCorrect || derivedStageFiveCorrect) || 0),
+        overallScorePercent: Math.max(0, Math.min(100, Number(attempt?.overallScorePercent || stageFiveAverage) || 0)),
+        stageOneAverage,
+        stageFiveAverage,
+        improvement: stageFiveAverage - stageOneAverage
+      };
+    })
+    .filter((instanceRow) => instanceRow.wordResults.length)
+    .sort((left, right) => {
+      const leftTime = new Date(left.completedAt || 0).getTime();
+      const rightTime = new Date(right.completedAt || 0).getTime();
+      return rightTime - leftTime || right.instanceNumber - left.instanceNumber;
+    });
+}
+
+function getSpellingInstanceOverview(spelling) {
+  const instanceRows = getSpellingCompletedInstanceRows(spelling);
+  const uniqueWordIds = new Set();
+  let loggedWordCount = 0;
+  let totalStageFiveAccuracy = 0;
+  instanceRows.forEach((instanceRow) => {
+    instanceRow.wordResults.forEach((result) => {
+      uniqueWordIds.add(result.wordId);
+      loggedWordCount += 1;
+      totalStageFiveAccuracy += result.stageFiveAccuracy;
+    });
+  });
+  return {
+    instanceCount: instanceRows.length,
+    uniqueWordCount: uniqueWordIds.size,
+    loggedWordCount,
+    averageStageFiveAccuracy: loggedWordCount ? Math.round(totalStageFiveAccuracy / loggedWordCount) : 0
+  };
 }
 
 function moveWritingBookPage(subject, direction) {

@@ -6801,6 +6801,12 @@ input[type="date"] {
   font-weight: 700;
 }
 
+.ss-focus-card strong {
+  color: var(--ink);
+  font-size: 28px;
+  line-height: 1;
+}
+
 .ss-note-card,
 .ss-side-card,
 .ss-stable-card {
@@ -7133,6 +7139,13 @@ input[type="date"] {
   gap: 12px;
 }
 
+.ss-stall-grid-wrap {
+  max-height: 386px;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+}
+
 .ss-stall {
   position: relative;
 }
@@ -7406,6 +7419,39 @@ input[type="date"] {
 .ss-review-list {
   display: grid;
   gap: 12px;
+}
+
+.ss-instance-list {
+  display: grid;
+  gap: 16px;
+}
+
+.ss-instance-card {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(218, 211, 223, 0.9);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.ss-instance-card__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.ss-instance-card__head strong,
+.ss-instance-card__head span {
+  display: block;
+}
+
+.ss-instance-card__head span:not(.ss-stage-badge) {
+  margin-top: 4px;
+  color: var(--soft);
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .ss-review-row {
@@ -7969,6 +8015,13 @@ input[type="date"] {
   gap: 10px;
 }
 
+.ss-stable-mini-scroll {
+  max-height: 286px;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+}
+
 .ss-stable-mini-card {
   display: grid;
   gap: 8px;
@@ -8242,6 +8295,11 @@ input[type="date"] {
 .ss-earned-horse-card {
   grid-template-columns: 1fr;
 }
+
+  .ss-stall-grid-wrap,
+  .ss-stable-mini-scroll {
+    max-height: 320px;
+  }
 }
 
 .ws-shell {
