@@ -12079,6 +12079,43 @@ function buildWritingIllustrationOption(section, option) {
   };
 }
 
+function getExpectedWritingIllustrationCount(writing, sectionIndex) {
+  if (sectionIndex === 0) {
+    return WRITING_STUDIO_STYLE_VARIANTS.length;
+  }
+  return writing.illustrationStyle?.label && writing.illustrationStyle?.brief ? 2 : WRITING_STUDIO_STYLE_VARIANTS.length;
+}
+
+function hasCurrentWritingStyleVariantSet(options) {
+  if (!Array.isArray(options) || options.length !== WRITING_STUDIO_STYLE_VARIANTS.length) {
+    return false;
+  }
+  const optionStyleIds = new Set(options.map((option) => String(option?.styleId || "")));
+  return WRITING_STUDIO_STYLE_VARIANTS.every((style) => optionStyleIds.has(style.id));
+}
+
+function shouldRefreshWritingIllustrationOptions(writing, sectionIndex, section) {
+  const options = Array.isArray(section?.illustrationOptions) ? section.illustrationOptions : [];
+  if (!options.length) {
+    return true;
+  }
+  if (options.length !== getExpectedWritingIllustrationCount(writing, sectionIndex)) {
+    return true;
+  }
+  if (sectionIndex === 0 && !hasCurrentWritingStyleVariantSet(options)) {
+    return true;
+  }
+  return false;
+}
+
+function hasCompleteWritingIllustrationImages(writing, sectionIndex, section) {
+  if (shouldRefreshWritingIllustrationOptions(writing, sectionIndex, section)) {
+    return false;
+  }
+  const options = Array.isArray(section?.illustrationOptions) ? section.illustrationOptions : [];
+  return options.every((option) => String(option?.imageUrl || "").trim());
+}
+
 function buildWritingIllustrationStyleSelection(section, option) {
   if (!option) {
     return null;
@@ -12155,8 +12192,11 @@ function ensureWritingIllustrationOptions(writing, sectionIndex, { force = false
     !force
     && Array.isArray(section.illustrationOptions)
     && section.illustrationOptions.length
-    && section.illustrationOptions.every((option) => String(option.imageUrl || "").trim())
+    && !shouldRefreshWritingIllustrationOptions(writing, sectionIndex, section)
   ) {
+    if (!section.illustrationOptions.some((option) => option.id === section.selectedIllustrationId)) {
+      section.selectedIllustrationId = section.illustrationOptions[0]?.id || "";
+    }
     return section.illustrationOptions;
   }
   section.illustrationOptions = buildWritingIllustrationOptions(writing, sectionIndex);
@@ -12305,7 +12345,7 @@ async function loadWritingIllustrations(subject, { force = false } = {}) {
     return [];
   }
   const baseOptions = ensureWritingIllustrationOptions(writing, writing.currentSectionIndex, { force });
-  if (!force && hasWritingIllustrationImages(section)) {
+  if (!force && hasCompleteWritingIllustrationImages(writing, writing.currentSectionIndex, section)) {
     return section.illustrationOptions;
   }
   writing.isGeneratingIllustrations = true;
@@ -12372,7 +12412,7 @@ async function continueWritingToIllustration(subject) {
   }
   writing.view = "illustrate";
   persistSubjects({ skipRemoteSync: true });
-  await loadWritingIllustrations(subject, { force: !hasWritingIllustrationImages(section) });
+  await loadWritingIllustrations(subject, { force: !hasCompleteWritingIllustrationImages(writing, writing.currentSectionIndex, section) });
 }
 
 async function rerollWritingIllustrations(subject) {
@@ -12594,7 +12634,7 @@ async function changeWritingBookIllustration(subject) {
   }
   const sectionIndex = writing.sections.findIndex((section) => section.id === previewSection.id);
   openWritingSection(subject, sectionIndex, "illustrate", { returnToBook: true });
-  await loadWritingIllustrations(subject, { force: !hasWritingIllustrationImages(previewSection) });
+  await loadWritingIllustrations(subject, { force: !hasCompleteWritingIllustrationImages(writing, sectionIndex, previewSection) });
 }
 
 function speakWritingSection(subject) {
@@ -12736,7 +12776,11 @@ function renderWriting() {
       openWritingSection(subject, sectionIndex, nextView);
       if (nextView === "illustrate") {
         render();
-        await loadWritingIllustrations(subject, { force: !hasWritingIllustrationImages(getWritingCurrentSection(getSubjectWritingState(subject))) });
+        const nextWritingState = getSubjectWritingState(subject);
+        const nextSection = getWritingCurrentSection(nextWritingState);
+        await loadWritingIllustrations(subject, {
+          force: !hasCompleteWritingIllustrationImages(nextWritingState, nextWritingState.currentSectionIndex, nextSection)
+        });
       }
       render();
     });
