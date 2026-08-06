@@ -5387,6 +5387,9 @@ function finishSpellingSession(subject) {
   const spelling = getSubjectSpellingState(subject);
   resetSpellingProgressForNewAttempt(spelling);
   spelling.homeTab = "stable";
+  spelling.selectedStageId = "diagnostic";
+  spelling.celebrationStageId = "";
+  spelling.sessionCompletionReady = false;
   spelling.sessionPreparedKey = currentSpellingSessionKey;
   persistSubjects();
 }
@@ -13141,7 +13144,7 @@ function renderSpelling() {
             ${SPELLING_UNIT_SEED.reviewDays.map((dayLabel) => `<span class="is-done">${escapeHtml(dayLabel)}</span>`).join("")}
           </div>
           <div class="spelling-stage-actions spelling-stage-actions--centered">
-            <button type="button" class="primary-button primary-button--dark" data-spelling-finish-session="true">${escapeHtml(overallScorePercent > 50 && earnedHorseMeta ? "Add to your stable" : "Continue")}</button>
+            <button type="button" class="primary-button primary-button--dark" data-spelling-finish-session="true">Visit the stables</button>
           </div>
         </article>
       `
