@@ -522,6 +522,7 @@ const SPELLING_UNIT_SEED = {
   followUpWordCount: 10,
   reviewDays: ["Day 1", "Day 3", "Day 7", "Day 14", "Day 30"]
 };
+const SPELLING_HOME_TABS = ["session", "stable", "paddock", "progress"];
 const SPELLING_PADDOCK_HORSES = [
   { id: "arabian", label: "Arabian", name: "Dusty", image: "/horses/Arabian.png" },
   { id: "quarter-horse", label: "Quarter Horse", name: "Willow", image: "/horses/Quarter Horse.png" },
@@ -4557,6 +4558,13 @@ function normaliseSpellingState(spelling, subjectId = "") {
         .slice(0, SPELLING_UNIT_SEED.followUpWordCount)
     : [];
 
+  const normalisedHomeTabRaw = String(next.homeTab || "");
+  const normalisedHomeTab = normalisedHomeTabRaw === "paddock"
+    ? "stable"
+    : normalisedHomeTabRaw === "review"
+      ? "progress"
+      : normalisedHomeTabRaw;
+
   return {
     ...base,
     ...next,
@@ -4681,7 +4689,7 @@ function normaliseSpellingState(spelling, subjectId = "") {
         : {},
       completed: Boolean(repeatCheck.completed)
     },
-    homeTab: ["session", "stable", "progress", "review"].includes(String(next.homeTab || "")) ? String(next.homeTab || "") : "stable",
+    homeTab: SPELLING_HOME_TABS.includes(normalisedHomeTab) ? normalisedHomeTab : "stable",
     selectedStageId: SPELLING_STAGE_ORDER.includes(String(next.selectedStageId || "")) ? String(next.selectedStageId || "") : "",
     celebrationStageId: SPELLING_STAGE_ORDER.includes(String(next.celebrationStageId || "")) ? String(next.celebrationStageId || "") : "",
     sessionCompletionReady: Boolean(next.sessionCompletionReady),
@@ -4695,6 +4703,18 @@ function normaliseSpellingState(spelling, subjectId = "") {
             completedAt: String(entry?.completedAt || ""),
             wordIds: Array.isArray(entry?.wordIds)
               ? entry.wordIds.map((value) => String(value || "")).filter((value) => SPELLING_INTERVENTION_LIBRARY[value]).slice(0, SPELLING_UNIT_SEED.followUpWordCount)
+              : [],
+            wordResults: Array.isArray(entry?.wordResults)
+              ? entry.wordResults
+                  .map((result) => ({
+                    wordId: String(result?.wordId || ""),
+                    word: String(result?.word || ""),
+                    stageOneAttempt: String(result?.stageOneAttempt || ""),
+                    stageOneAccuracy: Math.max(0, Math.min(100, Number(result?.stageOneAccuracy || 0) || 0)),
+                    stageFiveAttempt: String(result?.stageFiveAttempt || ""),
+                    stageFiveAccuracy: Math.max(0, Math.min(100, Number(result?.stageFiveAccuracy || 0) || 0))
+                  }))
+                  .filter((result) => result.wordId && result.word)
               : []
           }))
           .filter((entry) => entry.attemptId && entry.weekKey && entry.wordIds.length)
@@ -4764,6 +4784,21 @@ function normalizeSpellingAttempt(value) {
     .trim()
     .toLowerCase()
     .replace(/[^a-z]/g, "");
+}
+
+function calculateSpellingWordAccuracy(expectedWord, attemptWord) {
+  const expected = normalizeSpellingAttempt(expectedWord);
+  const attempt = normalizeSpellingAttempt(attemptWord);
+  if (!expected) {
+    return 0;
+  }
+  let correctLetters = 0;
+  for (let index = 0; index < expected.length; index += 1) {
+    if (expected[index] === attempt[index]) {
+      correctLetters += 1;
+    }
+  }
+  return Math.round((correctLetters / expected.length) * 100);
 }
 
 function getSpellingStageCompletionMap(subject) {
@@ -5166,21 +5201,26 @@ function activateSpellingSession(subject) {
 
 function setSpellingHomeTab(subject, tabId) {
   const spelling = getSubjectSpellingState(subject);
-  if (!["session", "stable", "progress", "review"].includes(String(tabId || ""))) {
+  const normalizedTabId = String(tabId || "") === "paddock"
+    ? "stable"
+    : String(tabId || "") === "review"
+      ? "progress"
+      : String(tabId || "");
+  if (!["session", "stable", "progress"].includes(normalizedTabId)) {
     return;
   }
-  if (String(tabId) === "session") {
+  if (normalizedTabId === "session") {
     activateSpellingSession(subject);
     return;
   }
   if (
-    spelling.homeTab === String(tabId) &&
+    spelling.homeTab === normalizedTabId &&
     !spelling.celebrationStageId &&
     !spelling.sessionCompletionReady
   ) {
     return;
   }
-  spelling.homeTab = String(tabId);
+  spelling.homeTab = normalizedTabId;
   spelling.celebrationStageId = "";
   spelling.sessionCompletionReady = false;
 }
@@ -5842,13 +5882,26 @@ function recordCompletedSpellingAttempt(subject) {
   if ((spelling.completedAttempts || []).some((entry) => entry.attemptId === spelling.currentAttemptId)) {
     return;
   }
+  const attemptWords = getSpellingAttemptWords(spelling);
   spelling.completedAttempts = [
     ...(spelling.completedAttempts || []),
     {
       attemptId: spelling.currentAttemptId,
       weekKey: currentWeekKey(),
       completedAt: new Date().toISOString(),
-      wordIds: [...spelling.followUpWordIds].slice(0, SPELLING_UNIT_SEED.followUpWordCount)
+      wordIds: [...spelling.followUpWordIds].slice(0, SPELLING_UNIT_SEED.followUpWordCount),
+      wordResults: attemptWords.map((wordEntry) => {
+        const stageOneAttempt = String(spelling.diagnostic.responses[wordEntry.id]?.attempt || "");
+        const stageFiveAttempt = String(spelling.repeatCheck.responses[wordEntry.id]?.attempt || "");
+        return {
+          wordId: wordEntry.id,
+          word: wordEntry.word,
+          stageOneAttempt,
+          stageOneAccuracy: calculateSpellingWordAccuracy(wordEntry.word, stageOneAttempt),
+          stageFiveAttempt,
+          stageFiveAccuracy: calculateSpellingWordAccuracy(wordEntry.word, stageFiveAttempt)
+        };
+      })
     }
   ].slice(-16);
 }
@@ -6338,9 +6391,8 @@ function buildSpellingPaddockMarkup(spelling) {
 function buildSpellingSurfaceTabs(activeTab) {
   const tabs = [
     { id: "session", label: "Session" },
-    { id: "stable", label: "Paddock & stalls" },
-    { id: "progress", label: "Progress" },
-    { id: "review", label: "Review" }
+    { id: "paddock", label: "Paddock" },
+    { id: "progress", label: "Progress" }
   ];
 
   return `
@@ -6586,55 +6638,20 @@ function buildSpellingProgressHome(subject, spelling) {
             </div>
           </div>
           <div class="ss-review-list">
-            ${wordProgressRows
-              .map((row) => `
-                <article class="ss-review-row ${escapeHtml(row.ratingClass)}">
-                  <div>
-                    <strong>${escapeHtml(row.word)}</strong>
-                    <span>${escapeHtml(`Stage 1: ${row.stageOneAttempt} · Stage 5: ${row.stageFiveAttempt}`)}</span>
-                  </div>
-                  <span class="ss-review-mark">${escapeHtml(row.rating)}</span>
-                </article>
-              `)
-              .join("")}
-          </div>
-        </article>
-      </div>
-      <aside class="ss-side">
-        ${buildSpellingSessionProgressCard(subject, spelling)}
-        ${buildSpellingHorsePreviewCard(spelling)}
-      </aside>
-    </div>
-  `;
-}
-
-function buildSpellingReviewHome(subject, spelling) {
-  return `
-    <div class="ss-home-panel">
-      <div class="ss-main">
-        <article class="ss-stage-panel">
-          <div class="ss-stage-panel__head">
-            <div>
-              <p class="eyebrow">Review</p>
-              <h4>Spaced practice rhythm</h4>
-            </div>
-          </div>
-          <div class="spelling-review-card__days ss-review-days-large">
-            ${SPELLING_UNIT_SEED.reviewDays.map((dayLabel, index) => `<span class="${index === 0 ? "is-done" : index === 1 ? "is-next" : ""}">${escapeHtml(dayLabel)}</span>`).join("")}
-          </div>
-          <p class="ss-stage-copy">We&rsquo;ll bring these ten words back on this rhythm so they stick.</p>
-          <div class="ss-review-list">
-            ${(getSpellingFollowUpWords(spelling).length ? getSpellingFollowUpWords(spelling) : getSpellingAttemptWords(spelling))
-              .slice(0, 10)
-              .map((entry, index) => `
-                <article class="ss-review-row">
-                  <div>
-                    <strong>${escapeHtml(entry.word)}</strong>
-                    <span>${escapeHtml(index === 0 ? "due now" : SPELLING_UNIT_SEED.reviewDays[Math.min(index, SPELLING_UNIT_SEED.reviewDays.length - 1)])}</span>
-                  </div>
-                </article>
-              `)
-              .join("")}
+            ${wordProgressRows.length
+              ? wordProgressRows
+                  .map((row) => `
+                    <article class="ss-review-row ${escapeHtml(row.ratingClass)}">
+                      <div>
+                        <strong>${escapeHtml(row.word)}</strong>
+                        <span>${escapeHtml(`${row.attempts} attempt${row.attempts === 1 ? "" : "s"} · Stage 5 accuracy: ${row.stageFiveAccuracy}% · Change: ${row.improvement > 0 ? "+" : ""}${row.improvement}%`)}</span>
+                        <span>${escapeHtml(`Latest stage 1: ${row.stageOneAttempt} · Latest stage 5: ${row.stageFiveAttempt}`)}</span>
+                      </div>
+                      <span class="ss-review-mark">${escapeHtml(row.rating)}</span>
+                    </article>
+                  `)
+                  .join("")
+              : '<p class="ss-stage-copy">Complete stage 5 to start building per-word progress history.</p>'}
           </div>
         </article>
       </div>
@@ -12172,42 +12189,81 @@ function acceptWritingIllustration(subject) {
 }
 
 function getSpellingWordProgressRows(spelling) {
-  const attemptWords = getSpellingAttemptWords(spelling);
-  return attemptWords.map((wordEntry) => {
-    const diagnosticResponse = spelling.diagnostic.responses[wordEntry.id] || {};
-    const repeatResponse = spelling.repeatCheck.responses[wordEntry.id] || {};
-    const diagnosticCorrect = Boolean(diagnosticResponse.correct);
-    const repeatCorrect = Boolean(repeatResponse.correct);
-    let rating = "Not checked yet";
-    let ratingClass = "";
-
-    if (repeatResponse.attempt) {
-      if (diagnosticCorrect && repeatCorrect) {
-        rating = "Stable · 100%";
-        ratingClass = "is-correct";
-      } else if (!diagnosticCorrect && repeatCorrect) {
-        rating = "Improved · 50%";
-        ratingClass = "is-correct";
-      } else if (diagnosticCorrect && !repeatCorrect) {
-        rating = "Dropped · 50%";
-        ratingClass = "is-incorrect";
-      } else {
-        rating = "Needs review · 0%";
-        ratingClass = "is-incorrect";
-      }
-    } else if (diagnosticResponse.attempt) {
-      rating = diagnosticCorrect ? "Strong start" : "Waiting for recheck";
-      ratingClass = diagnosticCorrect ? "is-correct" : "";
+  const aggregateByWordId = new Map();
+  const appendWordResult = (result) => {
+    const wordId = String(result?.wordId || "");
+    const word = String(result?.word || "");
+    if (!wordId || !word) {
+      return;
     }
+    if (!aggregateByWordId.has(wordId)) {
+      aggregateByWordId.set(wordId, {
+        word,
+        attempts: 0,
+        stageOneAttempt: "No answer",
+        stageFiveAttempt: "Not rechecked",
+        stageOneAccuracies: [],
+        stageFiveAccuracies: [],
+        improvements: []
+      });
+    }
+    const entry = aggregateByWordId.get(wordId);
+    entry.attempts += 1;
+    entry.stageOneAttempt = String(result.stageOneAttempt || entry.stageOneAttempt || "No answer");
+    entry.stageFiveAttempt = String(result.stageFiveAttempt || entry.stageFiveAttempt || "Not rechecked");
+    entry.stageOneAccuracies.push(Math.max(0, Math.min(100, Number(result.stageOneAccuracy || 0) || 0)));
+    entry.stageFiveAccuracies.push(Math.max(0, Math.min(100, Number(result.stageFiveAccuracy || 0) || 0)));
+    entry.improvements.push(
+      Math.max(0, Math.min(100, Number(result.stageFiveAccuracy || 0) || 0)) -
+        Math.max(0, Math.min(100, Number(result.stageOneAccuracy || 0) || 0))
+    );
+  };
 
-    return {
-      word: wordEntry.word,
-      stageOneAttempt: String(diagnosticResponse.attempt || "No answer"),
-      stageFiveAttempt: String(repeatResponse.attempt || "Not rechecked"),
-      rating,
-      ratingClass
-    };
+  (spelling.completedAttempts || []).forEach((attempt) => {
+    (attempt.wordResults || []).forEach(appendWordResult);
   });
+
+  const currentAttemptWords = getSpellingAttemptWords(spelling);
+  currentAttemptWords.forEach((wordEntry) => {
+    const stageOneAttempt = String(spelling.diagnostic.responses[wordEntry.id]?.attempt || "");
+    const stageFiveAttempt = String(spelling.repeatCheck.responses[wordEntry.id]?.attempt || "");
+    if (!stageOneAttempt && !stageFiveAttempt) {
+      return;
+    }
+    appendWordResult({
+      wordId: wordEntry.id,
+      word: wordEntry.word,
+      stageOneAttempt,
+      stageOneAccuracy: calculateSpellingWordAccuracy(wordEntry.word, stageOneAttempt),
+      stageFiveAttempt,
+      stageFiveAccuracy: calculateSpellingWordAccuracy(wordEntry.word, stageFiveAttempt)
+    });
+  });
+
+  return Array.from(aggregateByWordId.values())
+    .map((entry) => {
+      const stageFiveAccuracy = entry.stageFiveAccuracies.length
+        ? Math.round(entry.stageFiveAccuracies.reduce((sum, value) => sum + value, 0) / entry.stageFiveAccuracies.length)
+        : 0;
+      const stageOneAccuracy = entry.stageOneAccuracies.length
+        ? Math.round(entry.stageOneAccuracies.reduce((sum, value) => sum + value, 0) / entry.stageOneAccuracies.length)
+        : 0;
+      const improvement = entry.improvements.length
+        ? Math.round(entry.improvements.reduce((sum, value) => sum + value, 0) / entry.improvements.length)
+        : 0;
+      return {
+        word: entry.word,
+        attempts: entry.attempts,
+        stageOneAttempt: entry.stageOneAttempt,
+        stageFiveAttempt: entry.stageFiveAttempt,
+        stageOneAccuracy,
+        stageFiveAccuracy,
+        improvement,
+        rating: `${stageFiveAccuracy}%`,
+        ratingClass: stageFiveAccuracy >= 80 ? "is-correct" : stageFiveAccuracy >= 50 ? "" : "is-incorrect"
+      };
+    })
+    .sort((left, right) => left.word.localeCompare(right.word));
 }
 
 function moveWritingBookPage(subject, direction) {
@@ -12432,6 +12488,10 @@ function renderSpelling() {
   const overallScorePercent = getSpellingOverallScorePercent(spelling);
   const ownedHorseMeta = getSpellingOwnedHorseMeta(spelling);
   let homeTab = String(spelling.homeTab || "stable");
+  if (homeTab === "review") {
+    homeTab = "progress";
+  }
+  const visibleHomeTab = homeTab === "stable" ? "paddock" : homeTab;
 
   if (spelling.challenge.active || (spelling.challenge.completed && spelling.challenge.lastCompletedWeekKey === currentWeekKey())) {
     const currentChallengeItem = getSpellingChallengeCurrentItem(spelling);
@@ -12552,15 +12612,13 @@ function renderSpelling() {
   if (homeTab !== "session" && !showingCelebration && !spelling.sessionCompletionReady) {
     const homeBody = homeTab === "progress"
       ? buildSpellingProgressHome(subject, spelling)
-      : homeTab === "review"
-        ? buildSpellingReviewHome(subject, spelling)
-        : homeTab === "session"
-          ? buildSpellingHomeOverview(subject, spelling)
-          : buildSpellingStableHome(subject, spelling);
+      : homeTab === "session"
+        ? buildSpellingHomeOverview(subject, spelling)
+        : buildSpellingStableHome(subject, spelling);
 
     host.innerHTML = `
       <section class="ss-root spelling-shell" data-spelling-font="${escapeHtml(spelling.preferences.font)}" data-spelling-spacing="${escapeHtml(spelling.preferences.spacing)}" data-spelling-tint="${escapeHtml(spelling.preferences.tint)}">
-        ${buildSpellingSurfaceTabs(homeTab)}
+        ${buildSpellingSurfaceTabs(visibleHomeTab)}
 
         ${homeBody}
       </section>
