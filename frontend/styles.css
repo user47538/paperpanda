@@ -8615,6 +8615,17 @@ input[type="date"] {
   text-align: center;
 }
 
+.ws-illustration-card strong {
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.ws-illustration-card span {
+  color: #645d6c;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
 .ws-illustration-card:disabled {
   cursor: default;
   opacity: 1;
@@ -8646,6 +8657,26 @@ input[type="date"] {
   color: #645d6c;
   font-size: 15px;
   font-weight: 600;
+}
+
+.ws-style-note {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 18px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: rgba(110, 90, 134, 0.08);
+  border: 1px solid rgba(110, 90, 134, 0.16);
+}
+
+.ws-style-note strong {
+  color: #2e2a33;
+}
+
+.ws-style-note span {
+  color: #645d6c;
+  font-size: 14px;
+  line-height: 1.45;
 }
 
 .ws-book-spread {

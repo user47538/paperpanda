@@ -20,6 +20,16 @@ import { availableRevisionGrades, getRevisionCatalogueForGrade, getRevisionEntry
 const app = express();
 const port = Number(process.env.PORT || 3001);
 const openAiApiKey = process.env.OPENAI_API_KEY || "";
+const openAiWritingImageModel = String(process.env.OPENAI_WRITING_IMAGE_MODEL || "gpt-image-1-mini").trim() || "gpt-image-1-mini";
+const openAiWritingImageQuality = ["low", "medium", "high", "auto"].includes(String(process.env.OPENAI_WRITING_IMAGE_QUALITY || "low").trim().toLowerCase())
+  ? String(process.env.OPENAI_WRITING_IMAGE_QUALITY || "low").trim().toLowerCase()
+  : "low";
+const openAiWritingImageFormat = ["jpeg", "png", "webp"].includes(String(process.env.OPENAI_WRITING_IMAGE_FORMAT || "jpeg").trim().toLowerCase())
+  ? String(process.env.OPENAI_WRITING_IMAGE_FORMAT || "jpeg").trim().toLowerCase()
+  : "jpeg";
+const openAiWritingImageCompression = Math.max(40, Math.min(95, Number(process.env.OPENAI_WRITING_IMAGE_COMPRESSION || 70) || 70));
+const writingImageSectionTextLimit = 420;
+const writingImagePreviousTextLimit = 220;
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -150,6 +160,14 @@ function cleanRevisionNotes(notes) {
     .filter((note) => note.title || note.content);
 }
 
+function clipText(value, maxLength) {
+  const normalised = String(value || "").replace(/\s+/g, " ").trim();
+  if (!normalised || normalised.length <= maxLength) {
+    return normalised;
+  }
+  return `${normalised.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
 function cleanDocumentStudyText(value) {
   return String(value || "")
     .replace(/\u0000/g, "")
@@ -265,14 +283,20 @@ async function callOpenAiSpeech(payload) {
 }
 
 async function generateOpenAiImage(prompt) {
-  const payload = await callOpenAiJson("images/generations", {
-    model: "gpt-image-1",
+  const requestPayload = {
+    model: openAiWritingImageModel,
     prompt,
-    size: "1024x1024"
-  });
+    size: "1024x1024",
+    quality: openAiWritingImageQuality,
+    output_format: openAiWritingImageFormat
+  };
+  if (openAiWritingImageFormat !== "png") {
+    requestPayload.output_compression = openAiWritingImageCompression;
+  }
+  const payload = await callOpenAiJson("images/generations", requestPayload);
   const imageRecord = Array.isArray(payload?.data) ? payload.data[0] : null;
   if (imageRecord?.b64_json) {
-    return `data:image/png;base64,${imageRecord.b64_json}`;
+    return `data:image/${openAiWritingImageFormat};base64,${imageRecord.b64_json}`;
   }
   if (imageRecord?.url) {
     return String(imageRecord.url);
@@ -828,8 +852,15 @@ app.post("/api/writing/illustrations", async (request, response) => {
     const sectionText = String(request.body?.sectionText || "").trim();
     const previousSectionText = String(request.body?.previousSectionText || "").trim();
     const openingAnswers = request.body?.openingAnswers && typeof request.body.openingAnswers === "object" ? request.body.openingAnswers : {};
+    const styleGuide = request.body?.styleGuide && typeof request.body.styleGuide === "object"
+      ? {
+          label: String(request.body.styleGuide.label || "").trim(),
+          brief: String(request.body.styleGuide.brief || "").trim(),
+          prompt: String(request.body.styleGuide.prompt || "").trim()
+        }
+      : null;
     const prompts = Array.isArray(request.body?.prompts)
-      ? request.body.prompts.map((prompt) => String(prompt || "").trim()).filter(Boolean).slice(0, 2)
+      ? request.body.prompts.map((prompt) => String(prompt || "").trim()).filter(Boolean).slice(0, 4)
       : [];
 
     if (!sectionText) {
@@ -845,6 +876,8 @@ app.post("/api/writing/illustrations", async (request, response) => {
     const who = String(openingAnswers.who || "the main character").trim();
     const where = String(openingAnswers.where || "the setting").trim();
     const want = String(openingAnswers.want || "their goal").trim();
+    const clippedPreviousSectionText = clipText(previousSectionText, writingImagePreviousTextLimit);
+    const clippedSectionText = clipText(sectionText, writingImageSectionTextLimit);
 
     const results = await Promise.allSettled(
       prompts.map(async (prompt) => {
@@ -857,8 +890,11 @@ app.post("/api/writing/illustrations", async (request, response) => {
           `Main character: ${who}.`,
           `Setting: ${where}.`,
           `Goal: ${want}.`,
-          previousSectionText ? `Previous section summary: ${previousSectionText}` : "",
-          `Current section text: ${sectionText}`,
+          styleGuide?.label ? `Keep the established book style: ${styleGuide.label}.` : "",
+          styleGuide?.brief ? `Style notes: ${styleGuide.brief}` : "",
+          styleGuide?.prompt ? `Reference style direction from the chosen book image: ${styleGuide.prompt}` : "",
+          clippedPreviousSectionText ? `Previous section summary: ${clippedPreviousSectionText}` : "",
+          `Current section text: ${clippedSectionText}`,
           `Scene direction: ${prompt}`
         ].filter(Boolean).join(" ");
         const imageUrl = await generateOpenAiImage(fullPrompt);
