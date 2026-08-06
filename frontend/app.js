@@ -6438,7 +6438,7 @@ function buildSpellingPaddockMarkup(spelling) {
         <div class="ss-stalls-panel">
           <div class="ss-stalls-head">
             <h4>The stalls</h4>
-            <span>Tap a horse to send it out · tap it again in the paddock to bring it back</span>
+            <span>Scroll to see every horse · tap a horse to send it out · tap it again in the paddock to bring it back</span>
           </div>
           <div class="ss-stall-grid-wrap">
             <div class="ss-stall-grid">${stallMarkup}</div>
