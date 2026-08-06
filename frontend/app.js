@@ -5879,9 +5879,10 @@ function finaliseSpellingRepeatCheck(subject) {
   const completionMessage = unlockedHorse
     ? `Final spelling check complete. You moved from ${initialScore}/${SPELLING_UNIT_SEED.diagnosticTargetCount} to ${repeatScore}/${SPELLING_UNIT_SEED.diagnosticTargetCount}. ${unlockedHorseMeta?.name || "A new horse"} has been added to the paddock.`
     : `Final spelling check complete. You moved from ${initialScore}/${SPELLING_UNIT_SEED.diagnosticTargetCount} to ${repeatScore}/${SPELLING_UNIT_SEED.diagnosticTargetCount}.`;
-  resetSpellingProgressForNewAttempt(spelling);
-  spelling.homeTab = "stable";
-  spelling.sessionPreparedKey = currentSpellingSessionKey;
+  spelling.homeTab = "session";
+  spelling.selectedStageId = "repeat-check";
+  spelling.celebrationStageId = "";
+  spelling.sessionCompletionReady = true;
   spelling.coachMessage = completionMessage;
   spelling.lastUnlockedHorseId = unlockedHorse || spelling.lastUnlockedHorseId;
   persistSubjects();
