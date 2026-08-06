@@ -5187,16 +5187,18 @@ function activateSpellingSession(subject) {
     spelling.sessionPreparedKey = currentSpellingSessionKey;
   }
 
-  spelling.homeTab = "session";
   const visibleStageId = getSpellingVisibleStageId(subject);
   const fallbackStageId = getSpellingStageId(subject);
-  spelling.selectedStageId = canOpenSpellingStage(subject, visibleStageId)
+  const nextSelectedStageId = canOpenSpellingStage(subject, visibleStageId)
     ? visibleStageId
     : canOpenSpellingStage(subject, fallbackStageId)
       ? fallbackStageId
       : "diagnostic";
-  spelling.celebrationStageId = "";
-  spelling.sessionCompletionReady = false;
+  const nextSpelling = getSubjectSpellingState(subject);
+  nextSpelling.homeTab = "session";
+  nextSpelling.selectedStageId = nextSelectedStageId;
+  nextSpelling.celebrationStageId = "";
+  nextSpelling.sessionCompletionReady = false;
 }
 
 function setSpellingHomeTab(subject, tabId) {
@@ -5226,21 +5228,23 @@ function setSpellingHomeTab(subject, tabId) {
 }
 
 function setSpellingSelectedStage(subject, stageId) {
-  const spelling = getSubjectSpellingState(subject);
-  if (!canOpenSpellingStage(subject, stageId)) {
+  const normalizedStageId = String(stageId || "");
+  if (!canOpenSpellingStage(subject, normalizedStageId)) {
     return;
   }
+  const spelling = getSubjectSpellingState(subject);
   if (
     spelling.homeTab === "session" &&
-    spelling.selectedStageId === String(stageId) &&
+    spelling.selectedStageId === normalizedStageId &&
     !spelling.celebrationStageId
   ) {
     return;
   }
-  spelling.homeTab = "session";
-  spelling.selectedStageId = stageId;
-  spelling.celebrationStageId = "";
-  spelling.sessionCompletionReady = false;
+  const nextSpelling = getSubjectSpellingState(subject);
+  nextSpelling.homeTab = "session";
+  nextSpelling.selectedStageId = normalizedStageId;
+  nextSpelling.celebrationStageId = "";
+  nextSpelling.sessionCompletionReady = false;
 }
 
 function getActiveSpellingSubject() {
@@ -5338,13 +5342,14 @@ function celebrateSpellingStage(subject, stageId, coachMessage) {
 
 function continueSpellingStage(subject) {
   const spelling = getSubjectSpellingState(subject);
-  spelling.homeTab = "session";
   const celebrationStageId = String(spelling.celebrationStageId || "");
   const completionMap = getSpellingStageCompletionMap(subject);
   if (celebrationStageId === "repeat-check" && SPELLING_STAGE_ORDER.every((stageId) => completionMap[stageId])) {
-    spelling.celebrationStageId = "";
-    spelling.selectedStageId = "repeat-check";
-    spelling.sessionCompletionReady = true;
+    const nextSpelling = getSubjectSpellingState(subject);
+    nextSpelling.homeTab = "session";
+    nextSpelling.celebrationStageId = "";
+    nextSpelling.selectedStageId = "repeat-check";
+    nextSpelling.sessionCompletionReady = true;
     persistSubjects();
     return;
   }
@@ -5352,9 +5357,11 @@ function continueSpellingStage(subject) {
   if (celebrationStageId === "repeat-check" && !SPELLING_STAGE_ORDER.every((stageId) => completionMap[stageId])) {
     nextStageId = getSpellingStageId(subject);
   }
-  spelling.celebrationStageId = "";
-  spelling.sessionCompletionReady = false;
-  spelling.selectedStageId = nextStageId;
+  const nextSpelling = getSubjectSpellingState(subject);
+  nextSpelling.homeTab = "session";
+  nextSpelling.celebrationStageId = "";
+  nextSpelling.sessionCompletionReady = false;
+  nextSpelling.selectedStageId = nextStageId;
   persistSubjects();
 }
 
@@ -5364,11 +5371,11 @@ function continueSpellingStageToTarget(subject, targetStageId = "") {
     continueSpellingStage(subject);
     return;
   }
-  const spelling = getSubjectSpellingState(subject);
-  spelling.homeTab = "session";
-  spelling.celebrationStageId = "";
-  spelling.sessionCompletionReady = false;
   if (normalizedTarget === "repeat-check" || canOpenSpellingStage(subject, normalizedTarget)) {
+    const spelling = getSubjectSpellingState(subject);
+    spelling.homeTab = "session";
+    spelling.celebrationStageId = "";
+    spelling.sessionCompletionReady = false;
     spelling.selectedStageId = normalizedTarget;
     persistSubjects();
     return;
