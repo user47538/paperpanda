@@ -7149,7 +7149,9 @@ input[type="date"] {
 }
 
 .ss-stall-grid-wrap {
-  height: min(46vh, 420px);
+  height: 280px;
+  max-height: 280px;
+  min-height: 280px;
   overflow-y: auto;
   padding-right: 6px;
   scrollbar-gutter: stable;
@@ -8310,7 +8312,7 @@ input[type="date"] {
 
   .ss-stall-grid-wrap,
   .ss-stable-mini-scroll {
-    height: min(42vh, 320px);
+    height: 240px;
     max-height: none;
   }
 }
