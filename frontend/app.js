@@ -5143,7 +5143,20 @@ function getWeeklyCompletedSpellingAttempts(spelling, weekKey = currentWeekKey()
 
 function ensureSpellingSessionState(subject) {
   const spelling = getSubjectSpellingState(subject);
-  if (!spelling.enabled || spelling.sessionPreparedKey === currentSpellingSessionKey) {
+  if (!spelling.enabled) {
+    return;
+  }
+
+  const attemptComplete = SPELLING_STAGE_ORDER.every((stage) => getSpellingStageCompletionMap(subject)[stage]);
+
+  // Migrate older completed sessions into the final summary state so the
+  // session can always be closed from Stage 5, even if the legacy flag was missed.
+  if (attemptComplete && spelling.repeatCheck.completed && spelling.homeTab === "session" && !spelling.celebrationStageId) {
+    spelling.selectedStageId = "repeat-check";
+    spelling.sessionCompletionReady = true;
+  }
+
+  if (spelling.sessionPreparedKey === currentSpellingSessionKey) {
     return;
   }
 
@@ -5151,7 +5164,6 @@ function ensureSpellingSessionState(subject) {
   const weekKey = currentWeekKey();
   spelling.completedAttempts = (spelling.completedAttempts || []).slice(-16);
   const weeklyAttempts = getWeeklyCompletedSpellingAttempts(spelling, weekKey);
-  const attemptComplete = SPELLING_STAGE_ORDER.every((stage) => getSpellingStageCompletionMap(subject)[stage]);
 
   if (weeklyAttempts.length >= 4 && spelling.challenge.lastCompletedWeekKey !== weekKey) {
     spelling.challenge = {
@@ -12486,6 +12498,7 @@ function renderSpelling() {
   const completedCount = getSpellingCompletedActivityCount(subject);
   const totalCount = getSpellingTotalActivityCount(subject);
   const masteryPercent = Math.round(getSpellingMasteryRatio(subject) * 100);
+  const attemptComplete = SPELLING_STAGE_ORDER.every((candidateStageId) => getSpellingStageCompletionMap(subject)[candidateStageId]);
   const currentStageId = getSpellingStageId(subject);
   const stageId = getSpellingVisibleStageId(subject);
   const stageIndex = SPELLING_STAGE_ORDER.indexOf(stageId);
@@ -12503,6 +12516,10 @@ function renderSpelling() {
     homeTab = "progress";
   }
   const visibleHomeTab = homeTab === "stable" ? "paddock" : homeTab;
+  const showSessionCompletionSummary = homeTab === "session"
+    && !showingCelebration
+    && spelling.repeatCheck.completed
+    && (spelling.sessionCompletionReady || attemptComplete);
 
   if (spelling.challenge.active || (spelling.challenge.completed && spelling.challenge.lastCompletedWeekKey === currentWeekKey())) {
     const currentChallengeItem = getSpellingChallengeCurrentItem(spelling);
@@ -12620,7 +12637,7 @@ function renderSpelling() {
     return;
   }
 
-  if (homeTab !== "session" && !showingCelebration && !spelling.sessionCompletionReady) {
+  if (homeTab !== "session" && !showingCelebration && !showSessionCompletionSummary) {
     const homeBody = homeTab === "progress"
       ? buildSpellingProgressHome(subject, spelling)
       : homeTab === "session"
@@ -13108,7 +13125,7 @@ function renderSpelling() {
     const earnedHorseMeta = getSpellingPaddockHorseMeta(spelling.lastUnlockedHorseId || spelling.paddockHorses[spelling.paddockHorses.length - 1]);
     const repeatWord = getSpellingRepeatCurrentWord(spelling);
     const repeatCompletedCount = Object.keys(spelling.repeatCheck.responses || {}).length;
-    stageBody = spelling.sessionCompletionReady
+    stageBody = showSessionCompletionSummary
       ? `
         <article class="ss-stage-panel">
           <div class="ss-stage-panel__head">
