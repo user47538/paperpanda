@@ -7056,6 +7056,15 @@ input[type="date"] {
   gap: 16px;
 }
 
+.ss-stalls-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 24px;
+  border: 1px solid rgba(218, 211, 223, 0.95);
+  background: rgba(255, 255, 255, 0.72);
+}
+
 .ss-paddock-stage {
   position: relative;
   min-height: 404px;
@@ -7140,9 +7149,9 @@ input[type="date"] {
 }
 
 .ss-stall-grid-wrap {
-  max-height: 386px;
-  overflow-y: auto;
-  padding-right: 4px;
+  max-height: 540px;
+  overflow-y: scroll;
+  padding-right: 6px;
   scrollbar-gutter: stable;
 }
 
@@ -8298,7 +8307,7 @@ input[type="date"] {
 
   .ss-stall-grid-wrap,
   .ss-stable-mini-scroll {
-    max-height: 320px;
+    max-height: 360px;
   }
 }
 

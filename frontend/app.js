@@ -6435,12 +6435,14 @@ function buildSpellingPaddockMarkup(spelling) {
           <div class="ss-paddock-callout">Tap a horse from the stalls to bring it into the paddock, then drag it anywhere</div>
           ${roamingMarkup}
         </div>
-        <div class="ss-stalls-head">
-          <h4>The stalls</h4>
-          <span>Tap a horse to send it out · tap it again in the paddock to bring it back</span>
-        </div>
-        <div class="ss-stall-grid-wrap">
-          <div class="ss-stall-grid">${stallMarkup}</div>
+        <div class="ss-stalls-panel">
+          <div class="ss-stalls-head">
+            <h4>The stalls</h4>
+            <span>Tap a horse to send it out · tap it again in the paddock to bring it back</span>
+          </div>
+          <div class="ss-stall-grid-wrap">
+            <div class="ss-stall-grid">${stallMarkup}</div>
+          </div>
         </div>
       </div>
     </section>
