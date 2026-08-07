@@ -8591,7 +8591,84 @@ async function speakTextWithOpenAi(text, { context = "document", documentId = nu
       onChunkStart(chunks[chunkIndex], chunkIndex);
     }
 
-    const speechBlob = await requestApi("/api/speak", { text: chunks[chunkIndex] }, true);
+    await playSpeechChunkWithFallback(chunks[chunkIndex], {
+      listenSessionId,
+      statusMessages
+    });
+  }
+
+  if (typeof onFinished === "function") {
+    onFinished();
+  }
+  stopListening();
+  renderDocuments();
+}
+
+function getPreferredSpeechSynthesisVoice() {
+  if (!("speechSynthesis" in window) || typeof window.speechSynthesis.getVoices !== "function") {
+    return null;
+  }
+
+  const voices = window.speechSynthesis.getVoices();
+  if (!Array.isArray(voices) || !voices.length) {
+    return null;
+  }
+
+  const preferenceMatchers = [/en-au/i, /australia/i, /female/i, /en-gb/i, /en-us/i, /english/i];
+  for (const matcher of preferenceMatchers) {
+    const match = voices.find((voice) =>
+      matcher.test(String(voice.lang || "")) || matcher.test(String(voice.name || ""))
+    );
+    if (match) {
+      return match;
+    }
+  }
+
+  return voices[0] || null;
+}
+
+async function speakTextWithBrowserVoice(text, { listenSessionId, statusMessages = {} } = {}) {
+  if (!("speechSynthesis" in window) || typeof window.SpeechSynthesisUtterance !== "function") {
+    return false;
+  }
+
+  const utteranceText = normaliseSpeechText(text);
+  if (!utteranceText) {
+    return false;
+  }
+
+  window.speechSynthesis.cancel();
+  elements.askResponse.textContent = statusMessages.playing || "Reading...";
+
+  await new Promise((resolve, reject) => {
+    const utterance = new SpeechSynthesisUtterance(utteranceText);
+    const preferredVoice = getPreferredSpeechSynthesisVoice();
+    if (preferredVoice) {
+      utterance.voice = preferredVoice;
+      utterance.lang = preferredVoice.lang || "en-AU";
+    } else {
+      utterance.lang = "en-AU";
+    }
+    utterance.rate = utteranceText.length <= 32 ? 0.82 : 0.92;
+    utterance.pitch = 1;
+    utterance.volume = 1;
+    utterance.onend = () => resolve();
+    utterance.onerror = () => reject(new Error(statusMessages.error || "Browser voice playback failed."));
+
+    if (currentListenSessionId !== listenSessionId) {
+      resolve();
+      return;
+    }
+
+    window.speechSynthesis.speak(utterance);
+  });
+
+  return true;
+}
+
+async function playSpeechChunkWithFallback(chunkText, { listenSessionId, statusMessages = {} } = {}) {
+  try {
+    const speechBlob = await requestApi("/api/speak", { text: chunkText }, true);
 
     if (currentListenSessionId !== listenSessionId) {
       return;
@@ -8617,13 +8694,20 @@ async function speakTextWithOpenAi(text, { context = "document", documentId = nu
       currentAudioPlayback.onended = () => resolve();
       currentAudioPlayback.onerror = () => reject(new Error(statusMessages.error || "AI voice playback failed."));
     });
-  }
+  } catch (error) {
+    console.warn("Falling back to browser speech synthesis.", error);
+    const usedBrowserVoice = await speakTextWithBrowserVoice(chunkText, {
+      listenSessionId,
+      statusMessages
+    }).catch((browserError) => {
+      console.error("Browser speech fallback failed.", browserError);
+      return false;
+    });
 
-  if (typeof onFinished === "function") {
-    onFinished();
+    if (!usedBrowserVoice) {
+      throw error;
+    }
   }
-  stopListening();
-  renderDocuments();
 }
 
 function currentDateKey() {
