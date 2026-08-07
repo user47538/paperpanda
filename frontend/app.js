@@ -6144,16 +6144,27 @@ function speakSpellingDiagnosticWord(wordEntry) {
     return;
   }
 
-  void speakTextWithOpenAi(`Spell the word ${wordEntry.word}. ${wordEntry.sentence}`, {
+  const cueWord = String(wordEntry.word || "").trim();
+  const articulationCue = String(wordEntry.articulation || "").trim();
+  const cueText = articulationCue
+    ? `${cueWord}. ${cueWord}. Listen for the beats: ${articulationCue}.`
+    : `${cueWord}. ${cueWord}.`;
+
+  void speakTextWithOpenAi(cueText, {
     context: audioContext,
     statusMessages: {
       preparing: "Preparing spelling audio...",
       playing: "Reading spelling word...",
       error: "Spelling audio failed."
-    }
+    },
+    chunksOverride: [cueWord, cueWord]
   })
+    .then(() => {
+      render();
+    })
     .catch((error) => {
       console.error("Spelling audio failed.", error);
+      render();
     });
 }
 
