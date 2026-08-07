@@ -908,7 +908,7 @@ app.post("/api/speak", async (request, response) => {
     const speech = await callOpenAiSpeech({
       model: "gpt-4o-mini-tts",
       voice: "marin",
-      format: "wav",
+      response_format: "wav",
       input: text,
       instructions:
         "Speak as a warm, fluent female tutor for an Australian school student. Use natural pauses, clear emphasis, and calm expressive delivery."

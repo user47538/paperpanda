@@ -574,6 +574,16 @@ const SPELLING_PADDOCK_HORSES = [
   { id: "mustang", label: "Mustang", name: "Storm", image: "/horses/Mustang.png" },
   { id: "irish-sport-horse", label: "Irish Sport Horse", name: "Jasper", image: "/horses/Irish Sport Horse.png" }
 ];
+const SPELLING_PADDOCK_HORSE_ID_ALIASES = Object.fromEntries(
+  SPELLING_PADDOCK_HORSES.flatMap((horse) => {
+    const aliases = new Set([
+      String(horse.id || "").trim().toLowerCase(),
+      String(horse.label || "").trim().toLowerCase(),
+      String(horse.label || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
+    ]);
+    return [...aliases].filter(Boolean).map((alias) => [alias, horse.id]);
+  })
+);
 const SPELLING_PADDOCK_HORSE_BY_ID = Object.fromEntries(
   SPELLING_PADDOCK_HORSES.map((horse) => [horse.id, horse])
 );
@@ -1264,6 +1274,11 @@ const state = {
   googleDocsTokenExpiresAt: 0,
   askMicActive: false,
   askResponseSpeaking: false,
+  spellingAudioStatus: {
+    context: "",
+    tone: "",
+    message: ""
+  },
   expandedDocumentGroups: {},
   attachmentModalOpen: false,
   activeAttachmentTarget: null,
@@ -4610,6 +4625,26 @@ function normaliseSpellingState(spelling, subjectId = "") {
     : normalisedHomeTabRaw === "review"
       ? "progress"
       : normalisedHomeTabRaw;
+  const normalisedPaddockHorses = normaliseSpellingPaddockHorseIds(next.paddockHorses || []);
+  const normalisedPaddockStateEntries = next.paddockState && typeof next.paddockState === "object" && !Array.isArray(next.paddockState)
+    ? Object.entries(next.paddockState)
+        .map(([horseId, entry], index) => {
+          const normalisedHorseId = normaliseSpellingPaddockHorseId(horseId);
+          if (!normalisedHorseId) {
+            return null;
+          }
+          return [
+            normalisedHorseId,
+            {
+              stallId: String(entry?.stallId || `s${index + 1}`),
+              roaming: Boolean(entry?.roaming),
+              left: Math.max(0, Number(entry?.left || 24) || 24),
+              top: Math.max(0, Number(entry?.top || 24) || 24)
+            }
+          ];
+        })
+        .filter(Boolean)
+    : [];
 
   return {
     ...base,
@@ -4792,23 +4827,9 @@ function normaliseSpellingState(spelling, subjectId = "") {
       inputValue: isCurrentChallengeVersion ? String(challenge.inputValue || "") : "",
       lastCompletedWeekKey: isCurrentChallengeVersion ? String(challenge.lastCompletedWeekKey || "") : ""
     },
-    paddockHorses: Array.isArray(next.paddockHorses)
-      ? next.paddockHorses.map((horse) => String(horse || "").trim()).filter(Boolean).slice(0, SPELLING_PADDOCK_HORSES.length)
-      : [],
-    paddockState: next.paddockState && typeof next.paddockState === "object" && !Array.isArray(next.paddockState)
-      ? Object.fromEntries(
-          Object.entries(next.paddockState).map(([horseId, entry], index) => [
-            String(horseId || ""),
-            {
-              stallId: String(entry?.stallId || `s${index + 1}`),
-              roaming: Boolean(entry?.roaming),
-              left: Math.max(0, Number(entry?.left || 24) || 24),
-              top: Math.max(0, Number(entry?.top || 24) || 24)
-            }
-          ])
-        )
-      : {},
-    lastUnlockedHorseId: String(next.lastUnlockedHorseId || ""),
+    paddockHorses: normalisedPaddockHorses,
+    paddockState: Object.fromEntries(normalisedPaddockStateEntries),
+    lastUnlockedHorseId: normaliseSpellingPaddockHorseId(next.lastUnlockedHorseId || ""),
     lastOverallScorePercent: Math.max(0, Math.min(100, Number(next.lastOverallScorePercent || 0) || 0))
   };
 }
@@ -4940,6 +4961,7 @@ function getSpellingOverallScorePercent(spelling) {
 }
 
 function unlockSpellingPaddockHorse(spelling) {
+  spelling.paddockHorses = normaliseSpellingPaddockHorseIds(spelling.paddockHorses || []);
   const earnedHorseCount = Array.isArray(spelling.paddockHorses) ? spelling.paddockHorses.length : 0;
   const nextHorse = SPELLING_PADDOCK_HORSES[earnedHorseCount];
   if (!nextHorse) {
@@ -4953,6 +4975,32 @@ function unlockSpellingPaddockHorse(spelling) {
 
 function getSpellingPaddockHorseMeta(horseId = "") {
   return SPELLING_PADDOCK_HORSE_BY_ID[String(horseId || "")] || null;
+}
+
+function normaliseSpellingPaddockHorseId(horseId = "") {
+  const rawHorseId = String(horseId || "").trim().toLowerCase();
+  if (!rawHorseId) {
+    return "";
+  }
+  return SPELLING_PADDOCK_HORSE_ID_ALIASES[rawHorseId] || "";
+}
+
+function normaliseSpellingPaddockHorseIds(horseIds = []) {
+  const seenHorseIds = new Set();
+  return (Array.isArray(horseIds) ? horseIds : [])
+    .map((horseId) => normaliseSpellingPaddockHorseId(horseId))
+    .filter((horseId) => {
+      if (!horseId || seenHorseIds.has(horseId)) {
+        return false;
+      }
+      seenHorseIds.add(horseId);
+      return true;
+    })
+    .slice(0, SPELLING_PADDOCK_HORSES.length);
+}
+
+function getSpellingVisibleHorseCount(spelling) {
+  return getSpellingOwnedHorseMeta(spelling).length;
 }
 
 function getSpellingHorseRankLabel(horseCount = 0) {
@@ -4976,25 +5024,35 @@ function buildDefaultSpellingPaddockEntry(index = 0) {
 }
 
 function ensureSpellingPaddockState(spelling) {
+  spelling.paddockHorses = normaliseSpellingPaddockHorseIds(spelling.paddockHorses || []);
   if (!spelling.paddockState || typeof spelling.paddockState !== "object" || Array.isArray(spelling.paddockState)) {
     spelling.paddockState = {};
   }
+  const nextPaddockState = {};
   (spelling.paddockHorses || []).forEach((horseId, index) => {
     const normalizedHorseId = String(horseId || "");
     if (!normalizedHorseId) {
       return;
     }
-    if (!spelling.paddockState[normalizedHorseId]) {
-      spelling.paddockState[normalizedHorseId] = buildDefaultSpellingPaddockEntry(index);
-      return;
-    }
-    spelling.paddockState[normalizedHorseId] = {
+    const existingEntry = spelling.paddockState[normalizedHorseId];
+    nextPaddockState[normalizedHorseId] = {
       ...buildDefaultSpellingPaddockEntry(index),
-      ...spelling.paddockState[normalizedHorseId],
-      stallId: String(spelling.paddockState[normalizedHorseId].stallId || `s${index + 1}`)
+      ...(existingEntry && typeof existingEntry === "object" ? existingEntry : {}),
+      stallId: String(existingEntry?.stallId || `s${index + 1}`)
     };
   });
+  spelling.paddockState = nextPaddockState;
   return spelling.paddockState;
+}
+
+function clampSpellingPaddockEntry(entry, stageWidth, stageHeight, horseWidth = 170, horseHeight = 132) {
+  const safeStageWidth = Math.max(horseWidth + 24, Number(stageWidth || 0) || 0);
+  const safeStageHeight = Math.max(horseHeight + 96, Number(stageHeight || 0) || 0);
+  return {
+    ...entry,
+    left: Math.max(8, Math.min(Math.round(Number(entry?.left || 0) || 0), safeStageWidth - horseWidth - 8)),
+    top: Math.max(76, Math.min(Math.round(Number(entry?.top || 0) || 0), safeStageHeight - horseHeight - 8))
+  };
 }
 
 function getSpellingOwnedHorseMeta(spelling) {
@@ -5507,6 +5565,50 @@ function returnSpellingHorseToStall(subject, horseId) {
   render();
 }
 
+function returnAllSpellingHorsesToStalls(subject) {
+  const spelling = getSubjectSpellingState(subject);
+  ensureSpellingPaddockState(spelling);
+  let didUpdate = false;
+  Object.values(spelling.paddockState || {}).forEach((entry) => {
+    if (!entry?.roaming) {
+      return;
+    }
+    entry.roaming = false;
+    didUpdate = true;
+  });
+  if (!didUpdate) {
+    return;
+  }
+  persistSubjects();
+  render();
+}
+
+function clampSpellingPaddockRoamingPositions(subject, stageElement) {
+  if (!subject || !stageElement) {
+    return false;
+  }
+
+  const spelling = getSubjectSpellingState(subject);
+  ensureSpellingPaddockState(spelling);
+  const stageWidth = Math.round(stageElement.clientWidth || stageElement.offsetWidth || 0);
+  const stageHeight = Math.round(stageElement.clientHeight || stageElement.offsetHeight || 0);
+  let didUpdate = false;
+
+  Object.entries(spelling.paddockState || {}).forEach(([horseId, entry]) => {
+    if (!entry?.roaming || !SPELLING_PADDOCK_HORSE_BY_ID[horseId]) {
+      return;
+    }
+
+    const clampedEntry = clampSpellingPaddockEntry(entry, stageWidth, stageHeight);
+    if (clampedEntry.left !== entry.left || clampedEntry.top !== entry.top) {
+      spelling.paddockState[horseId] = clampedEntry;
+      didUpdate = true;
+    }
+  });
+
+  return didUpdate;
+}
+
 function setupSpellingPaddockInteractions(subject, host) {
   if (!host) {
     return;
@@ -5519,6 +5621,25 @@ function setupSpellingPaddockInteractions(subject, host) {
   if (!stage) {
     return;
   }
+
+  const syncRoamingHorsePositions = () => {
+    if (!clampSpellingPaddockRoamingPositions(subject, stage)) {
+      return;
+    }
+    persistSubjects({ skipRemoteSync: true });
+    const spelling = getSubjectSpellingState(subject);
+    host.querySelectorAll('[data-spelling-horse-mode="roaming"]').forEach((horseElement) => {
+      const horseId = horseElement.dataset.spellingHorse || "";
+      const horseState = spelling.paddockState?.[horseId];
+      if (!horseState) {
+        return;
+      }
+      horseElement.style.left = `${horseState.left}px`;
+      horseElement.style.top = `${horseState.top}px`;
+    });
+  };
+
+  syncRoamingHorsePositions();
 
   let drag = null;
 
@@ -5613,10 +5734,15 @@ function setupSpellingPaddockInteractions(subject, host) {
   host.addEventListener("pointerdown", handlePointerDown);
   window.addEventListener("pointermove", handlePointerMove);
   window.addEventListener("pointerup", handlePointerUp);
+  window.addEventListener("resize", syncRoamingHorsePositions);
+  host.querySelector("[data-spelling-return-all-stalls]")?.addEventListener("click", () => {
+    returnAllSpellingHorsesToStalls(subject);
+  });
   host._spellingPaddockCleanup = () => {
     host.removeEventListener("pointerdown", handlePointerDown);
     window.removeEventListener("pointermove", handlePointerMove);
     window.removeEventListener("pointerup", handlePointerUp);
+    window.removeEventListener("resize", syncRoamingHorsePositions);
   };
 }
 
@@ -6136,15 +6262,66 @@ function resetSpellingActivity(subject, activityId) {
   persistSubjects();
 }
 
-function speakSpellingDiagnosticWord(wordEntry) {
+function getSpellingAudioContext(mode, wordEntry, variant = "word") {
+  return `spelling:${String(mode || "diagnostic")}:${String(wordEntry?.id || "")}:${String(variant || "word")}`;
+}
+
+function setSpellingAudioStatus(context, tone, message, { skipRender = false } = {}) {
+  state.spellingAudioStatus = {
+    context: String(context || ""),
+    tone: String(tone || ""),
+    message: String(message || "")
+  };
+  if (!skipRender) {
+    render();
+  }
+}
+
+function clearSpellingAudioStatus(context = "", { skipRender = false } = {}) {
+  const requestedContext = String(context || "");
+  const activeContext = String(state.spellingAudioStatus?.context || "");
+  if (requestedContext && requestedContext !== activeContext) {
+    return;
+  }
+  if (!activeContext && !String(state.spellingAudioStatus?.message || "")) {
+    return;
+  }
+  state.spellingAudioStatus = {
+    context: "",
+    tone: "",
+    message: ""
+  };
+  if (!skipRender) {
+    render();
+  }
+}
+
+function buildSpellingAudioStatusMarkup(mode, wordEntry) {
+  if (!wordEntry) {
+    return "";
+  }
+  const activeContext = String(state.spellingAudioStatus?.context || "");
+  const message = String(state.spellingAudioStatus?.message || "").trim();
+  if (!message || !activeContext.startsWith(`spelling:${String(mode || "diagnostic")}:${wordEntry.id}:`)) {
+    return "";
+  }
+  const tone = String(state.spellingAudioStatus?.tone || "");
+  const toneClass = tone === "error" ? " is-incorrect" : tone ? " is-active" : "";
+  return `
+    <div class="ss-status-note ss-status-note--feedback${toneClass}">
+      <p>${escapeHtml(message)}</p>
+    </div>
+  `;
+}
+
+function speakSpellingWordAudio(wordEntry, { mode = "diagnostic" } = {}) {
   if (!wordEntry) {
     return;
   }
-  const audioContext = `spelling:diagnostic:${wordEntry.id}`;
+  const audioContext = getSpellingAudioContext(mode, wordEntry, "word");
   if (currentAudioContext === audioContext) {
     stopListening();
-    render();
-    return;
+    clearSpellingAudioStatus(audioContext, { skipRender: true });
   }
 
   const cueWord = String(wordEntry.word || "").trim();
@@ -6153,6 +6330,7 @@ function speakSpellingDiagnosticWord(wordEntry) {
     ? `${cueWord}. ${cueWord}. Listen for the beats: ${articulationCue}.`
     : `${cueWord}. ${cueWord}.`;
 
+  setSpellingAudioStatus(audioContext, "pending", "Preparing AI voice...", { skipRender: true });
   void speakTextWithOpenAi(cueText, {
     context: audioContext,
     statusMessages: {
@@ -6160,38 +6338,71 @@ function speakSpellingDiagnosticWord(wordEntry) {
       playing: "Reading spelling word...",
       error: "Spelling audio failed."
     },
-    chunksOverride: [cueWord, cueWord]
+    chunksOverride: [cueText],
+    onStatusChange: (tone, message) => {
+      setSpellingAudioStatus(audioContext, tone, message);
+    }
   })
     .then(() => {
-      render();
+      clearSpellingAudioStatus(audioContext);
     })
     .catch((error) => {
       console.error("Spelling audio failed.", error);
-      render();
+      setSpellingAudioStatus(
+        audioContext,
+        "error",
+        error instanceof Error ? error.message : "Spelling audio failed."
+      );
     });
 }
 
-function speakSpellingDiagnosticSentence(wordEntry) {
+function speakSpellingDiagnosticWord(wordEntry) {
+  speakSpellingWordAudio(wordEntry, { mode: "diagnostic" });
+}
+
+function speakSpellingDiagnosticSentence(wordEntry, { mode = "diagnostic" } = {}) {
   if (!wordEntry) {
     return;
   }
-  const audioContext = `spelling:diagnostic-sentence:${wordEntry.id}`;
+  const audioContext = getSpellingAudioContext(mode, wordEntry, "sentence");
   if (currentAudioContext === audioContext) {
     stopListening();
-    render();
-    return;
+    clearSpellingAudioStatus(audioContext, { skipRender: true });
   }
 
-  void speakTextWithOpenAi(wordEntry.sentence || `Use ${wordEntry.word} in a sentence.`, {
+  const sentenceText = wordEntry.sentence || `Use ${wordEntry.word} in a sentence.`;
+  setSpellingAudioStatus(audioContext, "pending", "Preparing AI voice...", { skipRender: true });
+  void speakTextWithOpenAi(sentenceText, {
     context: audioContext,
     statusMessages: {
       preparing: "Preparing sentence audio...",
       playing: "Reading sentence...",
       error: "Sentence audio failed."
+    },
+    chunksOverride: [sentenceText],
+    onStatusChange: (tone, message) => {
+      setSpellingAudioStatus(audioContext, tone, message);
     }
-  }).catch((error) => {
-    console.error("Spelling sentence audio failed.", error);
-  });
+  })
+    .then(() => {
+      clearSpellingAudioStatus(audioContext);
+    })
+    .catch((error) => {
+      console.error("Spelling sentence audio failed.", error);
+      setSpellingAudioStatus(
+        audioContext,
+        "error",
+        error instanceof Error ? error.message : "Sentence audio failed."
+      );
+    });
+}
+
+function speakSpellingRepeatWord(wordEntry) {
+  speakSpellingWordAudio(wordEntry, { mode: "repeat-check" });
+}
+
+function speakSpellingRepeatSentence(wordEntry) {
+  speakSpellingDiagnosticSentence(wordEntry, { mode: "repeat-check" });
 }
 
 function submitSpellingDiagnosticWord(subject, attemptOverride = null) {
@@ -6454,6 +6665,7 @@ function buildSpellingPaddockMarkup(spelling) {
   const ownedHorses = getSpellingOwnedHorseMeta(spelling);
   const stalls = ownedHorses.length ? ownedHorses : [];
   const stallCount = Math.max(6, stalls.length || 0);
+  const roamingCount = ownedHorses.filter((horse) => horse.state.roaming).length;
   const stallMarkup = Array.from({ length: stallCount }, (_, index) => {
     const horse = stalls[index] || null;
     const stateEntry = horse?.state || buildDefaultSpellingPaddockEntry(index);
@@ -6493,10 +6705,11 @@ function buildSpellingPaddockMarkup(spelling) {
           ${roamingMarkup}
         </div>
         <div class="ss-stalls-panel">
-          <div class="ss-stalls-head">
-            <h4>The stalls</h4>
-            <span>Scroll to see every horse · tap a horse to send it out · tap it again in the paddock to bring it back</span>
-          </div>
+        <div class="ss-stalls-head">
+          <h4>The stalls</h4>
+          <span>${escapeHtml(roamingCount ? `${roamingCount} roaming in the paddock · tap a horse to bring it back` : "Scroll to see every horse · tap a horse to send it out · tap it again in the paddock to bring it back")}</span>
+        </div>
+        ${roamingCount ? '<div class="spelling-stage-actions spelling-stage-actions--compact"><button type="button" class="ghost-button ghost-button--small" data-spelling-return-all-stalls="true">Return all to stalls</button></div>' : ""}
           <div class="ss-stall-grid-wrap">
             <div class="ss-stall-grid">${stallMarkup}</div>
           </div>
@@ -6577,7 +6790,7 @@ function buildSpellingStableMiniCard(spelling) {
     <section class="ss-side-card">
       <div class="ss-side-card__head">
         <h4>Your stable</h4>
-        <span>${escapeHtml(`${(spelling.paddockHorses || []).length} / ${SPELLING_PADDOCK_HORSES.length}`)}</span>
+        <span>${escapeHtml(`${owned.length} / ${SPELLING_PADDOCK_HORSES.length}`)}</span>
       </div>
       <div class="ss-stable-mini-scroll">
         <div class="ss-stable-mini-grid">
@@ -6690,7 +6903,7 @@ function buildSpellingReviewBacklogCard(spelling) {
 }
 
 function buildSpellingHorsePreviewCard(spelling) {
-  const nextHorse = SPELLING_PADDOCK_HORSES[(spelling.paddockHorses || []).length] || null;
+  const nextHorse = SPELLING_PADDOCK_HORSES[getSpellingVisibleHorseCount(spelling)] || null;
   if (!nextHorse) {
     return `
       <section class="ss-side-card">
@@ -6716,6 +6929,7 @@ function buildSpellingHomeOverview(subject, spelling) {
   const currentStageId = getSpellingStageId(subject);
   const currentStageLabel = SPELLING_STAGE_LABELS[currentStageId] || "Diagnostic";
   const isFreshSession = !spelling.diagnostic.completed && !Object.keys(spelling.diagnostic.responses || {}).length;
+  const ownedHorseCount = getSpellingVisibleHorseCount(spelling);
   return `
     <section class="ss-home-stack">
       <article class="ss-stage-panel">
@@ -6724,7 +6938,7 @@ function buildSpellingHomeOverview(subject, spelling) {
             <p class="eyebrow">Spelling Stables</p>
             <h4>${escapeHtml(isFreshSession ? "Ready to begin a new set" : `Continue with ${currentStageLabel}`)}</h4>
           </div>
-          <span class="ss-stage-badge">${escapeHtml(`${(spelling.paddockHorses || []).length} / ${SPELLING_PADDOCK_HORSES.length} horses`)}</span>
+          <span class="ss-stage-badge">${escapeHtml(`${ownedHorseCount} / ${SPELLING_PADDOCK_HORSES.length} horses`)}</span>
         </div>
         <p class="ss-stage-copy">${escapeHtml(SPELLING_UNIT_SEED.intro)}</p>
         <div class="ss-stage-actions">
@@ -8562,7 +8776,7 @@ function startAskMicrophone() {
   recognition.start();
 }
 
-async function speakTextWithOpenAi(text, { context = "document", documentId = null, statusMessages = {}, onChunkStart = null, onFinished = null, chunksOverride = null } = {}) {
+async function speakTextWithOpenAi(text, { context = "document", documentId = null, statusMessages = {}, onChunkStart = null, onFinished = null, chunksOverride = null, onStatusChange = null } = {}) {
   stopListening();
   const textToRead = normaliseSpeechText(text);
   if (!textToRead) {
@@ -8577,6 +8791,9 @@ async function speakTextWithOpenAi(text, { context = "document", documentId = nu
   renderDocuments();
   renderAskVoiceControls();
   elements.askResponse.textContent = statusMessages.preparing || "Preparing audio...";
+  if (typeof onStatusChange === "function") {
+    onStatusChange("pending", statusMessages.preparing || "Preparing audio...");
+  }
   await ensureAiSpeechPlaybackReady();
 
   const chunks = Array.isArray(chunksOverride) && chunksOverride.length
@@ -8597,7 +8814,8 @@ async function speakTextWithOpenAi(text, { context = "document", documentId = nu
 
     await playSpeechChunk(chunks[chunkIndex], {
       listenSessionId,
-      statusMessages
+      statusMessages,
+      onStatusChange
     });
   }
 
@@ -8673,7 +8891,7 @@ async function primeAiSpeechPlaybackElement() {
   aiSpeechPlaybackPrimed = true;
 }
 
-async function playSpeechBlobThroughAudioElement(speechBlob, { statusMessages = {} } = {}) {
+async function playSpeechBlobThroughAudioElement(speechBlob, { statusMessages = {}, onStatusChange = null } = {}) {
   const playbackElement = ensureAiSpeechPlaybackElement();
   if (currentAudioObjectUrl) {
     URL.revokeObjectURL(currentAudioObjectUrl);
@@ -8708,6 +8926,9 @@ async function playSpeechBlobThroughAudioElement(speechBlob, { statusMessages = 
 
   await playbackElement.play();
   elements.askResponse.textContent = statusMessages.playing || "Reading...";
+  if (typeof onStatusChange === "function") {
+    onStatusChange("playing", statusMessages.playing || "Reading...");
+  }
 
   await new Promise((resolve, reject) => {
     playbackElement.onended = () => resolve();
@@ -8715,7 +8936,7 @@ async function playSpeechBlobThroughAudioElement(speechBlob, { statusMessages = 
   });
 }
 
-async function playSpeechChunk(chunkText, { listenSessionId, statusMessages = {} } = {}) {
+async function playSpeechChunk(chunkText, { listenSessionId, statusMessages = {}, onStatusChange = null } = {}) {
   const speechBlob = await requestApi("/api/speak", { text: chunkText }, true);
 
   if (currentListenSessionId !== listenSessionId) {
@@ -8723,7 +8944,7 @@ async function playSpeechChunk(chunkText, { listenSessionId, statusMessages = {}
   }
 
   try {
-    await playSpeechBlobThroughAudioElement(speechBlob, { statusMessages });
+    await playSpeechBlobThroughAudioElement(speechBlob, { statusMessages, onStatusChange });
     return;
   } catch (error) {
     console.warn("DOM audio playback failed, retrying with AudioContext.", error);
@@ -8762,6 +8983,9 @@ async function playSpeechChunk(chunkText, { listenSessionId, statusMessages = {}
 
     try {
       elements.askResponse.textContent = statusMessages.playing || "Reading...";
+      if (typeof onStatusChange === "function") {
+        onStatusChange("playing", statusMessages.playing || "Reading...");
+      }
       source.start(0);
     } catch (error) {
       if (currentAudioBufferSource === source) {
@@ -10041,11 +10265,8 @@ function stopListening() {
     currentAudioPlayback.onended = null;
     currentAudioPlayback.onerror = null;
     currentAudioPlayback.pause();
-    currentAudioPlayback.src = "";
-    if (currentAudioPlayback.parentNode) {
-      currentAudioPlayback.parentNode.removeChild(currentAudioPlayback);
-    }
-    currentAudioPlayback = null;
+    currentAudioPlayback.removeAttribute("src");
+    currentAudioPlayback.load();
   }
   if (currentAudioObjectUrl) {
     URL.revokeObjectURL(currentAudioObjectUrl);
@@ -13189,6 +13410,7 @@ function renderSpelling() {
                 <button type="button" class="primary-button primary-button--dark" data-spelling-play-diagnostic="true">Hear the word</button>
                 <button type="button" class="ghost-button ghost-button--light" data-spelling-play-diagnostic-sentence="true">Hear it in a sentence</button>
               </div>
+              ${buildSpellingAudioStatusMarkup("diagnostic", getSpellingDiagnosticCurrentWord(spelling))}
               <label class="spelling-input-label" for="spelling-diagnostic-input">Type your spelling</label>
               <input
                 id="spelling-diagnostic-input"
@@ -13545,7 +13767,7 @@ function renderSpelling() {
     const hayRemaining = Math.max(0, SPELLING_UNIT_SEED.followUpWordCount - incorrectTenseCount);
     const currentTenseIndex = currentFamilyWord ? Math.max(0, followUpWords.findIndex((entry) => entry.id === currentFamilyWord.id)) : 0;
     const currentTensePrompt = currentFamilyWord ? getSpellingTensePrompt(spelling, currentFamilyWord) : null;
-    const raceHorseMeta = SPELLING_PADDOCK_HORSES[(spelling.paddockHorses || []).length] || getSpellingOwnedHorseMeta(spelling)[0] || SPELLING_PADDOCK_HORSES[0];
+    const raceHorseMeta = SPELLING_PADDOCK_HORSES[getSpellingVisibleHorseCount(spelling)] || getSpellingOwnedHorseMeta(spelling)[0] || SPELLING_PADDOCK_HORSES[0];
     stageBody = spelling.tenseTransfer.completed
       ? `
         <article class="ss-stage-panel">
@@ -13651,7 +13873,7 @@ function renderSpelling() {
               <img class="spelling-horse-card__image" src="${escapeHtml(earnedHorseMeta.image)}" alt="${escapeHtml(earnedHorseMeta.name)}" />
               <div class="spelling-horse-card__copy">
                 <strong>${escapeHtml(`${earnedHorseMeta.name} · ${earnedHorseMeta.label}`)}</strong>
-                <span>${escapeHtml(getSpellingHorseRankLabel((spelling.paddockHorses || []).length))}</span>
+                <span>${escapeHtml(getSpellingHorseRankLabel(getSpellingVisibleHorseCount(spelling)))}</span>
               </div>
             </article>
           ` : ""}
@@ -13729,6 +13951,7 @@ function renderSpelling() {
             <button type="button" class="primary-button primary-button--dark" data-spelling-play-repeat="true">Hear the word</button>
             <button type="button" class="ghost-button ghost-button--light" data-spelling-play-repeat-sentence="true">Hear it in a sentence</button>
           </div>
+          ${buildSpellingAudioStatusMarkup("repeat-check", repeatWord)}
           <label class="spelling-input-label" for="spelling-repeat-input">Type your spelling</label>
           <input
             id="spelling-repeat-input"
@@ -13902,14 +14125,14 @@ function renderSpelling() {
     const input = host.querySelector("#spelling-repeat-input");
     spelling.repeatCheck.currentInput = input?.value || spelling.repeatCheck.currentInput;
     persistSubjects({ skipRemoteSync: true });
-    speakSpellingDiagnosticWord(getSpellingRepeatCurrentWord(getSubjectSpellingState(subject)));
+    speakSpellingRepeatWord(getSpellingRepeatCurrentWord(getSubjectSpellingState(subject)));
   });
 
   host.querySelector("[data-spelling-play-repeat-sentence]")?.addEventListener("click", () => {
     const input = host.querySelector("#spelling-repeat-input");
     spelling.repeatCheck.currentInput = input?.value || spelling.repeatCheck.currentInput;
     persistSubjects({ skipRemoteSync: true });
-    speakSpellingDiagnosticSentence(getSpellingRepeatCurrentWord(getSubjectSpellingState(subject)));
+    speakSpellingRepeatSentence(getSpellingRepeatCurrentWord(getSubjectSpellingState(subject)));
   });
 
   host.querySelector("#spelling-repeat-input")?.addEventListener("input", (event) => {
@@ -13923,7 +14146,7 @@ function renderSpelling() {
       submitSpellingRepeatWord(subject, event.currentTarget.value);
       render();
       if (!getSubjectSpellingState(subject).repeatCheck.completed) {
-        speakSpellingDiagnosticWord(getSpellingRepeatCurrentWord(getSubjectSpellingState(subject)));
+        speakSpellingRepeatWord(getSpellingRepeatCurrentWord(getSubjectSpellingState(subject)));
       }
     }
   });
@@ -13936,7 +14159,7 @@ function renderSpelling() {
     submitSpellingRepeatWord(subject, host.querySelector("#spelling-repeat-input")?.value || "");
     render();
     if (!getSubjectSpellingState(subject).repeatCheck.completed) {
-      speakSpellingDiagnosticWord(getSpellingRepeatCurrentWord(getSubjectSpellingState(subject)));
+      speakSpellingRepeatWord(getSpellingRepeatCurrentWord(getSubjectSpellingState(subject)));
     }
   });
 }

@@ -7989,6 +7989,11 @@ input[type="date"] {
   grid-template-columns: 1fr;
 }
 
+.ss-status-note--feedback.is-active {
+  background: rgba(237, 241, 249, 0.92);
+  border-color: rgba(104, 124, 173, 0.26);
+}
+
 .ss-status-note--feedback.is-correct {
   background: rgba(238, 244, 238, 0.92);
   border-color: rgba(94, 125, 99, 0.24);
