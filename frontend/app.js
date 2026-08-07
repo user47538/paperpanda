@@ -43,6 +43,7 @@ let currentAudioPlayback = null;
 let currentAudioObjectUrl = "";
 let currentAudioBufferSource = null;
 let aiSpeechPlaybackContext = null;
+let aiSpeechPlaybackPrimed = false;
 let previewDatabasePromise = null;
 let currentListenSessionId = 0;
 let currentAudioContext = "";
@@ -8621,12 +8622,14 @@ function getAiSpeechPlaybackContext() {
 async function ensureAiSpeechPlaybackReady() {
   const audioContext = getAiSpeechPlaybackContext();
   if (!audioContext) {
+    await primeAiSpeechPlaybackElement();
     return;
   }
 
   if (audioContext.state === "suspended") {
     await audioContext.resume();
   }
+  await primeAiSpeechPlaybackElement();
 }
 
 function ensureAiSpeechPlaybackElement() {
@@ -8647,6 +8650,27 @@ function ensureAiSpeechPlaybackElement() {
   document.body.appendChild(playbackElement);
   currentAudioPlayback = playbackElement;
   return playbackElement;
+}
+
+async function primeAiSpeechPlaybackElement() {
+  if (aiSpeechPlaybackPrimed) {
+    return;
+  }
+
+  const playbackElement = ensureAiSpeechPlaybackElement();
+  playbackElement.muted = true;
+  playbackElement.src = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
+  try {
+    await playbackElement.play();
+  } catch (error) {
+    console.warn("AI audio priming was blocked.", error);
+  }
+  playbackElement.pause();
+  playbackElement.currentTime = 0;
+  playbackElement.removeAttribute("src");
+  playbackElement.load();
+  playbackElement.muted = false;
+  aiSpeechPlaybackPrimed = true;
 }
 
 async function playSpeechBlobThroughAudioElement(speechBlob, { statusMessages = {} } = {}) {
@@ -8698,52 +8722,54 @@ async function playSpeechChunk(chunkText, { listenSessionId, statusMessages = {}
     return;
   }
 
-  const audioContext = getAiSpeechPlaybackContext();
-  if (audioContext) {
-    const speechData = await speechBlob.arrayBuffer();
-    if (currentListenSessionId !== listenSessionId) {
-      return;
-    }
-
-    if (audioContext.state === "suspended") {
-      await audioContext.resume();
-    }
-
-    const decodedBuffer = await audioContext.decodeAudioData(speechData.slice(0));
-    if (currentListenSessionId !== listenSessionId) {
-      return;
-    }
-
-    try {
-      await new Promise((resolve, reject) => {
-        const source = audioContext.createBufferSource();
-        currentAudioBufferSource = source;
-        source.buffer = decodedBuffer;
-        source.connect(audioContext.destination);
-        source.onended = () => {
-          if (currentAudioBufferSource === source) {
-            currentAudioBufferSource = null;
-          }
-          resolve();
-        };
-
-        try {
-          elements.askResponse.textContent = statusMessages.playing || "Reading...";
-          source.start(0);
-        } catch (error) {
-          if (currentAudioBufferSource === source) {
-            currentAudioBufferSource = null;
-          }
-          reject(error);
-        }
-      });
-      return;
-    } catch (error) {
-      console.warn("AudioContext playback failed, retrying with a DOM audio element.", error);
-    }
+  try {
+    await playSpeechBlobThroughAudioElement(speechBlob, { statusMessages });
+    return;
+  } catch (error) {
+    console.warn("DOM audio playback failed, retrying with AudioContext.", error);
   }
 
-  await playSpeechBlobThroughAudioElement(speechBlob, { statusMessages });
+  const audioContext = getAiSpeechPlaybackContext();
+  if (!audioContext) {
+    throw new Error(statusMessages.error || "AI voice playback failed.");
+  }
+
+  const speechData = await speechBlob.arrayBuffer();
+  if (currentListenSessionId !== listenSessionId) {
+    return;
+  }
+
+  if (audioContext.state === "suspended") {
+    await audioContext.resume();
+  }
+
+  const decodedBuffer = await audioContext.decodeAudioData(speechData.slice(0));
+  if (currentListenSessionId !== listenSessionId) {
+    return;
+  }
+
+  await new Promise((resolve, reject) => {
+    const source = audioContext.createBufferSource();
+    currentAudioBufferSource = source;
+    source.buffer = decodedBuffer;
+    source.connect(audioContext.destination);
+    source.onended = () => {
+      if (currentAudioBufferSource === source) {
+        currentAudioBufferSource = null;
+      }
+      resolve();
+    };
+
+    try {
+      elements.askResponse.textContent = statusMessages.playing || "Reading...";
+      source.start(0);
+    } catch (error) {
+      if (currentAudioBufferSource === source) {
+        currentAudioBufferSource = null;
+      }
+      reject(error);
+    }
+  });
 }
 
 function currentDateKey() {
