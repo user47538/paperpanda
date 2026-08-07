@@ -8629,6 +8629,68 @@ async function ensureAiSpeechPlaybackReady() {
   }
 }
 
+function ensureAiSpeechPlaybackElement() {
+  if (currentAudioPlayback && currentAudioPlayback instanceof HTMLAudioElement) {
+    return currentAudioPlayback;
+  }
+
+  const playbackElement = document.createElement("audio");
+  playbackElement.preload = "auto";
+  playbackElement.playsInline = true;
+  playbackElement.setAttribute("aria-hidden", "true");
+  playbackElement.style.position = "fixed";
+  playbackElement.style.width = "0";
+  playbackElement.style.height = "0";
+  playbackElement.style.opacity = "0";
+  playbackElement.style.pointerEvents = "none";
+  playbackElement.style.inset = "auto";
+  document.body.appendChild(playbackElement);
+  currentAudioPlayback = playbackElement;
+  return playbackElement;
+}
+
+async function playSpeechBlobThroughAudioElement(speechBlob, { statusMessages = {} } = {}) {
+  const playbackElement = ensureAiSpeechPlaybackElement();
+  if (currentAudioObjectUrl) {
+    URL.revokeObjectURL(currentAudioObjectUrl);
+  }
+  currentAudioObjectUrl = URL.createObjectURL(speechBlob);
+  playbackElement.pause();
+  playbackElement.onended = null;
+  playbackElement.onerror = null;
+  playbackElement.src = currentAudioObjectUrl;
+  playbackElement.load();
+
+  await new Promise((resolve, reject) => {
+    const handleReady = () => {
+      playbackElement.removeEventListener("canplay", handleReady);
+      playbackElement.removeEventListener("error", handleError);
+      resolve();
+    };
+    const handleError = () => {
+      playbackElement.removeEventListener("canplay", handleReady);
+      playbackElement.removeEventListener("error", handleError);
+      reject(new Error(statusMessages.error || "AI voice playback failed."));
+    };
+
+    if (playbackElement.readyState >= 2) {
+      resolve();
+      return;
+    }
+
+    playbackElement.addEventListener("canplay", handleReady, { once: true });
+    playbackElement.addEventListener("error", handleError, { once: true });
+  });
+
+  await playbackElement.play();
+  elements.askResponse.textContent = statusMessages.playing || "Reading...";
+
+  await new Promise((resolve, reject) => {
+    playbackElement.onended = () => resolve();
+    playbackElement.onerror = () => reject(new Error(statusMessages.error || "AI voice playback failed."));
+  });
+}
+
 async function playSpeechChunk(chunkText, { listenSessionId, statusMessages = {} } = {}) {
   const speechBlob = await requestApi("/api/speak", { text: chunkText }, true);
 
@@ -8652,51 +8714,36 @@ async function playSpeechChunk(chunkText, { listenSessionId, statusMessages = {}
       return;
     }
 
-    await new Promise((resolve, reject) => {
-      const source = audioContext.createBufferSource();
-      currentAudioBufferSource = source;
-      source.buffer = decodedBuffer;
-      source.connect(audioContext.destination);
-      source.onended = () => {
-        if (currentAudioBufferSource === source) {
-          currentAudioBufferSource = null;
+    try {
+      await new Promise((resolve, reject) => {
+        const source = audioContext.createBufferSource();
+        currentAudioBufferSource = source;
+        source.buffer = decodedBuffer;
+        source.connect(audioContext.destination);
+        source.onended = () => {
+          if (currentAudioBufferSource === source) {
+            currentAudioBufferSource = null;
+          }
+          resolve();
+        };
+
+        try {
+          elements.askResponse.textContent = statusMessages.playing || "Reading...";
+          source.start(0);
+        } catch (error) {
+          if (currentAudioBufferSource === source) {
+            currentAudioBufferSource = null;
+          }
+          reject(error);
         }
-        resolve();
-      };
-
-      try {
-        elements.askResponse.textContent = statusMessages.playing || "Reading...";
-        source.start(0);
-      } catch (error) {
-        if (currentAudioBufferSource === source) {
-          currentAudioBufferSource = null;
-        }
-        reject(error);
-      }
-    });
-    return;
-  }
-
-  if (currentAudioObjectUrl) {
-    URL.revokeObjectURL(currentAudioObjectUrl);
-  }
-  currentAudioObjectUrl = URL.createObjectURL(speechBlob);
-  currentAudioPlayback = new Audio(currentAudioObjectUrl);
-  currentAudioPlayback.onerror = () => {
-    stopListening();
-    elements.askResponse.textContent = statusMessages.error || "AI voice playback failed.";
-  };
-  await currentAudioPlayback.play();
-  elements.askResponse.textContent = statusMessages.playing || "Reading...";
-
-  await new Promise((resolve, reject) => {
-    if (!currentAudioPlayback) {
-      resolve();
+      });
       return;
+    } catch (error) {
+      console.warn("AudioContext playback failed, retrying with a DOM audio element.", error);
     }
-    currentAudioPlayback.onended = () => resolve();
-    currentAudioPlayback.onerror = () => reject(new Error(statusMessages.error || "AI voice playback failed."));
-  });
+  }
+
+  await playSpeechBlobThroughAudioElement(speechBlob, { statusMessages });
 }
 
 function currentDateKey() {
@@ -9969,6 +10016,9 @@ function stopListening() {
     currentAudioPlayback.onerror = null;
     currentAudioPlayback.pause();
     currentAudioPlayback.src = "";
+    if (currentAudioPlayback.parentNode) {
+      currentAudioPlayback.parentNode.removeChild(currentAudioPlayback);
+    }
     currentAudioPlayback = null;
   }
   if (currentAudioObjectUrl) {
