@@ -41,6 +41,8 @@ let pdfjsLibPromise = null;
 let jsZipPromise = null;
 let currentAudioPlayback = null;
 let currentAudioObjectUrl = "";
+let currentAudioBufferSource = null;
+let aiSpeechPlaybackContext = null;
 let previewDatabasePromise = null;
 let currentListenSessionId = 0;
 let currentAudioContext = "";
@@ -8574,6 +8576,7 @@ async function speakTextWithOpenAi(text, { context = "document", documentId = nu
   renderDocuments();
   renderAskVoiceControls();
   elements.askResponse.textContent = statusMessages.preparing || "Preparing audio...";
+  await ensureAiSpeechPlaybackReady();
 
   const chunks = Array.isArray(chunksOverride) && chunksOverride.length
     ? chunksOverride.map((chunk) => normaliseSpeechText(chunk)).filter(Boolean)
@@ -8591,7 +8594,7 @@ async function speakTextWithOpenAi(text, { context = "document", documentId = nu
       onChunkStart(chunks[chunkIndex], chunkIndex);
     }
 
-    await playSpeechChunkWithFallback(chunks[chunkIndex], {
+    await playSpeechChunk(chunks[chunkIndex], {
       listenSessionId,
       statusMessages
     });
@@ -8604,110 +8607,96 @@ async function speakTextWithOpenAi(text, { context = "document", documentId = nu
   renderDocuments();
 }
 
-function getPreferredSpeechSynthesisVoice() {
-  if (!("speechSynthesis" in window) || typeof window.speechSynthesis.getVoices !== "function") {
+function getAiSpeechPlaybackContext() {
+  const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
+  if (typeof AudioContextConstructor !== "function") {
     return null;
   }
-
-  const voices = window.speechSynthesis.getVoices();
-  if (!Array.isArray(voices) || !voices.length) {
-    return null;
+  if (!aiSpeechPlaybackContext) {
+    aiSpeechPlaybackContext = new AudioContextConstructor();
   }
-
-  const preferenceMatchers = [/en-au/i, /australia/i, /female/i, /en-gb/i, /en-us/i, /english/i];
-  for (const matcher of preferenceMatchers) {
-    const match = voices.find((voice) =>
-      matcher.test(String(voice.lang || "")) || matcher.test(String(voice.name || ""))
-    );
-    if (match) {
-      return match;
-    }
-  }
-
-  return voices[0] || null;
+  return aiSpeechPlaybackContext;
 }
 
-async function speakTextWithBrowserVoice(text, { listenSessionId, statusMessages = {} } = {}) {
-  if (!("speechSynthesis" in window) || typeof window.SpeechSynthesisUtterance !== "function") {
-    return false;
+async function ensureAiSpeechPlaybackReady() {
+  const audioContext = getAiSpeechPlaybackContext();
+  if (!audioContext) {
+    return;
   }
 
-  const utteranceText = normaliseSpeechText(text);
-  if (!utteranceText) {
-    return false;
+  if (audioContext.state === "suspended") {
+    await audioContext.resume();
+  }
+}
+
+async function playSpeechChunk(chunkText, { listenSessionId, statusMessages = {} } = {}) {
+  const speechBlob = await requestApi("/api/speak", { text: chunkText }, true);
+
+  if (currentListenSessionId !== listenSessionId) {
+    return;
   }
 
-  window.speechSynthesis.cancel();
+  const audioContext = getAiSpeechPlaybackContext();
+  if (audioContext) {
+    const speechData = await speechBlob.arrayBuffer();
+    if (currentListenSessionId !== listenSessionId) {
+      return;
+    }
+
+    if (audioContext.state === "suspended") {
+      await audioContext.resume();
+    }
+
+    const decodedBuffer = await audioContext.decodeAudioData(speechData.slice(0));
+    if (currentListenSessionId !== listenSessionId) {
+      return;
+    }
+
+    await new Promise((resolve, reject) => {
+      const source = audioContext.createBufferSource();
+      currentAudioBufferSource = source;
+      source.buffer = decodedBuffer;
+      source.connect(audioContext.destination);
+      source.onended = () => {
+        if (currentAudioBufferSource === source) {
+          currentAudioBufferSource = null;
+        }
+        resolve();
+      };
+
+      try {
+        elements.askResponse.textContent = statusMessages.playing || "Reading...";
+        source.start(0);
+      } catch (error) {
+        if (currentAudioBufferSource === source) {
+          currentAudioBufferSource = null;
+        }
+        reject(error);
+      }
+    });
+    return;
+  }
+
+  if (currentAudioObjectUrl) {
+    URL.revokeObjectURL(currentAudioObjectUrl);
+  }
+  currentAudioObjectUrl = URL.createObjectURL(speechBlob);
+  currentAudioPlayback = new Audio(currentAudioObjectUrl);
+  currentAudioPlayback.onerror = () => {
+    stopListening();
+    elements.askResponse.textContent = statusMessages.error || "AI voice playback failed.";
+  };
+  await currentAudioPlayback.play();
   elements.askResponse.textContent = statusMessages.playing || "Reading...";
 
   await new Promise((resolve, reject) => {
-    const utterance = new SpeechSynthesisUtterance(utteranceText);
-    const preferredVoice = getPreferredSpeechSynthesisVoice();
-    if (preferredVoice) {
-      utterance.voice = preferredVoice;
-      utterance.lang = preferredVoice.lang || "en-AU";
-    } else {
-      utterance.lang = "en-AU";
-    }
-    utterance.rate = utteranceText.length <= 32 ? 0.82 : 0.92;
-    utterance.pitch = 1;
-    utterance.volume = 1;
-    utterance.onend = () => resolve();
-    utterance.onerror = () => reject(new Error(statusMessages.error || "Browser voice playback failed."));
-
-    if (currentListenSessionId !== listenSessionId) {
+    if (!currentAudioPlayback) {
       resolve();
       return;
     }
-
-    window.speechSynthesis.speak(utterance);
+    currentAudioPlayback.onended = () => resolve();
+    currentAudioPlayback.onerror = () => reject(new Error(statusMessages.error || "AI voice playback failed."));
   });
-
-  return true;
-}
-
-async function playSpeechChunkWithFallback(chunkText, { listenSessionId, statusMessages = {} } = {}) {
-  try {
-    const speechBlob = await requestApi("/api/speak", { text: chunkText }, true);
-
-    if (currentListenSessionId !== listenSessionId) {
-      return;
-    }
-
-    if (currentAudioObjectUrl) {
-      URL.revokeObjectURL(currentAudioObjectUrl);
-    }
-    currentAudioObjectUrl = URL.createObjectURL(speechBlob);
-    currentAudioPlayback = new Audio(currentAudioObjectUrl);
-    currentAudioPlayback.onerror = () => {
-      stopListening();
-      elements.askResponse.textContent = statusMessages.error || "AI voice playback failed.";
-    };
-    await currentAudioPlayback.play();
-    elements.askResponse.textContent = statusMessages.playing || "Reading...";
-
-    await new Promise((resolve, reject) => {
-      if (!currentAudioPlayback) {
-        resolve();
-        return;
-      }
-      currentAudioPlayback.onended = () => resolve();
-      currentAudioPlayback.onerror = () => reject(new Error(statusMessages.error || "AI voice playback failed."));
-    });
-  } catch (error) {
-    console.warn("Falling back to browser speech synthesis.", error);
-    const usedBrowserVoice = await speakTextWithBrowserVoice(chunkText, {
-      listenSessionId,
-      statusMessages
-    }).catch((browserError) => {
-      console.error("Browser speech fallback failed.", browserError);
-      return false;
-    });
-
-    if (!usedBrowserVoice) {
-      throw error;
-    }
-  }
 }
 
 function currentDateKey() {
@@ -9964,6 +9953,16 @@ function stopListening() {
   currentListenSessionId += 1;
   if ("speechSynthesis" in window) {
     window.speechSynthesis.cancel();
+  }
+  if (currentAudioBufferSource) {
+    currentAudioBufferSource.onended = null;
+    currentAudioBufferSource.disconnect();
+    try {
+      currentAudioBufferSource.stop(0);
+    } catch (error) {
+      console.debug("Audio buffer source was already stopped.", error);
+    }
+    currentAudioBufferSource = null;
   }
   if (currentAudioPlayback) {
     currentAudioPlayback.onended = null;
