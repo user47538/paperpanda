@@ -1263,6 +1263,8 @@ const state = {
   focusMode: window.localStorage.getItem(FOCUS_MODE_STORAGE_KEY) === "on",
   focusArea: null,
   focusAskOpen: false,
+  subjectWorkspaceExpanded: false,
+  subjectWorkspaceExpandedSubjectId: "",
   selectedDocumentId: null,
   currentDocumentPageIndexes: {},
   activeReaderSegmentIndex: -1,
@@ -1387,6 +1389,9 @@ const elements = {
   openUpcomingFromHeroButton: document.getElementById("open-upcoming-from-hero-button"),
   settingsView: document.getElementById("settings-view"),
   subjectsView: document.getElementById("subjects-view"),
+  subjectLandingView: document.getElementById("subject-landing-view"),
+  subjectsWorkspaceMain: document.getElementById("subjects-workspace-main"),
+  subjectsWorkspaceDock: document.getElementById("subjects-workspace-dock"),
   subjectsHeroDate: document.getElementById("subjects-hero-date"),
   subjectsHeroTitle: document.getElementById("subjects-hero-title"),
   subjectsHeroSubtitle: document.getElementById("subjects-hero-subtitle"),
@@ -2170,6 +2175,7 @@ function openSubjectsWorkspace(tab = "reader") {
   const nextTab = availableTabs.includes(tab) ? tab : availableTabs[0] || "reader";
   state.currentView = "subjects";
   state.activeSubjectTab = nextTab;
+  resetSubjectWorkspaceView();
   state.focusAskOpen = false;
   state.focusArea = state.focusMode ? nextTab : null;
   render();
@@ -2812,6 +2818,182 @@ function renderSubjectHeader() {
     return;
   }
   elements.subjectHeader.innerHTML = "";
+}
+
+function getSubjectLandingPalette(subject) {
+  const palette = ["lilac", "peach", "yellow", "sky", "mint"];
+  const subjectIndex = Math.max(0, state.subjects.findIndex((item) => item.id === subject?.id));
+  return palette[subjectIndex % palette.length] || palette[0];
+}
+
+function getSubjectLandingItems(subject) {
+  const documentItems = getAllDocumentBundles(subject).map((bundle) => {
+    const primaryDocument = getBundlePrimaryDocument(bundle);
+    return {
+      id: `document:${bundle.id}`,
+      title: bundle.title,
+      meta: `${bundle.type || "Notes"} · ${bundle.added || "Recently added"}${getBundlePageCount(bundle) ? ` · ${getBundlePageCount(bundle)} pages` : ""}`,
+      tab: "reader",
+      targetDocumentId: primaryDocument?.id || "",
+      tone: "lilac",
+      previewImageUrl: primaryDocument?.previewImageUrl || ""
+    };
+  });
+
+  const homeworkItems = getSubjectHomeworkBundles(subject).map((bundle) => ({
+    id: `homework:${bundle.id}`,
+    title: bundle.title,
+    meta: `Homework · ${getBundlePrimaryDocument(bundle)?.added || "This week"}${getBundleWorkNotes(bundle) ? " · notes started" : ""}`,
+    tab: "homework",
+    tone: "peach",
+    previewImageUrl: getBundlePrimaryDocument(bundle)?.previewImageUrl || ""
+  }));
+
+  const watchItems = getSubjectWatchItems(subject).map((item) => ({
+    id: `watch:${item.id}`,
+    title: item.title,
+    meta: `Watch · ${item.sourceDocumentTitle ? `${item.sourceDocumentTitle} video` : "Saved link"}`,
+    tab: "watch",
+    tone: "mint",
+    previewImageUrl: ""
+  }));
+
+  const assessmentItems = getActiveSubjectAssessments(subject).map((assessment) => ({
+    id: `assessment:${assessment.id}`,
+    title: assessment.componentTask || assessment.title || "Assessment task",
+    meta: `Assessment · Due ${formatAssessmentDate(assessment.dueDate)}`,
+    tab: "assessments",
+    tone: "yellow",
+    previewImageUrl: ""
+  }));
+
+  return [...documentItems, ...homeworkItems, ...watchItems, ...assessmentItems].slice(0, 6);
+}
+
+function renderSubjectLanding() {
+  const host = elements.subjectLandingView;
+  const workspaceMain = elements.subjectsWorkspaceMain;
+  const workspaceDock = elements.subjectsWorkspaceDock;
+  const subject = getSelectedSubject();
+  const showLanding = shouldShowSubjectLanding(subject);
+
+  if (workspaceMain) {
+    workspaceMain.classList.toggle("hidden", showLanding);
+  }
+  if (workspaceDock) {
+    workspaceDock.classList.toggle("hidden", showLanding);
+  }
+  if (!host) {
+    return;
+  }
+
+  host.classList.toggle("hidden", !showLanding);
+  if (!showLanding || !subject) {
+    host.innerHTML = "";
+    return;
+  }
+
+  const counts = getSubjectTabCounts(subject);
+  const landingItems = getSubjectLandingItems(subject);
+  const nextAssessment = getNextSubjectAssessmentEntry(subject);
+  const palette = getSubjectLandingPalette(subject);
+  const statCards = [
+    { label: "Resources", value: counts.reader, tone: "lilac" },
+    { label: "Homework", value: counts.homework, tone: "peach" },
+    { label: "Watch", value: counts.watch, tone: "mint" },
+    { label: nextAssessment ? "Next due" : "Assessments", value: nextAssessment ? `${getDaysUntilDate(nextAssessment.dueDateObject)}d` : counts.assessments, tone: "yellow" }
+  ];
+
+  host.innerHTML = `
+    <section class="subject-landing subject-landing--${escapeHtml(palette)}">
+      <div class="subject-landing__shell">
+        <div class="subject-landing__top">
+          <div class="subject-landing__pill">
+            <span class="subject-landing__pill-icon">${getSubjectTileCodeMarkup(subject)}</span>
+            <span>${escapeHtml(subject.name)}</span>
+            <span class="subject-landing__pill-meta">${escapeHtml(`Year ${state.studentGrade}`)}</span>
+          </div>
+          <button type="button" class="primary-button primary-button--dark subject-landing__expand" data-subject-landing-expand="true">EXPAND</button>
+        </div>
+
+        <div class="subject-landing__hero">
+          <div>
+            <p class="eyebrow">${escapeHtml(`${subject.name} workspace`)}</p>
+            <h2>${escapeHtml(`Start with ${subject.name}`)}</h2>
+            <p>${escapeHtml(subject.summary || `Open your ${subject.name} work and expand into the full workspace when you're ready.`)}</p>
+          </div>
+          <div class="subject-landing__stats">
+            ${statCards.map((card) => `
+              <article class="subject-landing__stat subject-landing__stat--${escapeHtml(card.tone)}">
+                <strong>${escapeHtml(String(card.value))}</strong>
+                <span>${escapeHtml(card.label)}</span>
+              </article>
+            `).join("")}
+          </div>
+        </div>
+
+        <section class="subject-landing__library">
+          <div class="subject-landing__library-head">
+            <div>
+              <p class="eyebrow">Opening page</p>
+              <h3>Pick something to jump into</h3>
+            </div>
+            <span>${escapeHtml(landingItems.length ? `${landingItems.length} ready` : "Nothing uploaded yet")}</span>
+          </div>
+          <div class="subject-landing__list">
+            ${landingItems.length
+              ? landingItems.map((item) => `
+                <button
+                  type="button"
+                  class="subject-landing-row"
+                  data-subject-landing-tab="${escapeHtml(item.tab)}"
+                  ${item.targetDocumentId ? `data-subject-landing-document-id="${escapeHtml(item.targetDocumentId)}"` : ""}
+                >
+                  <span class="subject-landing-row__cover subject-landing-row__cover--${escapeHtml(item.tone)}">
+                    ${item.previewImageUrl
+                      ? `<img src="${escapeHtml(item.previewImageUrl)}" alt="${escapeHtml(item.title)}" />`
+                      : `
+                        <span class="subject-landing-row__sheet">
+                          <span class="subject-landing-row__sheet-bar"></span>
+                          <span class="subject-landing-row__sheet-line"></span>
+                          <span class="subject-landing-row__sheet-line subject-landing-row__sheet-line--short"></span>
+                          <span class="subject-landing-row__sheet-line"></span>
+                        </span>
+                      `}
+                  </span>
+                  <span class="subject-landing-row__copy">
+                    <strong>${escapeHtml(item.title)}</strong>
+                    <span>${escapeHtml(item.meta)}</span>
+                  </span>
+                  <span class="subject-landing-row__action">Open</span>
+                </button>
+              `).join("")
+              : `
+                <article class="subject-landing__empty">
+                  <strong>No subject resources yet</strong>
+                  <span>Use EXPAND to open the original workspace and upload notes, homework, watch links, or assessment files.</span>
+                </article>
+              `}
+          </div>
+        </section>
+      </div>
+    </section>
+  `;
+
+  host.querySelector("[data-subject-landing-expand]")?.addEventListener("click", () => {
+    expandSubjectWorkspace();
+  });
+  host.querySelectorAll("[data-subject-landing-tab]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const nextTab = String(button.dataset.subjectLandingTab || "reader");
+      const nextDocumentId = String(button.dataset.subjectLandingDocumentId || "");
+      if (nextDocumentId) {
+        state.selectedDocumentId = nextDocumentId;
+        state.askDocumentId = nextDocumentId;
+      }
+      expandSubjectWorkspace(nextTab);
+    });
+  });
 }
 
 function renderSubjectTabs() {
@@ -9111,6 +9293,33 @@ function getPreferredSubjectTab(subject) {
   return getAvailableSubjectTabs(subject)[0] || "reader";
 }
 
+function shouldShowSubjectLanding(subject = getSelectedSubject()) {
+  return Boolean(
+    subject &&
+    subject.id !== "spelling" &&
+    state.currentView === "subjects" &&
+    !state.focusMode &&
+    (!state.subjectWorkspaceExpanded || state.subjectWorkspaceExpandedSubjectId !== subject.id)
+  );
+}
+
+function resetSubjectWorkspaceView() {
+  state.subjectWorkspaceExpanded = false;
+  state.subjectWorkspaceExpandedSubjectId = "";
+}
+
+function expandSubjectWorkspace(tab = null) {
+  const subject = getSelectedSubject();
+  const availableTabs = getAvailableSubjectTabs(subject);
+  if (tab && availableTabs.includes(tab)) {
+    state.activeSubjectTab = tab;
+  }
+  state.subjectWorkspaceExpanded = true;
+  state.subjectWorkspaceExpandedSubjectId = subject?.id || "";
+  state.focusAskOpen = false;
+  render();
+}
+
 function getHomeFocusSubjectStatus(subject) {
   const unreadCount = getAllDocumentBundles(subject).filter((bundle) => !bundle.reviewed).length;
   const remainingHomeworkCount = getSubjectHomeworkBundles(subject).filter(
@@ -9344,6 +9553,7 @@ function renderSubjectList() {
 
       state.selectedSubjectId = subject.id;
       state.activeSubjectTab = getPreferredSubjectTab(subject);
+      resetSubjectWorkspaceView();
       state.focusArea = null;
       state.focusAskOpen = false;
       state.selectedDocumentIds = [];
@@ -15906,6 +16116,7 @@ function render() {
   renderSubjectsHero();
   renderSubjectHeader();
   renderSubjectTabs();
+  renderSubjectLanding();
   renderFocusMode();
   renderPendingUpload();
   renderDocuments();
@@ -16147,6 +16358,7 @@ elements.navHomeButton.addEventListener("click", () => {
 });
 elements.navSubjectsButton.addEventListener("click", () => {
   state.currentView = "subjects";
+  resetSubjectWorkspaceView();
   state.focusAskOpen = false;
   if (state.focusMode) {
     state.focusArea = null;
@@ -16164,6 +16376,7 @@ elements.changeBackgroundButton.addEventListener("click", () => {
 elements.backgroundUpload.addEventListener("change", handleBackgroundUpload);
 elements.enterSubjectsButton.addEventListener("click", () => {
   state.currentView = "subjects";
+  resetSubjectWorkspaceView();
   state.focusAskOpen = false;
   if (state.focusMode) {
     state.focusArea = null;
