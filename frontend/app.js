@@ -1268,6 +1268,10 @@ const state = {
   subjectLandingOpenDocumentId: "",
   subjectLandingView: "simple",
   subjectLandingPieceIndex: 0,
+  subjectLandingSubjectMenuOpen: false,
+  subjectLandingAskOpen: false,
+  subjectLandingAskDraft: "",
+  subjectLandingAskStatus: "",
   selectedDocumentId: null,
   currentDocumentPageIndexes: {},
   activeReaderSegmentIndex: -1,
@@ -1813,6 +1817,27 @@ function getSelectedSubject() {
   return state.subjects.find((subject) => subject.id === state.selectedSubjectId);
 }
 
+function selectSubjectForSubjectsView(subjectId, { returnToHome = false } = {}) {
+  const subject = state.subjects.find((item) => item.id === subjectId);
+  if (!subject) {
+    return;
+  }
+
+  state.selectedSubjectId = subject.id;
+  state.activeSubjectTab = getPreferredSubjectTab(subject);
+  resetSubjectWorkspaceView();
+  state.focusArea = null;
+  state.focusAskOpen = false;
+  state.selectedDocumentIds = [];
+  state.expandedDocumentGroups = {};
+  state.watchExpanded = false;
+  state.documentsExpanded = false;
+  state.taskAskResponse = "";
+  state.taskAskStatus = "";
+  state.currentView = returnToHome ? "home" : "subjects";
+  render();
+}
+
 function getSubjectHiddenWatchUrls(subject) {
   return new Set(
     Array.isArray(subject?.hiddenWatchUrls)
@@ -2157,8 +2182,50 @@ function scrollReaderIntoView() {
 }
 
 function focusAskComposer() {
-  elements.askInput.focus();
-  elements.askInput.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  const activeSurface = getActiveAskSurface();
+  activeSurface?.input?.focus();
+  activeSurface?.input?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function getDockAskSurface() {
+  return {
+    kind: "dock",
+    input: elements.askInput,
+    submitButton: elements.askButton,
+    micButton: elements.askMicButton,
+    listenButton: elements.askListenButton,
+    context: elements.askContext,
+    response: elements.askResponse
+  };
+}
+
+function getSubjectLandingAskSurface() {
+  if (!state.subjectLandingAskOpen || !elements.subjectLandingView || elements.subjectLandingView.classList.contains("hidden")) {
+    return null;
+  }
+
+  const popup = elements.subjectLandingView.querySelector("[data-subject-landing-ask-popup]");
+  if (!popup) {
+    return null;
+  }
+
+  return {
+    kind: "landing",
+    input: popup.querySelector("[data-subject-landing-ask-input]"),
+    submitButton: popup.querySelector("[data-subject-landing-ask-submit]"),
+    micButton: popup.querySelector("[data-subject-landing-ask-mic]"),
+    listenButton: popup.querySelector("[data-subject-landing-ask-listen]"),
+    context: popup.querySelector("[data-subject-landing-ask-context]"),
+    response: popup.querySelector("[data-subject-landing-ask-response]")
+  };
+}
+
+function getAskSurfaces() {
+  return [getDockAskSurface(), getSubjectLandingAskSurface()].filter(Boolean);
+}
+
+function getActiveAskSurface() {
+  return getSubjectLandingAskSurface() || getDockAskSurface();
 }
 
 function closeFocusAskPopup({ stopMic = false } = {}) {
@@ -2935,6 +3002,10 @@ function openSubjectLandingDocument(subject, documentId) {
   state.subjectLandingOpenDocumentId = documentRecord.id;
   state.subjectLandingView = "simple";
   state.subjectLandingPieceIndex = Math.max(0, getResumeDocumentSectionIndex(documentRecord));
+  state.subjectLandingSubjectMenuOpen = false;
+  state.subjectLandingAskOpen = false;
+  state.subjectLandingAskDraft = "";
+  state.subjectLandingAskStatus = "";
   state.selectedDocumentId = documentRecord.id;
   state.askDocumentId = documentRecord.id;
   render();
@@ -2973,11 +3044,28 @@ function renderSubjectLanding() {
     host.innerHTML = `
       <section class="subject-landing">
         <div class="subject-landing__bar">
-          <div class="subject-landing__bar-copy">
-            <button type="button" class="subject-landing__subject-pill">
+          <div class="subject-landing__bar-copy subject-landing__bar-copy--menu">
+            <button type="button" class="subject-landing__subject-pill" data-subject-landing-subject-toggle="true" aria-expanded="${state.subjectLandingSubjectMenuOpen ? "true" : "false"}">
               <span class="subject-landing__subject-icon">${getSubjectTileCodeMarkup(subject)}</span>
               <span>${escapeHtml(subject.name)}</span>
+              <span class="subject-landing__subject-caret" aria-hidden="true">▾</span>
             </button>
+            ${state.subjectLandingSubjectMenuOpen
+              ? `
+                <div class="subject-landing__subject-menu" data-subject-landing-subject-menu>
+                  ${state.subjects.map((item) => `
+                    <button
+                      type="button"
+                      class="subject-landing__subject-option${item.id === subject.id ? " is-active" : ""}"
+                      data-subject-landing-subject-id="${escapeHtml(item.id)}"
+                    >
+                      <span class="subject-landing__subject-option-icon">${getSubjectTileCodeMarkup(item)}</span>
+                      <span>${escapeHtml(item.name)}</span>
+                    </button>
+                  `).join("")}
+                </div>
+              `
+              : ""}
             <span class="subject-landing__year">${escapeHtml(`Year ${state.studentGrade}`)}</span>
           </div>
           <div class="subject-landing__bar-actions">
@@ -3050,15 +3138,37 @@ function renderSubjectLanding() {
     const totalPageCount = Array.isArray(openDocument.pages) && openDocument.pages.length
       ? openDocument.pages.length
       : Math.max(1, getBundlePageCount({ documents: [openDocument] }));
+    const landingAskDocument = getAskDocument() || openDocument;
+    const landingAskContext = landingAskDocument
+      ? `Asking about: ${landingAskDocument.title}`
+      : "No document selected for Ask yet.";
+    const landingAskResponse = state.subjectLandingAskStatus || getLatestAskAnswer() || "Ask Panda about the current document here.";
 
     host.innerHTML = `
-      <section class="subject-landing subject-landing--open">
+      <section class="subject-landing subject-landing--open${state.subjectLandingAskOpen ? " subject-landing--ask-open" : ""}">
         <div class="subject-landing__bar">
-          <div class="subject-landing__bar-copy">
-            <button type="button" class="subject-landing__subject-pill">
+          <div class="subject-landing__bar-copy subject-landing__bar-copy--menu">
+            <button type="button" class="subject-landing__subject-pill" data-subject-landing-subject-toggle="true" aria-expanded="${state.subjectLandingSubjectMenuOpen ? "true" : "false"}">
               <span class="subject-landing__subject-icon">${getSubjectTileCodeMarkup(subject)}</span>
               <span>${escapeHtml(subject.name)}</span>
+              <span class="subject-landing__subject-caret" aria-hidden="true">▾</span>
             </button>
+            ${state.subjectLandingSubjectMenuOpen
+              ? `
+                <div class="subject-landing__subject-menu" data-subject-landing-subject-menu>
+                  ${state.subjects.map((item) => `
+                    <button
+                      type="button"
+                      class="subject-landing__subject-option${item.id === subject.id ? " is-active" : ""}"
+                      data-subject-landing-subject-id="${escapeHtml(item.id)}"
+                    >
+                      <span class="subject-landing__subject-option-icon">${getSubjectTileCodeMarkup(item)}</span>
+                      <span>${escapeHtml(item.name)}</span>
+                    </button>
+                  `).join("")}
+                </div>
+              `
+              : ""}
             <span class="subject-landing__year">${escapeHtml(`Year ${state.studentGrade}`)}</span>
           </div>
           <div class="subject-landing__bar-actions">
@@ -3116,6 +3226,39 @@ function renderSubjectLanding() {
                 <button type="button" class="subject-landing__dock-ask" data-subject-landing-ask="true">Ask Panda</button>
               </div>
             </div>
+            ${state.subjectLandingAskOpen
+              ? `
+                <aside class="subject-landing-ask-popup" data-subject-landing-ask-popup>
+                  <button type="button" class="subject-landing-ask-popup__close" data-subject-landing-ask-close aria-label="Close Ask Panda">×</button>
+                  <p class="subject-landing-ask-popup__eyebrow">Support</p>
+                  <div class="subject-landing-ask-popup__header">
+                    <img src="/paperpanda-logo.svg" alt="PaperPanda" class="subject-landing-ask-popup__avatar" />
+                    <div class="subject-landing-ask-popup__copy">
+                      <h3>Ask Panda</h3>
+                      <p>Ask about the current subject or what you're reading.</p>
+                    </div>
+                  </div>
+                  <button type="button" class="subject-landing-ask-popup__mic" data-subject-landing-ask-mic>
+                    ${state.askMicActive ? "Stop microphone" : "Use microphone"}
+                  </button>
+                  <div class="subject-landing-ask-popup__wave" aria-hidden="true">
+                    <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+                  </div>
+                  <div class="subject-landing-ask-popup__context" data-subject-landing-ask-context>${escapeHtml(landingAskContext)}</div>
+                  <div class="subject-landing-ask-popup__response" data-subject-landing-ask-response>${escapeHtml(landingAskResponse)}</div>
+                  <textarea
+                    class="subject-landing-ask-popup__input"
+                    data-subject-landing-ask-input
+                    rows="5"
+                    placeholder="Ask Panda about this document here."
+                  >${escapeHtml(state.subjectLandingAskDraft)}</textarea>
+                  <div class="subject-landing-ask-popup__actions">
+                    <button type="button" class="subject-landing-ask-popup__submit" data-subject-landing-ask-submit>Get guidance</button>
+                    <button type="button" class="subject-landing-ask-popup__listen" data-subject-landing-ask-listen ${!state.askResponseSpeaking && !getLatestAskAnswer() ? "disabled" : ""}>${state.askResponseSpeaking ? "Stop" : "Listen"}</button>
+                  </div>
+                </aside>
+              `
+              : ""}
           `
           : `
             <div class="subject-landing__original-wrap">
@@ -3140,7 +3283,20 @@ function renderSubjectLanding() {
   }
 
   host.querySelector("[data-subject-landing-all-areas]")?.addEventListener("click", () => {
-    expandSubjectWorkspace(getPreferredSubjectTab(subject));
+    selectSubjectForSubjectsView(subject.id, { returnToHome: true });
+  });
+  host.querySelector("[data-subject-landing-subject-toggle]")?.addEventListener("click", () => {
+    state.subjectLandingSubjectMenuOpen = !state.subjectLandingSubjectMenuOpen;
+    render();
+  });
+  host.querySelectorAll("[data-subject-landing-subject-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const nextSubjectId = String(button.dataset.subjectLandingSubjectId || "");
+      if (!nextSubjectId) {
+        return;
+      }
+      selectSubjectForSubjectsView(nextSubjectId);
+    });
   });
   host.querySelector("[data-subject-landing-upload]")?.addEventListener("click", openUploadModal);
   host.querySelectorAll("[data-subject-landing-open-document]").forEach((button) => {
@@ -3155,6 +3311,10 @@ function renderSubjectLanding() {
     state.subjectLandingOpenDocumentId = "";
     state.subjectLandingView = "simple";
     state.subjectLandingPieceIndex = 0;
+    state.subjectLandingSubjectMenuOpen = false;
+    state.subjectLandingAskOpen = false;
+    state.subjectLandingAskDraft = "";
+    state.subjectLandingAskStatus = "";
     render();
   });
   host.querySelectorAll("[data-subject-landing-view]").forEach((button) => {
@@ -3215,14 +3375,32 @@ function renderSubjectLanding() {
     const pieces = getSubjectLandingSimplifiedPieces(documentRecord);
     const piece = pieces[Math.max(0, Math.min(state.subjectLandingPieceIndex, Math.max(0, pieces.length - 1)))] || null;
     state.askDocumentId = documentRecord.id;
-    elements.askInput.value = piece?.title
+    state.subjectLandingAskOpen = true;
+    state.subjectLandingAskDraft = state.subjectLandingAskDraft || (piece?.title
       ? `Can you explain "${piece.title}" in even simpler language?`
-      : "Can you explain this section in simpler language?";
-    expandSubjectWorkspace("reader");
-    renderAskContext();
-    elements.askResponse.textContent = "Ask Panda about the current document here.";
-    focusAskComposer();
+      : "Can you explain this section in simpler language?");
+    state.subjectLandingAskStatus = state.subjectLandingAskStatus || "Ask Panda about the current document here.";
+    render();
+    requestAnimationFrame(() => {
+      renderAskContext();
+      focusAskComposer();
+    });
   });
+  host.querySelector("[data-subject-landing-ask-close]")?.addEventListener("click", () => {
+    state.subjectLandingAskOpen = false;
+    if (state.askMicActive) {
+      stopAskMicrophone({ preserveStatus: true });
+    }
+    render();
+  });
+  host.querySelector("[data-subject-landing-ask-input]")?.addEventListener("input", (event) => {
+    state.subjectLandingAskDraft = event.target.value;
+  });
+  host.querySelector("[data-subject-landing-ask-submit]")?.addEventListener("click", () => {
+    void handleAsk();
+  });
+  host.querySelector("[data-subject-landing-ask-mic]")?.addEventListener("click", handleAskMicToggle);
+  host.querySelector("[data-subject-landing-ask-listen]")?.addEventListener("click", handleAskListen);
   host.querySelector("[data-subject-landing-open-reader]")?.addEventListener("click", () => {
     expandSubjectWorkspace("reader");
   });
@@ -3598,8 +3776,10 @@ function renderFocusAskFab() {
 }
 
 function renderFocusMode() {
+  const subject = getSelectedSubject();
   const askOpen = state.focusMode && state.currentView === "subjects" && state.focusAskOpen;
-  const showLaunchpad = state.focusMode && state.currentView === "subjects" && !state.focusArea && !askOpen;
+  const landingVisible = shouldShowSubjectLanding(subject);
+  const showLaunchpad = state.focusMode && state.currentView === "subjects" && !state.focusArea && !askOpen && !landingVisible;
   const drilledIn = state.focusMode && state.currentView === "subjects" && Boolean(state.focusArea) && !askOpen;
   const readerDrilled = drilledIn && state.focusArea === "reader";
 
@@ -8842,9 +9022,9 @@ function renderOverview() {
   }
 
   if (elements.homeAskPrompt) {
-    elements.homeAskPrompt.textContent = continueBundle
-      ? `Good morning. Want me to start with ${continueBundle.title} or your homework?`
-      : "Good morning. Upload some notes and I can help you read or simplify them.";
+    elements.homeAskPrompt.textContent = nextEntry
+      ? `Good morning. Want help choosing a subject or getting ready for ${nextEntry.assessment.componentTask || nextEntry.assessment.title}?`
+      : "Good morning. Want help choosing a subject or getting started with your notes?";
   }
 
   renderUpcomingModal();
@@ -9112,13 +9292,16 @@ function getLatestAskAnswer() {
 }
 
 function renderAskVoiceControls() {
-  if (elements.askMicButton) {
-    elements.askMicButton.textContent = state.askMicActive ? "Stop microphone" : "Use microphone";
-  }
-  if (elements.askListenButton) {
-    elements.askListenButton.textContent = state.askResponseSpeaking ? "Stop" : "Listen";
-    elements.askListenButton.disabled = !state.askResponseSpeaking && !getLatestAskAnswer();
-  }
+  const hasAnswer = Boolean(getLatestAskAnswer());
+  getAskSurfaces().forEach((surface) => {
+    if (surface.micButton) {
+      surface.micButton.textContent = state.askMicActive ? "Stop microphone" : "Use microphone";
+    }
+    if (surface.listenButton) {
+      surface.listenButton.textContent = state.askResponseSpeaking ? "Stop" : "Listen";
+      surface.listenButton.disabled = !state.askResponseSpeaking && !hasAnswer;
+    }
+  });
 }
 
 function getSpeechRecognitionConstructor() {
@@ -9126,6 +9309,7 @@ function getSpeechRecognitionConstructor() {
 }
 
 function stopAskMicrophone({ preserveStatus = false } = {}) {
+  const activeSurface = getActiveAskSurface();
   if (currentSpeechRecognition) {
     currentSpeechRecognition.onresult = null;
     currentSpeechRecognition.onerror = null;
@@ -9134,16 +9318,28 @@ function stopAskMicrophone({ preserveStatus = false } = {}) {
     currentSpeechRecognition = null;
   }
   state.askMicActive = false;
-  if (!preserveStatus && elements.askResponse.textContent === "Listening for your question...") {
-    elements.askResponse.textContent = getLatestAskAnswer() || "Ask a question about the selected subject or document.";
+  if (!preserveStatus && activeSurface?.response?.textContent === "Listening for your question...") {
+    const fallbackResponse = activeSurface.kind === "landing"
+      ? getLatestAskAnswer() || "Ask Panda about the current document here."
+      : getLatestAskAnswer() || "Ask a question about the selected subject or document.";
+    activeSurface.response.textContent = fallbackResponse;
+    if (activeSurface.kind === "landing") {
+      state.subjectLandingAskStatus = fallbackResponse;
+    }
   }
   renderAskVoiceControls();
 }
 
 function startAskMicrophone() {
+  const activeSurface = getActiveAskSurface();
   const SpeechRecognitionConstructor = getSpeechRecognitionConstructor();
   if (!SpeechRecognitionConstructor) {
-    elements.askResponse.textContent = "Microphone input is not available in this browser.";
+    if (activeSurface?.response) {
+      activeSurface.response.textContent = "Microphone input is not available in this browser.";
+    }
+    if (activeSurface?.kind === "landing") {
+      state.subjectLandingAskStatus = "Microphone input is not available in this browser.";
+    }
     renderAskVoiceControls();
     return;
   }
@@ -9155,7 +9351,12 @@ function startAskMicrophone() {
   recognition.interimResults = true;
   recognition.continuous = false;
   state.askMicActive = true;
-  elements.askResponse.textContent = "Listening for your question...";
+  if (activeSurface?.response) {
+    activeSurface.response.textContent = "Listening for your question...";
+  }
+  if (activeSurface?.kind === "landing") {
+    state.subjectLandingAskStatus = "Listening for your question...";
+  }
   renderAskVoiceControls();
 
   recognition.onresult = (event) => {
@@ -9163,9 +9364,19 @@ function startAskMicrophone() {
       .map((result) => result[0]?.transcript || "")
       .join(" ")
       .trim();
-    elements.askInput.value = transcript;
+    if (activeSurface?.input) {
+      activeSurface.input.value = transcript;
+    }
+    if (activeSurface?.kind === "landing") {
+      state.subjectLandingAskDraft = transcript;
+    }
     if (event.results?.[event.results.length - 1]?.isFinal && transcript) {
-      elements.askResponse.textContent = "Question captured. Asking Panda...";
+      if (activeSurface?.response) {
+        activeSurface.response.textContent = "Question captured. Asking Panda...";
+      }
+      if (activeSurface?.kind === "landing") {
+        state.subjectLandingAskStatus = "Question captured. Asking Panda...";
+      }
       stopAskMicrophone({ preserveStatus: true });
       void handleAsk();
     }
@@ -9174,10 +9385,15 @@ function startAskMicrophone() {
   recognition.onerror = (event) => {
     state.askMicActive = false;
     currentSpeechRecognition = null;
-    elements.askResponse.textContent =
-      event?.error === "not-allowed"
-        ? "Microphone permission was denied."
-        : "Voice input failed. Try again or type your question.";
+    const message = event?.error === "not-allowed"
+      ? "Microphone permission was denied."
+      : "Voice input failed. Try again or type your question.";
+    if (activeSurface?.response) {
+      activeSurface.response.textContent = message;
+    }
+    if (activeSurface?.kind === "landing") {
+      state.subjectLandingAskStatus = message;
+    }
     renderAskVoiceControls();
   };
 
@@ -9530,7 +9746,6 @@ function shouldShowSubjectLanding(subject = getSelectedSubject()) {
     subject &&
     subject.id !== "spelling" &&
     state.currentView === "subjects" &&
-    !state.focusMode &&
     (!state.subjectWorkspaceExpanded || state.subjectWorkspaceExpandedSubjectId !== subject.id)
   );
 }
@@ -9541,6 +9756,10 @@ function resetSubjectWorkspaceView() {
   state.subjectLandingOpenDocumentId = "";
   state.subjectLandingView = "simple";
   state.subjectLandingPieceIndex = 0;
+  state.subjectLandingSubjectMenuOpen = false;
+  state.subjectLandingAskOpen = false;
+  state.subjectLandingAskDraft = "";
+  state.subjectLandingAskStatus = "";
 }
 
 function expandSubjectWorkspace(tab = null) {
@@ -9552,6 +9771,7 @@ function expandSubjectWorkspace(tab = null) {
   state.subjectWorkspaceExpanded = true;
   state.subjectWorkspaceExpandedSubjectId = subject?.id || "";
   state.focusAskOpen = false;
+  state.focusArea = state.focusMode ? state.activeSubjectTab : null;
   render();
 }
 
@@ -9785,20 +10005,7 @@ function renderSubjectList() {
       if (!subject) {
         return;
       }
-
-      state.selectedSubjectId = subject.id;
-      state.activeSubjectTab = getPreferredSubjectTab(subject);
-      resetSubjectWorkspaceView();
-      state.focusArea = null;
-      state.focusAskOpen = false;
-      state.selectedDocumentIds = [];
-      state.expandedDocumentGroups = {};
-      state.watchExpanded = false;
-      state.documentsExpanded = false;
-      state.taskAskResponse = "";
-      state.taskAskStatus = "";
-      state.currentView = button.closest("#home-view") ? "subjects" : state.currentView;
-      render();
+      selectSubjectForSubjectsView(subject.id, { returnToHome: false });
     });
   });
 }
@@ -9824,11 +10031,24 @@ function renderAskContext() {
         )
         .join("\n\n")
     : "";
-  elements.askContext.textContent = askDocument
-    ? `Asking about: ${askDocument.title}`
-    : "No document selected for Ask yet.";
-  elements.askResponse.textContent =
-    historyMarkup || "Ask a question about the selected subject or document.";
+  if (elements.askContext) {
+    elements.askContext.textContent = askDocument
+      ? `Asking about: ${askDocument.title}`
+      : "No document selected for Ask yet.";
+  }
+  if (elements.askResponse) {
+    elements.askResponse.textContent = historyMarkup || "Ask a question about the selected subject or document.";
+  }
+  const landingSurface = getSubjectLandingAskSurface();
+  if (landingSurface?.context) {
+    landingSurface.context.textContent = askDocument
+      ? `Asking about: ${askDocument.title}`
+      : "No document selected for Ask yet.";
+  }
+  if (landingSurface?.response) {
+    const landingResponse = state.subjectLandingAskStatus || getLatestAskAnswer() || "Ask Panda about the current document here.";
+    landingSurface.response.textContent = landingResponse;
+  }
   renderAskVoiceControls();
 }
 
@@ -14787,26 +15007,46 @@ function renderPractice() {
 async function handleAsk() {
   const subject = getSelectedSubject();
   const document = getAskDocument() || getSelectedDocument();
+  const activeSurface = getActiveAskSurface();
   if (!subject) {
     return;
   }
 
-  const question = elements.askInput.value.trim();
+  const question = activeSurface?.input?.value.trim() || "";
   if (!question) {
-    elements.askResponse.textContent = "Write a question first so the AI can focus on what you need help with.";
+    if (activeSurface?.response) {
+      activeSurface.response.textContent = "Write a question first so the AI can focus on what you need help with.";
+    }
+    if (activeSurface?.kind === "landing") {
+      state.subjectLandingAskStatus = "Write a question first so the AI can focus on what you need help with.";
+    }
     return;
   }
 
-  elements.askButton.disabled = true;
-  elements.askResponse.textContent = "Thinking...";
+  if (activeSurface?.submitButton) {
+    activeSurface.submitButton.disabled = true;
+  }
+  if (activeSurface?.response) {
+    activeSurface.response.textContent = "Thinking...";
+  }
+  if (activeSurface?.kind === "landing") {
+    state.subjectLandingAskStatus = "Thinking...";
+  }
 
   let answer = "";
   try {
     answer = await requestAskAnswer(question, subject, document);
   } catch (error) {
-    elements.askResponse.textContent =
-      error instanceof Error ? `Ask AI failed: ${error.message}` : "Ask AI failed.";
-    elements.askButton.disabled = false;
+    const message = error instanceof Error ? `Ask AI failed: ${error.message}` : "Ask AI failed.";
+    if (activeSurface?.response) {
+      activeSurface.response.textContent = message;
+    }
+    if (activeSurface?.kind === "landing") {
+      state.subjectLandingAskStatus = message;
+    }
+    if (activeSurface?.submitButton) {
+      activeSurface.submitButton.disabled = false;
+    }
     return;
   }
 
@@ -14818,9 +15058,19 @@ async function handleAsk() {
     answer
   });
   persistSubjects();
-  elements.askResponse.textContent = answer;
-  elements.askInput.value = "";
-  elements.askButton.disabled = false;
+  if (activeSurface?.response) {
+    activeSurface.response.textContent = answer;
+  }
+  if (activeSurface?.input) {
+    activeSurface.input.value = "";
+  }
+  if (activeSurface?.submitButton) {
+    activeSurface.submitButton.disabled = false;
+  }
+  if (activeSurface?.kind === "landing") {
+    state.subjectLandingAskDraft = "";
+    state.subjectLandingAskStatus = answer;
+  }
   renderAskContext();
 }
 
@@ -14833,6 +15083,7 @@ function handleAskMicToggle() {
 }
 
 function handleAskListen() {
+  const activeSurface = getActiveAskSurface();
   if (state.askResponseSpeaking) {
     stopListening();
     return;
@@ -14840,7 +15091,12 @@ function handleAskListen() {
 
   const latestAnswer = getLatestAskAnswer();
   if (!latestAnswer) {
-    elements.askResponse.textContent = "Ask a question first so there is an AI response to play back.";
+    if (activeSurface?.response) {
+      activeSurface.response.textContent = "Ask a question first so there is an AI response to play back.";
+    }
+    if (activeSurface?.kind === "landing") {
+      state.subjectLandingAskStatus = "Ask a question first so there is an AI response to play back.";
+    }
     renderAskVoiceControls();
     return;
   }
@@ -14851,12 +15107,25 @@ function handleAskListen() {
       preparing: "Preparing Panda's answer...",
       playing: "Playing Panda's answer...",
       error: "AI voice playback failed for this answer."
+    },
+    onStatusChange: (_status, message) => {
+      if (activeSurface?.response) {
+        activeSurface.response.textContent = message;
+      }
+      if (activeSurface?.kind === "landing") {
+        state.subjectLandingAskStatus = message;
+      }
     }
   }).catch((error) => {
     console.error("OpenAI speech failed.", error);
     stopListening();
-    elements.askResponse.textContent =
-      error instanceof Error ? `Listen failed: ${error.message}` : "Listen failed.";
+    const message = error instanceof Error ? `Listen failed: ${error.message}` : "Listen failed.";
+    if (activeSurface?.response) {
+      activeSurface.response.textContent = message;
+    }
+    if (activeSurface?.kind === "landing") {
+      state.subjectLandingAskStatus = message;
+    }
   });
 }
 
@@ -16664,25 +16933,17 @@ elements.homeAskMicButton?.addEventListener("click", () => {
   startAskMicrophone();
 });
 elements.homeAskReadButton?.addEventListener("click", () => {
-  const subject = getSelectedSubject();
-  if (!subject) {
-    return;
+  state.currentView = "subjects";
+  resetSubjectWorkspaceView();
+  state.focusAskOpen = false;
+  if (state.focusMode) {
+    state.focusArea = null;
   }
-  const bundle = getHomeworkBundles(subject)[0];
-  if (!bundle) {
-    openSubjectsWorkspace("homework");
-    return;
-  }
-  const firstDocument = bundle.documents[0];
-  if (firstDocument) {
-    state.askDocumentId = firstDocument.id;
-    state.selectedDocumentId = firstDocument.id;
-  }
-  openSubjectsWorkspace("homework");
+  render();
 });
 elements.homeAskQuizButton?.addEventListener("click", () => {
-  openSubjectsWorkspace("homework");
-  elements.askInput.value = "Quiz me on the notes I read yesterday and focus on the most important ideas.";
+  openSubjectsWorkspace("reader");
+  elements.askInput.value = "Quiz me on the notes I read recently and focus on the most important ideas.";
   renderAskContext();
   void handleAsk();
 });
