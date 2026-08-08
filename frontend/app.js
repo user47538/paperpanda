@@ -1265,6 +1265,9 @@ const state = {
   focusAskOpen: false,
   subjectWorkspaceExpanded: false,
   subjectWorkspaceExpandedSubjectId: "",
+  subjectLandingOpenDocumentId: "",
+  subjectLandingView: "simple",
+  subjectLandingPieceIndex: 0,
   selectedDocumentId: null,
   currentDocumentPageIndexes: {},
   activeReaderSegmentIndex: -1,
@@ -2820,54 +2823,124 @@ function renderSubjectHeader() {
   elements.subjectHeader.innerHTML = "";
 }
 
-function getSubjectLandingPalette(subject) {
-  const palette = ["lilac", "peach", "yellow", "sky", "mint"];
-  const subjectIndex = Math.max(0, state.subjects.findIndex((item) => item.id === subject?.id));
-  return palette[subjectIndex % palette.length] || palette[0];
+function getSubjectLandingTone(type = "") {
+  const normalizedType = String(type || "").trim().toLowerCase();
+  if (normalizedType.includes("assessment")) {
+    return "peach";
+  }
+  if (normalizedType.includes("homework")) {
+    return "yellow";
+  }
+  if (normalizedType.includes("video")) {
+    return "mint";
+  }
+  return "lilac";
 }
 
-function getSubjectLandingItems(subject) {
-  const documentItems = getAllDocumentBundles(subject).map((bundle) => {
-    const primaryDocument = getBundlePrimaryDocument(bundle);
-    return {
-      id: `document:${bundle.id}`,
-      title: bundle.title,
-      meta: `${bundle.type || "Notes"} · ${bundle.added || "Recently added"}${getBundlePageCount(bundle) ? ` · ${getBundlePageCount(bundle)} pages` : ""}`,
-      tab: "reader",
-      targetDocumentId: primaryDocument?.id || "",
-      tone: "lilac",
-      previewImageUrl: primaryDocument?.previewImageUrl || ""
-    };
+function getSubjectLandingResourceBundles(subject) {
+  return getDocumentGroupsFromDocuments(Array.isArray(subject?.documents) ? subject.documents : []);
+}
+
+function getSubjectLandingOpenDocument(subject) {
+  if (!subject || !state.subjectLandingOpenDocumentId) {
+    return null;
+  }
+  return (Array.isArray(subject.documents) ? subject.documents : []).find((documentRecord) => {
+    const bundleId = documentRecord.uploadGroupId || documentRecord.id;
+    return documentRecord.id === state.subjectLandingOpenDocumentId || bundleId === state.subjectLandingOpenDocumentId;
+  }) || null;
+}
+
+function buildSubjectLandingSectionBullets(section) {
+  const summary = String(section?.summary || "").trim().toLowerCase();
+  const sourceText = String(section?.sectionText || "").trim();
+  const sentences = sourceText
+    .split(/[\n•]+/)
+    .flatMap((chunk) => String(chunk || "").split(/(?<=[.!?])\s+/))
+    .map((sentence) => String(sentence || "").replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .filter((sentence) => sentence.toLowerCase() !== summary);
+
+  const uniqueSentences = [];
+  sentences.forEach((sentence) => {
+    if (uniqueSentences.some((candidate) => candidate.toLowerCase() === sentence.toLowerCase())) {
+      return;
+    }
+    uniqueSentences.push(sentence.replace(/[.!?]+$/, ""));
   });
 
-  const homeworkItems = getSubjectHomeworkBundles(subject).map((bundle) => ({
-    id: `homework:${bundle.id}`,
-    title: bundle.title,
-    meta: `Homework · ${getBundlePrimaryDocument(bundle)?.added || "This week"}${getBundleWorkNotes(bundle) ? " · notes started" : ""}`,
-    tab: "homework",
-    tone: "peach",
-    previewImageUrl: getBundlePrimaryDocument(bundle)?.previewImageUrl || ""
-  }));
+  if (uniqueSentences.length) {
+    return uniqueSentences.slice(0, 3);
+  }
 
-  const watchItems = getSubjectWatchItems(subject).map((item) => ({
-    id: `watch:${item.id}`,
-    title: item.title,
-    meta: `Watch · ${item.sourceDocumentTitle ? `${item.sourceDocumentTitle} video` : "Saved link"}`,
-    tab: "watch",
-    tone: "mint",
-    previewImageUrl: ""
-  }));
+  if (section?.importantTerms?.length) {
+    return section.importantTerms.slice(0, 3).map((term) => `Focus on ${term}`);
+  }
 
-  const assessmentItems = getActiveSubjectAssessments(subject).map((assessment) => ({
-    id: `assessment:${assessment.id}`,
-    title: assessment.componentTask || assessment.title || "Assessment task",
-    meta: `Assessment · Due ${formatAssessmentDate(assessment.dueDate)}`,
-    tab: "assessments",
-    tone: "yellow",
-    previewImageUrl: ""
-  }));
+  return ["Read the main idea closely", "Pull out the strongest detail", "Keep the key terms in mind"];
+}
 
-  return [...documentItems, ...homeworkItems, ...watchItems, ...assessmentItems].slice(0, 6);
+function buildSubjectLandingBeats(section, bullets) {
+  const labels = (section?.importantTerms?.length ? section.importantTerms : bullets)
+    .slice(0, 3)
+    .map((item) => String(item || "").replace(/[.!?]+$/, "").trim())
+    .filter(Boolean);
+  const icons = ["📘", "✏️", "💬"];
+  return (labels.length ? labels : ["Read closely", "Keep the details", "Explain it simply"]).map((label, index) => ({
+    icon: icons[index % icons.length],
+    label
+  }));
+}
+
+function getSubjectLandingSimplifiedPieces(documentRecord) {
+  return getDocumentSections(documentRecord).map((section, index, sections) => {
+    const bullets = buildSubjectLandingSectionBullets(section);
+    const beats = buildSubjectLandingBeats(section, bullets);
+    const hasPageRange = section?.pageStart || section?.pageEnd;
+    const pageLabel = hasPageRange
+      ? section.pageStart === section.pageEnd
+        ? `Page ${section.pageStart}`
+        : `Pages ${section.pageStart}-${section.pageEnd}`
+      : `Piece ${index + 1}`;
+    return {
+      id: section.id || `piece-${index + 1}`,
+      title: section.title || `Section ${index + 1}`,
+      summary: String(section.summary || summariseSectionText(section.sectionText || "")).trim(),
+      bullets,
+      beats,
+      badge: `Piece ${index + 1} of ${sections.length} · ${pageLabel}`
+    };
+  });
+}
+
+function buildSubjectLandingPieceListenText(documentRecord, piece) {
+  return [
+    documentRecord?.title || "",
+    piece?.title || "",
+    piece?.summary || "",
+    ...(Array.isArray(piece?.bullets) ? piece.bullets : [])
+  ]
+    .filter(Boolean)
+    .join(". ");
+}
+
+function openSubjectLandingDocument(subject, documentId) {
+  const documentRecord = (Array.isArray(subject?.documents) ? subject.documents : []).find((candidate) => {
+    const bundleId = candidate.uploadGroupId || candidate.id;
+    return candidate.id === documentId || bundleId === documentId;
+  });
+  if (!documentRecord) {
+    return;
+  }
+  state.subjectLandingOpenDocumentId = documentRecord.id;
+  state.subjectLandingView = "simple";
+  state.subjectLandingPieceIndex = Math.max(0, getResumeDocumentSectionIndex(documentRecord));
+  state.selectedDocumentId = documentRecord.id;
+  state.askDocumentId = documentRecord.id;
+  render();
+  if (subject && isWholeStudyDocument(documentRecord)) {
+    void ensureDocumentStudyPlan(documentRecord, subject).then(() => render()).catch(() => render());
+  }
 }
 
 function renderSubjectLanding() {
@@ -2893,106 +2966,265 @@ function renderSubjectLanding() {
     return;
   }
 
-  const counts = getSubjectTabCounts(subject);
-  const landingItems = getSubjectLandingItems(subject);
-  const nextAssessment = getNextSubjectAssessmentEntry(subject);
-  const palette = getSubjectLandingPalette(subject);
-  const statCards = [
-    { label: "Resources", value: counts.reader, tone: "lilac" },
-    { label: "Homework", value: counts.homework, tone: "peach" },
-    { label: "Watch", value: counts.watch, tone: "mint" },
-    { label: nextAssessment ? "Next due" : "Assessments", value: nextAssessment ? `${getDaysUntilDate(nextAssessment.dueDateObject)}d` : counts.assessments, tone: "yellow" }
-  ];
+  const resourceBundles = getSubjectLandingResourceBundles(subject);
+  const openDocument = getSubjectLandingOpenDocument(subject);
 
-  host.innerHTML = `
-    <section class="subject-landing subject-landing--${escapeHtml(palette)}">
-      <div class="subject-landing__shell">
-        <div class="subject-landing__top">
-          <div class="subject-landing__pill">
-            <span class="subject-landing__pill-icon">${getSubjectTileCodeMarkup(subject)}</span>
-            <span>${escapeHtml(subject.name)}</span>
-            <span class="subject-landing__pill-meta">${escapeHtml(`Year ${state.studentGrade}`)}</span>
+  if (!openDocument) {
+    host.innerHTML = `
+      <section class="subject-landing">
+        <div class="subject-landing__bar">
+          <div class="subject-landing__bar-copy">
+            <button type="button" class="subject-landing__subject-pill">
+              <span class="subject-landing__subject-icon">${getSubjectTileCodeMarkup(subject)}</span>
+              <span>${escapeHtml(subject.name)}</span>
+            </button>
+            <span class="subject-landing__year">${escapeHtml(`Year ${state.studentGrade}`)}</span>
           </div>
-          <button type="button" class="primary-button primary-button--dark subject-landing__expand" data-subject-landing-expand="true">EXPAND</button>
-        </div>
-
-        <div class="subject-landing__hero">
-          <div>
-            <p class="eyebrow">${escapeHtml(`${subject.name} workspace`)}</p>
-            <h2>${escapeHtml(`Start with ${subject.name}`)}</h2>
-            <p>${escapeHtml(subject.summary || `Open your ${subject.name} work and expand into the full workspace when you're ready.`)}</p>
-          </div>
-          <div class="subject-landing__stats">
-            ${statCards.map((card) => `
-              <article class="subject-landing__stat subject-landing__stat--${escapeHtml(card.tone)}">
-                <strong>${escapeHtml(String(card.value))}</strong>
-                <span>${escapeHtml(card.label)}</span>
-              </article>
-            `).join("")}
+          <div class="subject-landing__bar-actions">
+            <button type="button" class="ghost-button subject-landing__nav-button" data-subject-landing-all-areas="true">← All areas</button>
+            <button type="button" class="primary-button primary-button--dark subject-landing__nav-button" data-subject-landing-upload="true">+ Upload</button>
           </div>
         </div>
-
-        <section class="subject-landing__library">
-          <div class="subject-landing__library-head">
-            <div>
-              <p class="eyebrow">Opening page</p>
-              <h3>Pick something to jump into</h3>
-            </div>
-            <span>${escapeHtml(landingItems.length ? `${landingItems.length} ready` : "Nothing uploaded yet")}</span>
+        <div class="subject-landing__content">
+          <div class="subject-landing__heading">
+            <p class="eyebrow">${escapeHtml(`${subject.name.toUpperCase()} · YEAR ${state.studentGrade}`)}</p>
+            <h2>Pick something to open</h2>
+            <p>Panda will break it into bite-size pieces for you.</p>
           </div>
           <div class="subject-landing__list">
-            ${landingItems.length
-              ? landingItems.map((item) => `
-                <button
-                  type="button"
-                  class="subject-landing-row"
-                  data-subject-landing-tab="${escapeHtml(item.tab)}"
-                  ${item.targetDocumentId ? `data-subject-landing-document-id="${escapeHtml(item.targetDocumentId)}"` : ""}
-                >
-                  <span class="subject-landing-row__cover subject-landing-row__cover--${escapeHtml(item.tone)}">
-                    ${item.previewImageUrl
-                      ? `<img src="${escapeHtml(item.previewImageUrl)}" alt="${escapeHtml(item.title)}" />`
-                      : `
-                        <span class="subject-landing-row__sheet">
-                          <span class="subject-landing-row__sheet-bar"></span>
-                          <span class="subject-landing-row__sheet-line"></span>
-                          <span class="subject-landing-row__sheet-line subject-landing-row__sheet-line--short"></span>
-                          <span class="subject-landing-row__sheet-line"></span>
-                        </span>
-                      `}
-                  </span>
-                  <span class="subject-landing-row__copy">
-                    <strong>${escapeHtml(item.title)}</strong>
-                    <span>${escapeHtml(item.meta)}</span>
-                  </span>
-                  <span class="subject-landing-row__action">Open</span>
-                </button>
-              `).join("")
+            ${resourceBundles.length
+              ? resourceBundles.map((bundle) => {
+                const primaryDocument = getBundlePrimaryDocument(bundle);
+                const tone = getSubjectLandingTone(bundle.type);
+                return `
+                  <button
+                    type="button"
+                    class="subject-landing-row"
+                    data-subject-landing-open-document="${escapeHtml(bundle.id || primaryDocument?.id || "")}"
+                  >
+                    <span class="subject-landing-row__cover subject-landing-row__cover--${escapeHtml(tone)}">
+                      ${primaryDocument?.previewImageUrl
+                        ? `<img src="${escapeHtml(primaryDocument.previewImageUrl)}" alt="${escapeHtml(bundle.title)}" />`
+                        : `
+                          <span class="subject-landing-row__sheet">
+                            <span class="subject-landing-row__sheet-bar"></span>
+                            <span class="subject-landing-row__sheet-line subject-landing-row__sheet-line--dark"></span>
+                            <span class="subject-landing-row__sheet-line"></span>
+                            <span class="subject-landing-row__sheet-line subject-landing-row__sheet-line--short"></span>
+                          </span>
+                        `}
+                    </span>
+                    <span class="subject-landing-row__copy">
+                      <strong>${escapeHtml(bundle.title)}</strong>
+                      <span>${escapeHtml(`${bundle.type || "Notes"} · ${bundle.added || "Recently added"}${getBundlePageCount(bundle) ? ` · ${getBundlePageCount(bundle)} pages` : ""}`)}</span>
+                    </span>
+                    <span class="subject-landing-row__action">Open →</span>
+                  </button>
+                `;
+              }).join("")
               : `
                 <article class="subject-landing__empty">
-                  <strong>No subject resources yet</strong>
-                  <span>Use EXPAND to open the original workspace and upload notes, homework, watch links, or assessment files.</span>
+                  <strong>No resources uploaded yet</strong>
+                  <span>Upload notes, homework, or assessment files to start the simplified summary view.</span>
                 </article>
               `}
           </div>
-        </section>
-      </div>
-    </section>
-  `;
+        </div>
+      </section>
+    `;
+  } else {
+    const simplifiedPieces = getSubjectLandingSimplifiedPieces(openDocument);
+    const pieceIndex = Math.max(0, Math.min(state.subjectLandingPieceIndex, Math.max(0, simplifiedPieces.length - 1)));
+    const currentPiece = simplifiedPieces[pieceIndex] || simplifiedPieces[0] || {
+      title: "Overview",
+      summary: "PaperPanda is preparing the document summary.",
+      bullets: [],
+      beats: [],
+      badge: "Piece 1 of 1"
+    };
+    const beatsDuration = `${Math.max(1, currentPiece.beats.length) * 1.8}s`;
+    const pageList = getDocumentPages(openDocument);
+    const currentPageIndex = getCurrentDocumentPageIndex(openDocument);
+    const currentPage = pageList[currentPageIndex] || null;
+    const currentPageText = currentPage ? getDocumentPageText(currentPage) : String(openDocument.content || "").trim();
+    const totalPageCount = Array.isArray(openDocument.pages) && openDocument.pages.length
+      ? openDocument.pages.length
+      : Math.max(1, getBundlePageCount({ documents: [openDocument] }));
 
-  host.querySelector("[data-subject-landing-expand]")?.addEventListener("click", () => {
-    expandSubjectWorkspace();
+    host.innerHTML = `
+      <section class="subject-landing subject-landing--open">
+        <div class="subject-landing__bar">
+          <div class="subject-landing__bar-copy">
+            <button type="button" class="subject-landing__subject-pill">
+              <span class="subject-landing__subject-icon">${getSubjectTileCodeMarkup(subject)}</span>
+              <span>${escapeHtml(subject.name)}</span>
+            </button>
+            <span class="subject-landing__year">${escapeHtml(`Year ${state.studentGrade}`)}</span>
+          </div>
+          <div class="subject-landing__bar-actions">
+            <button type="button" class="ghost-button subject-landing__nav-button" data-subject-landing-all-areas="true">← All areas</button>
+            <button type="button" class="primary-button primary-button--dark subject-landing__nav-button" data-subject-landing-upload="true">+ Upload</button>
+          </div>
+        </div>
+        <div class="subject-landing__document-head">
+          <div class="subject-landing__document-copy">
+            <button type="button" class="ghost-button subject-landing__resource-back" data-subject-landing-back="true">← Resources</button>
+            <div>
+              <h2>${escapeHtml(openDocument.title)}</h2>
+              <p>${escapeHtml(`${totalPageCount} pages · simplified into ${Math.max(1, simplifiedPieces.length)} bite-size pieces`)}</p>
+            </div>
+          </div>
+          <div class="subject-landing__switch" role="tablist" aria-label="Document view">
+            <button type="button" class="${state.subjectLandingView === "simple" ? "is-active" : ""}" data-subject-landing-view="simple">Simplified</button>
+            <button type="button" class="${state.subjectLandingView === "original" ? "is-active" : ""}" data-subject-landing-view="original">Original doc</button>
+          </div>
+        </div>
+        ${state.subjectLandingView === "simple"
+          ? `
+            <div class="subject-landing__progress-dots">
+              ${simplifiedPieces.map((_, index) => `<span class="subject-landing__progress-dot${index === pieceIndex ? " is-active" : index < pieceIndex ? " is-done" : ""}"></span>`).join("")}
+            </div>
+            <div class="subject-landing__summary-layout">
+              <button type="button" class="subject-landing__arrow" data-subject-landing-piece-move="-1" ${pieceIndex <= 0 ? "disabled" : ""}>←</button>
+              <article class="subject-landing__summary-card">
+                <span class="subject-landing__summary-pill">${escapeHtml(currentPiece.badge)}</span>
+                <h3>${escapeHtml(currentPiece.title)}</h3>
+                <p>${escapeHtml(currentPiece.summary)}</p>
+                <ul>
+                  ${currentPiece.bullets.map((bullet) => `<li>${escapeHtml(bullet)}</li>`).join("")}
+                </ul>
+                <section class="subject-landing__explainer" style="--subject-landing-duration:${escapeHtml(beatsDuration)};">
+                  <div class="subject-landing__explainer-track">
+                    <span class="subject-landing__explainer-fill"></span>
+                  </div>
+                  <div class="subject-landing__explainer-beats">
+                    ${currentPiece.beats.map((beat, index) => `
+                      <article class="subject-landing__explainer-beat" style="--subject-landing-delay:${escapeHtml(`${index * 1.8}s`)};">
+                        <span class="subject-landing__explainer-icon">${escapeHtml(beat.icon)}</span>
+                        <strong>${escapeHtml(beat.label)}</strong>
+                      </article>
+                    `).join("")}
+                  </div>
+                </section>
+              </article>
+              <button type="button" class="subject-landing__arrow" data-subject-landing-piece-move="1" ${pieceIndex >= simplifiedPieces.length - 1 ? "disabled" : ""}>→</button>
+            </div>
+            <div class="subject-landing__dock">
+              <div class="subject-landing__dock-inner">
+                <span class="subject-landing__dock-label">This piece</span>
+                <button type="button" class="subject-landing__dock-listen" data-subject-landing-listen-piece="true">▶ Listen</button>
+                <button type="button" class="subject-landing__dock-ask" data-subject-landing-ask="true">Ask Panda</button>
+              </div>
+            </div>
+          `
+          : `
+            <div class="subject-landing__original-wrap">
+              <button type="button" class="subject-landing__arrow" data-subject-landing-page-move="-1" ${currentPageIndex <= 0 ? "disabled" : ""}>←</button>
+              <article class="subject-landing__summary-card subject-landing__summary-card--original">
+                <span class="subject-landing__summary-pill">${escapeHtml(currentPage ? `Page ${currentPage.pageNumber || currentPageIndex + 1} of ${Math.max(1, pageList.length)}` : "Original document")}</span>
+                <h3>${escapeHtml(currentPage ? `Page ${currentPage.pageNumber || currentPageIndex + 1}` : "Original document")}</h3>
+                <p>${escapeHtml(currentPageText || "Open the full workspace to see the original pages and document tools.")}</p>
+              </article>
+              <button type="button" class="subject-landing__arrow" data-subject-landing-page-move="1" ${!pageList.length || currentPageIndex >= pageList.length - 1 ? "disabled" : ""}>→</button>
+            </div>
+            <div class="subject-landing__dock">
+              <div class="subject-landing__dock-inner">
+                <span class="subject-landing__dock-label">Full doc</span>
+                <button type="button" class="subject-landing__dock-listen" data-subject-landing-listen-full="true">▶ Listen</button>
+                <button type="button" class="subject-landing__dock-ask" data-subject-landing-open-reader="true">Open in reader</button>
+              </div>
+            </div>
+          `}
+      </section>
+    `;
+  }
+
+  host.querySelector("[data-subject-landing-all-areas]")?.addEventListener("click", () => {
+    expandSubjectWorkspace(getPreferredSubjectTab(subject));
   });
-  host.querySelectorAll("[data-subject-landing-tab]").forEach((button) => {
+  host.querySelector("[data-subject-landing-upload]")?.addEventListener("click", openUploadModal);
+  host.querySelectorAll("[data-subject-landing-open-document]").forEach((button) => {
     button.addEventListener("click", () => {
-      const nextTab = String(button.dataset.subjectLandingTab || "reader");
-      const nextDocumentId = String(button.dataset.subjectLandingDocumentId || "");
-      if (nextDocumentId) {
-        state.selectedDocumentId = nextDocumentId;
-        state.askDocumentId = nextDocumentId;
+      const documentId = String(button.dataset.subjectLandingOpenDocument || "");
+      if (documentId) {
+        openSubjectLandingDocument(subject, documentId);
       }
-      expandSubjectWorkspace(nextTab);
     });
+  });
+  host.querySelector("[data-subject-landing-back]")?.addEventListener("click", () => {
+    state.subjectLandingOpenDocumentId = "";
+    state.subjectLandingView = "simple";
+    state.subjectLandingPieceIndex = 0;
+    render();
+  });
+  host.querySelectorAll("[data-subject-landing-view]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.subjectLandingView = String(button.dataset.subjectLandingView || "simple");
+      render();
+    });
+  });
+  host.querySelectorAll("[data-subject-landing-piece-move]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.subjectLandingPieceIndex += Number(button.dataset.subjectLandingPieceMove || 0) || 0;
+      render();
+    });
+  });
+  host.querySelectorAll("[data-subject-landing-page-move]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const documentRecord = getSubjectLandingOpenDocument(subject);
+      if (!documentRecord) {
+        return;
+      }
+      setCurrentDocumentPageIndex(documentRecord, getCurrentDocumentPageIndex(documentRecord) + (Number(button.dataset.subjectLandingPageMove || 0) || 0));
+      render();
+    });
+  });
+  host.querySelector("[data-subject-landing-listen-piece]")?.addEventListener("click", () => {
+    const documentRecord = getSubjectLandingOpenDocument(subject);
+    if (!documentRecord) {
+      return;
+    }
+    const pieces = getSubjectLandingSimplifiedPieces(documentRecord);
+    const piece = pieces[Math.max(0, Math.min(state.subjectLandingPieceIndex, Math.max(0, pieces.length - 1)))] || null;
+    if (!piece) {
+      return;
+    }
+    void speakTextWithOpenAi(buildSubjectLandingPieceListenText(documentRecord, piece), {
+      context: `subject-landing:piece:${documentRecord.id}:${piece.id}`,
+      statusMessages: {
+        preparing: "Preparing summary audio...",
+        playing: "Reading this piece...",
+        error: "Summary audio failed."
+      }
+    }).catch((error) => {
+      console.error("Subject landing piece audio failed.", error);
+    });
+  });
+  host.querySelector("[data-subject-landing-listen-full]")?.addEventListener("click", () => {
+    const documentRecord = getSubjectLandingOpenDocument(subject);
+    if (!documentRecord) {
+      return;
+    }
+    speakDocument(documentRecord);
+  });
+  host.querySelector("[data-subject-landing-ask]")?.addEventListener("click", () => {
+    const documentRecord = getSubjectLandingOpenDocument(subject);
+    if (!documentRecord) {
+      return;
+    }
+    const pieces = getSubjectLandingSimplifiedPieces(documentRecord);
+    const piece = pieces[Math.max(0, Math.min(state.subjectLandingPieceIndex, Math.max(0, pieces.length - 1)))] || null;
+    state.askDocumentId = documentRecord.id;
+    elements.askInput.value = piece?.title
+      ? `Can you explain "${piece.title}" in even simpler language?`
+      : "Can you explain this section in simpler language?";
+    expandSubjectWorkspace("reader");
+    renderAskContext();
+    elements.askResponse.textContent = "Ask Panda about the current document here.";
+    focusAskComposer();
+  });
+  host.querySelector("[data-subject-landing-open-reader]")?.addEventListener("click", () => {
+    expandSubjectWorkspace("reader");
   });
 }
 
@@ -9306,6 +9538,9 @@ function shouldShowSubjectLanding(subject = getSelectedSubject()) {
 function resetSubjectWorkspaceView() {
   state.subjectWorkspaceExpanded = false;
   state.subjectWorkspaceExpandedSubjectId = "";
+  state.subjectLandingOpenDocumentId = "";
+  state.subjectLandingView = "simple";
+  state.subjectLandingPieceIndex = 0;
 }
 
 function expandSubjectWorkspace(tab = null) {
