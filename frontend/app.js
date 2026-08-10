@@ -8,7 +8,6 @@ const currentUiVersion = "2026-07-30-writing-launchpad-and-stage5-fix";
 const previewDatabaseName = "paperpanda-assets";
 const previewStoreName = "document-previews";
 const settingsAssetStoreName = "settings-assets";
-const FOCUS_MODE_STORAGE_KEY = "paperpanda.focusMode";
 const GOOGLE_DOCS_SCOPE = "https://www.googleapis.com/auth/documents";
 const GOOGLE_IDENTITY_SCRIPT_ID = "google-identity-client";
 const GOOGLE_IDENTITY_SCRIPT_URL = "https://accounts.google.com/gsi/client";
@@ -1260,7 +1259,6 @@ const state = {
   authViewOpen: true,
   selectedSubjectId: subjectSeed[0].id,
   activeSubjectTab: "reader",
-  focusMode: window.localStorage.getItem(FOCUS_MODE_STORAGE_KEY) === "on",
   focusArea: null,
   focusAskOpen: false,
   subjectWorkspaceExpanded: false,
@@ -1366,7 +1364,6 @@ const elements = {
   navHomeButton: document.getElementById("nav-home-button"),
   navSubjectsButton: document.getElementById("nav-subjects-button"),
   navSettingsButton: document.getElementById("nav-settings-button"),
-  focusModeToggle: document.getElementById("focus-mode-toggle"),
   homeView: document.getElementById("home-view"),
   focusHomeNextCard: document.getElementById("focus-home-next-card"),
   focusHomeSubjectHeading: document.getElementById("focus-home-subject-heading"),
@@ -2247,7 +2244,7 @@ function openSubjectsWorkspace(tab = "reader") {
   state.activeSubjectTab = nextTab;
   resetSubjectWorkspaceView();
   state.focusAskOpen = false;
-  state.focusArea = state.focusMode ? nextTab : null;
+  state.focusArea = null;
   render();
 }
 
@@ -3700,13 +3697,26 @@ function renderSubjectFocusLaunchpad() {
   });
 }
 
+function shouldUseHomeFocusUi() {
+  return state.currentView === "home";
+}
+
+function shouldUseSpellingFocusUi(subject = getSelectedSubject()) {
+  return Boolean(
+    subject &&
+    state.currentView === "subjects" &&
+    subject.id === "spelling" &&
+    state.activeSubjectTab === "spelling"
+  );
+}
+
 function renderFocusHomeCard() {
   const host = elements.focusHomeNextCard;
   if (!host) {
     return;
   }
 
-  const show = state.focusMode && state.currentView === "home";
+  const show = shouldUseHomeFocusUi();
   host.classList.toggle("hidden", !show);
   elements.focusHomeSubjectHeading?.classList.toggle("hidden", !show);
   if (!show) {
@@ -3768,35 +3778,28 @@ function renderFocusHomeCard() {
 }
 
 function renderFocusAskFab() {
-  const shouldShow = state.focusMode && (state.currentView === "home" || state.currentView === "subjects") && !state.focusAskOpen;
+  const shouldShow = !state.focusAskOpen && (shouldUseHomeFocusUi() || shouldUseSpellingFocusUi());
   elements.focusAskFab?.classList.toggle("hidden", !shouldShow);
   if (elements.focusAskLabel) {
-    elements.focusAskLabel.textContent = state.currentView === "subjects" ? "Hold to talk" : "Ask Panda";
+    elements.focusAskLabel.textContent = shouldUseSpellingFocusUi() ? "Hold to talk" : "Ask Panda";
   }
 }
 
 function renderFocusMode() {
   const subject = getSelectedSubject();
-  const askOpen = state.focusMode && state.currentView === "subjects" && state.focusAskOpen;
-  const landingVisible = shouldShowSubjectLanding(subject);
-  const showLaunchpad = state.focusMode && state.currentView === "subjects" && !state.focusArea && !askOpen && !landingVisible;
-  const drilledIn = state.focusMode && state.currentView === "subjects" && Boolean(state.focusArea) && !askOpen;
-  const readerDrilled = drilledIn && state.focusArea === "reader";
+  const spellingFocus = shouldUseSpellingFocusUi(subject);
+  const askOpen = spellingFocus && state.focusAskOpen;
+  const drilledIn = spellingFocus && !askOpen;
 
-  elements.subjectsView?.classList.toggle("focus-launchpad-open", showLaunchpad);
+  elements.subjectsView?.classList.toggle("focus-launchpad-open", false);
   elements.subjectsView?.classList.toggle("focus-drilled", drilledIn);
-  elements.subjectsView?.classList.toggle("focus-reader-drilled", readerDrilled);
+  elements.subjectsView?.classList.toggle("focus-reader-drilled", false);
   elements.subjectsView?.classList.toggle("focus-ask-open", askOpen);
-  elements.subjectFocusLaunchpad?.classList.toggle("hidden", !showLaunchpad);
-  elements.focusBackButton?.classList.toggle("hidden", !drilledIn);
+  elements.subjectFocusLaunchpad?.classList.add("hidden");
+  elements.focusBackButton?.classList.add("hidden");
 
   renderFocusHomeCard();
   renderFocusAskFab();
-
-  if (showLaunchpad) {
-    renderSubjectFocusLaunchpad();
-    return;
-  }
 
   if (elements.subjectFocusLaunchpad) {
     elements.subjectFocusLaunchpad.innerHTML = "";
@@ -8587,14 +8590,6 @@ function renderAiConnectionState() {
   }
 }
 
-function setFocusMode(on) {
-  state.focusMode = Boolean(on);
-  state.focusArea = null;
-  state.focusAskOpen = false;
-  window.localStorage.setItem(FOCUS_MODE_STORAGE_KEY, state.focusMode ? "on" : "off");
-  render();
-}
-
 function openDashboard(nextView = "home") {
   setAuthPending(false);
   state.authViewOpen = false;
@@ -8818,7 +8813,7 @@ function openAssessmentTaskFromEntry(entry) {
   }
   state.selectedSubjectId = entry.subject.id;
   state.activeSubjectTab = "assessments";
-  state.focusArea = state.focusMode ? "assessments" : null;
+  state.focusArea = null;
   openTaskView({ kind: "assessment", id: entry.assessment.id });
 }
 
@@ -8828,7 +8823,7 @@ function openHomeworkTaskForSubject(subject, bundle) {
   }
   state.selectedSubjectId = subject.id;
   state.activeSubjectTab = "homework";
-  state.focusArea = state.focusMode ? "homework" : null;
+  state.focusArea = null;
   openTaskView({ kind: "homework", id: bundle.id });
 }
 
@@ -8860,16 +8855,30 @@ function speakAssessmentEntry(entry, { context = null } = {}) {
 }
 
 function handleFocusAskLaunch() {
-  if (state.currentView === "subjects" && state.focusMode && state.focusAskOpen) {
+  const subject = getSelectedSubject();
+  const spellingFocus = shouldUseSpellingFocusUi(subject);
+
+  if (spellingFocus && state.focusAskOpen) {
     closeFocusAskPopup({ stopMic: true });
     return;
   }
 
-  if (state.currentView !== "subjects" || state.focusMode) {
+  if (spellingFocus) {
+    state.focusAskOpen = true;
+    render();
+    requestAnimationFrame(() => {
+      focusAskComposer();
+      startAskMicrophone();
+    });
+    return;
+  }
+
+  if (state.currentView !== "subjects") {
     state.currentView = "subjects";
     state.activeSubjectTab = state.activeSubjectTab || "reader";
+    resetSubjectWorkspaceView();
+    state.focusAskOpen = false;
     state.focusArea = null;
-    state.focusAskOpen = true;
     render();
     requestAnimationFrame(() => {
       focusAskComposer();
@@ -9041,7 +9050,6 @@ function renderCurrentView() {
     "hidden",
     state.authViewOpen || state.currentView === "task" || state.currentView === "revision"
   );
-  elements.appShell.classList.toggle("focus-mode", state.focusMode);
   elements.homeView.classList.toggle("hidden", state.currentView !== "home");
   elements.settingsView.classList.toggle("hidden", state.currentView !== "settings");
   elements.subjectsView.classList.toggle("hidden", state.currentView !== "subjects");
@@ -9050,10 +9058,6 @@ function renderCurrentView() {
   elements.navHomeButton.classList.toggle("is-active", state.currentView === "home");
   elements.navSubjectsButton.classList.toggle("is-active", state.currentView === "subjects");
   elements.navSettingsButton.classList.toggle("is-active", state.currentView === "settings");
-  if (elements.focusModeToggle) {
-    elements.focusModeToggle.classList.toggle("is-on", state.focusMode);
-    elements.focusModeToggle.setAttribute("aria-pressed", String(state.focusMode));
-  }
 }
 
 function clipText(value, maxLength = 9000) {
@@ -9771,7 +9775,7 @@ function expandSubjectWorkspace(tab = null) {
   state.subjectWorkspaceExpanded = true;
   state.subjectWorkspaceExpandedSubjectId = subject?.id || "";
   state.focusAskOpen = false;
-  state.focusArea = state.focusMode ? state.activeSubjectTab : null;
+  state.focusArea = null;
   render();
 }
 
@@ -9896,7 +9900,7 @@ function renderHomeHero() {
   const daysUntil = nextEntry?.dueDateObject ? getDaysUntilDate(nextEntry.dueDateObject) : 0;
 
   elements.homeHeroDate.textContent = formatHeroDate();
-  if (state.focusMode && state.currentView === "home") {
+  if (shouldUseHomeFocusUi()) {
     elements.homeHeroTitle.innerHTML = `Hey ${escapeHtml(state.studentName || "there")}. <span>👋</span>`;
     elements.homeHeroSubtitle.textContent = "Here's what's due next. Then pick a subject to jump in.";
     return;
@@ -9911,13 +9915,6 @@ function renderHomeHero() {
 function renderSubjectsHero() {
   const subject = getSelectedSubject();
   if (!subject) {
-    return;
-  }
-
-  if (state.focusMode && state.currentView === "subjects" && !state.focusArea) {
-    elements.subjectsHeroDate.textContent = formatHeroDate();
-    elements.subjectsHeroTitle.innerHTML = `Hey ${escapeHtml(state.studentName || "there")}. <span>👋</span>`;
-    elements.subjectsHeroSubtitle.textContent = "Pick one card to start. Everything else can wait.";
     return;
   }
 
@@ -9938,40 +9935,21 @@ function renderSubjectList() {
   const homeSubjectTileMarkup = state.subjects
     .map((subject, index) => {
       const focusStatus = getHomeFocusSubjectStatus(subject);
-      const counts = getSubjectTabCounts(subject);
-      if (state.focusMode) {
-        return `
-          <button
-            type="button"
-            class="focus-home-subject-card${subject.id === state.selectedSubjectId ? " focus-home-subject-card--active" : ""}"
-            data-subject-id="${subject.id}"
-            style="--focus-subject-code-bg:${escapeHtml(getSubjectTileCodeBackground(subject, index))}; --focus-subject-dot:${escapeHtml(getSubjectTileOutlineColor(subject, index))}"
-          >
-            <span class="focus-home-subject-card__code">${escapeHtml(getSubjectShortCode(subject.name))}</span>
-            <span class="focus-home-subject-card__copy">
-              <strong>${escapeHtml(subject.name)}</strong>
-              <span class="focus-home-subject-card__pill${focusStatus.hasWaiting ? " focus-home-subject-card__pill--active" : ""}">
-                ${escapeHtml(focusStatus.summary)}
-              </span>
-            </span>
-            ${focusStatus.hasWaiting ? '<span class="focus-home-subject-card__dot" aria-hidden="true"></span>' : ""}
-          </button>
-        `;
-      }
       return `
         <button
           type="button"
-          class="subject-tile subject-tile--home${subject.id === state.selectedSubjectId ? " subject-tile--home-active" : ""}"
+          class="focus-home-subject-card${subject.id === state.selectedSubjectId ? " focus-home-subject-card--active" : ""}"
           data-subject-id="${subject.id}"
-          style="--subject-outline:${escapeHtml(getSubjectTileOutlineColor(subject, index))}; --subject-code-bg:${escapeHtml(getSubjectTileCodeBackground(subject, index))}"
+          style="--focus-subject-code-bg:${escapeHtml(getSubjectTileCodeBackground(subject, index))}; --focus-subject-dot:${escapeHtml(getSubjectTileOutlineColor(subject, index))}"
         >
-          <span class="subject-tile__code">${getSubjectTileCodeMarkup(subject)}</span>
-          <span class="subject-tile__title">${escapeHtml(subject.name)}</span>
-          <span class="subject-tile__meta">
-            ${counts.spelling ? `<span class="subject-tile__feature-chip">Aa ${escapeHtml(`${counts.spelling} stages`)}</span>` : ""}
-            <span>${escapeHtml(`${counts.reader} notes`)}</span>
-            <span>${escapeHtml(`${counts.homework} HW`)}</span>
+          <span class="focus-home-subject-card__code">${escapeHtml(getSubjectShortCode(subject.name))}</span>
+          <span class="focus-home-subject-card__copy">
+            <strong>${escapeHtml(subject.name)}</strong>
+            <span class="focus-home-subject-card__pill${focusStatus.hasWaiting ? " focus-home-subject-card__pill--active" : ""}">
+              ${escapeHtml(focusStatus.summary)}
+            </span>
           </span>
+          ${focusStatus.hasWaiting ? '<span class="focus-home-subject-card__dot" aria-hidden="true"></span>' : ""}
         </button>
       `;
     })
@@ -16116,7 +16094,7 @@ async function processFiles(fileList) {
       state.selectedSubjectId = subject.id;
       state.currentView = "subjects";
       state.activeSubjectTab = "watch";
-      state.focusArea = state.focusMode ? "watch" : null;
+      state.focusArea = null;
       persistSubjects();
       render();
       elements.uploadStatus.textContent = "That WATCH link is already in this subject.";
@@ -16141,7 +16119,7 @@ async function processFiles(fileList) {
     state.selectedSubjectId = subject.id;
     state.currentView = "subjects";
     state.activeSubjectTab = "watch";
-    state.focusArea = state.focusMode ? "watch" : null;
+    state.focusArea = null;
     persistSubjects();
     render();
     elements.uploadStatus.textContent = "WATCH item added.";
@@ -16204,17 +16182,17 @@ async function processFiles(fileList) {
       state.selectedSubjectId = subject.id;
       state.currentView = "subjects";
       state.activeSubjectTab = "homework";
-      state.focusArea = state.focusMode ? "homework" : null;
+      state.focusArea = null;
     } else if (flags.assessment) {
       state.selectedSubjectId = subject.id;
       state.currentView = "subjects";
       state.activeSubjectTab = "assessments";
-      state.focusArea = state.focusMode ? "assessments" : null;
+      state.focusArea = null;
     } else if (flags.classNotes) {
       state.selectedSubjectId = subject.id;
       state.currentView = "subjects";
       state.activeSubjectTab = "reader";
-      state.focusArea = state.focusMode ? "reader" : null;
+      state.focusArea = null;
     }
     state.selectedDocumentId = getVisibleSubjectDocuments(subject)[0]?.id || null;
     elements.documentUpload.value = "";
@@ -16850,9 +16828,6 @@ elements.revisionNotesSelect.addEventListener("change", () => {
 elements.createRevisionTestButton.addEventListener("click", handleCreateRevisionTest);
 elements.submitRevisionTestButton.addEventListener("click", handleSubmitRevisionTest);
 elements.saveRevisionTestButton.addEventListener("click", saveCurrentRevisionTest);
-elements.focusModeToggle?.addEventListener("click", () => {
-  setFocusMode(!state.focusMode);
-});
 elements.focusAskButton?.addEventListener("click", handleFocusAskLaunch);
 elements.focusAskAvatarButton?.addEventListener("click", handleFocusAskLaunch);
 elements.navHomeButton.addEventListener("click", () => {
@@ -16864,9 +16839,7 @@ elements.navSubjectsButton.addEventListener("click", () => {
   state.currentView = "subjects";
   resetSubjectWorkspaceView();
   state.focusAskOpen = false;
-  if (state.focusMode) {
-    state.focusArea = null;
-  }
+  state.focusArea = null;
   render();
 });
 elements.navSettingsButton.addEventListener("click", () => {
@@ -16882,9 +16855,7 @@ elements.enterSubjectsButton.addEventListener("click", () => {
   state.currentView = "subjects";
   resetSubjectWorkspaceView();
   state.focusAskOpen = false;
-  if (state.focusMode) {
-    state.focusArea = null;
-  }
+  state.focusArea = null;
   render();
 });
 elements.openUploadModalButton?.addEventListener("click", openUploadModal);
@@ -16936,9 +16907,7 @@ elements.homeAskReadButton?.addEventListener("click", () => {
   state.currentView = "subjects";
   resetSubjectWorkspaceView();
   state.focusAskOpen = false;
-  if (state.focusMode) {
-    state.focusArea = null;
-  }
+  state.focusArea = null;
   render();
 });
 elements.homeAskQuizButton?.addEventListener("click", () => {
@@ -16955,9 +16924,7 @@ elements.subjectTabs?.querySelectorAll("[data-viewer-tab]").forEach((button) => 
     }
     state.activeSubjectTab = nextTab;
     state.focusAskOpen = false;
-    if (state.focusMode) {
-      state.focusArea = nextTab;
-    }
+    state.focusArea = null;
     render();
   });
 });
@@ -17018,7 +16985,7 @@ elements.closeRevisionViewButton.addEventListener("click", () => {
     state.selectedSubjectId = returnContext.subjectId || state.selectedSubjectId;
     state.activeSubjectTab = returnContext.activeSubjectTab || "reader";
     state.focusAskOpen = false;
-    state.focusArea = state.focusMode ? state.activeSubjectTab : null;
+    state.focusArea = null;
     state.selectedDocumentId = returnContext.documentId || state.selectedDocumentId;
     render();
     requestAnimationFrame(() => {
