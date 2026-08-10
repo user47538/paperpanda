@@ -4432,7 +4432,8 @@ input[type="date"] {
   grid-template-columns: 64px minmax(0, 1fr) 64px;
   align-items: center;
   gap: 10px;
-  padding: 0 36px;
+  width: 100%;
+  padding: 0 16px;
 }
 
 .subject-landing__arrow {
@@ -4456,8 +4457,8 @@ input[type="date"] {
 }
 
 .subject-landing__summary-card {
-  max-width: 1120px;
-  width: 100%;
+  max-width: 784px;
+  width: min(100%, 70%);
   margin: 0 auto;
   padding: 28px 30px;
   border-radius: 28px;
