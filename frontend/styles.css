@@ -4083,10 +4083,13 @@ input[type="date"] {
 }
 
 .subject-landing-view {
+  grid-column: 1 / -1;
   width: 100%;
+  min-width: 0;
 }
 
 .subject-landing {
+  width: 100%;
   min-height: calc(100vh - 180px);
   background: #f5efe7;
   border-radius: 30px;
