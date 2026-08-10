@@ -3075,6 +3075,7 @@ function renderSubjectLanding() {
           </div>
         </div>
         <div class="subject-landing__content">
+          <button type="button" class="ghost-button subject-landing__resource-back" data-subject-landing-all-areas="true">← All areas</button>
           <div class="subject-landing__heading">
             <p class="eyebrow">${escapeHtml(`${subject.name.toUpperCase()} · YEAR ${state.studentGrade}`)}</p>
             <h2>Choose Spelling or Writing</h2>
@@ -3357,8 +3358,10 @@ function renderSubjectLanding() {
     `;
   }
 
-  host.querySelector("[data-subject-landing-all-areas]")?.addEventListener("click", () => {
-    selectSubjectForSubjectsView(subject.id, { returnToHome: true });
+  host.querySelectorAll("[data-subject-landing-all-areas]").forEach((button) => {
+    button.addEventListener("click", () => {
+      selectSubjectForSubjectsView(subject.id, { returnToHome: true });
+    });
   });
   host.querySelector("[data-subject-landing-subject-toggle]")?.addEventListener("click", () => {
     state.subjectLandingSubjectMenuOpen = !state.subjectLandingSubjectMenuOpen;
