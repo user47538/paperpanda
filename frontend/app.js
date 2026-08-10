@@ -3609,9 +3609,7 @@ function renderSubjectFocusLaunchpad() {
   `;
 
   host.querySelector("#focus-subject-select")?.addEventListener("change", (event) => {
-    state.selectedSubjectId = event.target.value;
-    state.focusArea = null;
-    render();
+    selectSubjectForSubjectsView(event.target.value);
   });
 
   host.querySelectorAll("[data-focus-area]").forEach((card) => {
@@ -3620,14 +3618,7 @@ function renderSubjectFocusLaunchpad() {
       if (!nextArea) {
         return;
       }
-      if (nextArea === "writing" && subject.id !== "english") {
-        state.selectedSubjectId = "english";
-        openSubjectsWorkspace("writing");
-        return;
-      }
-      state.activeSubjectTab = nextArea;
-      state.focusArea = nextArea;
-      render();
+      openFocusLaunchpadArea(subject, nextArea);
     };
     card.addEventListener("click", drillIn);
     card.addEventListener("keydown", (event) => {
@@ -3662,16 +3653,11 @@ function renderSubjectFocusLaunchpad() {
         return;
       }
       if (area === "spelling") {
-        openSubjectsWorkspace("spelling");
+        openFocusLaunchpadArea(subject, "spelling");
         return;
       }
       if (area === "writing") {
-        if (subject.id === "english") {
-          openSubjectsWorkspace("writing");
-          return;
-        }
-        state.selectedSubjectId = "english";
-        openSubjectsWorkspace("writing");
+        openFocusLaunchpadArea(subject, "writing");
         return;
       }
       if (area === "watch") {
@@ -3697,6 +3683,30 @@ function renderSubjectFocusLaunchpad() {
   });
 }
 
+function shouldShowSpellingLaunchpad(subject = getSelectedSubject()) {
+  return Boolean(
+    subject &&
+    state.currentView === "subjects" &&
+    subject.id === "spelling" &&
+    (!state.subjectWorkspaceExpanded || state.subjectWorkspaceExpandedSubjectId !== subject.id)
+  );
+}
+
+function openFocusLaunchpadArea(subject, area) {
+  if (!subject || !area) {
+    return;
+  }
+
+  if (area === "writing") {
+    state.selectedSubjectId = "english";
+    expandSubjectWorkspace("writing");
+    return;
+  }
+
+  state.selectedSubjectId = subject.id;
+  expandSubjectWorkspace(area);
+}
+
 function shouldUseHomeFocusUi() {
   return state.currentView === "home";
 }
@@ -3706,7 +3716,9 @@ function shouldUseSpellingFocusUi(subject = getSelectedSubject()) {
     subject &&
     state.currentView === "subjects" &&
     subject.id === "spelling" &&
-    state.activeSubjectTab === "spelling"
+    state.activeSubjectTab === "spelling" &&
+    state.subjectWorkspaceExpanded &&
+    state.subjectWorkspaceExpandedSubjectId === subject.id
   );
 }
 
@@ -3787,22 +3799,27 @@ function renderFocusAskFab() {
 
 function renderFocusMode() {
   const subject = getSelectedSubject();
+  const spellingLaunchpad = shouldShowSpellingLaunchpad(subject);
   const spellingFocus = shouldUseSpellingFocusUi(subject);
   const askOpen = spellingFocus && state.focusAskOpen;
   const drilledIn = spellingFocus && !askOpen;
 
-  elements.subjectsView?.classList.toggle("focus-launchpad-open", false);
+  elements.subjectsView?.classList.toggle("focus-launchpad-open", spellingLaunchpad);
   elements.subjectsView?.classList.toggle("focus-drilled", drilledIn);
   elements.subjectsView?.classList.toggle("focus-reader-drilled", false);
   elements.subjectsView?.classList.toggle("focus-ask-open", askOpen);
-  elements.subjectFocusLaunchpad?.classList.add("hidden");
+  elements.subjectFocusLaunchpad?.classList.toggle("hidden", !spellingLaunchpad);
   elements.focusBackButton?.classList.add("hidden");
 
   renderFocusHomeCard();
   renderFocusAskFab();
 
   if (elements.subjectFocusLaunchpad) {
-    elements.subjectFocusLaunchpad.innerHTML = "";
+    if (spellingLaunchpad) {
+      renderSubjectFocusLaunchpad();
+    } else {
+      elements.subjectFocusLaunchpad.innerHTML = "";
+    }
   }
 }
 
