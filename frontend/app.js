@@ -3037,7 +3037,85 @@ function renderSubjectLanding() {
   const resourceBundles = getSubjectLandingResourceBundles(subject);
   const openDocument = getSubjectLandingOpenDocument(subject);
 
-  if (!openDocument) {
+  if (!openDocument && subject.id === "spelling") {
+    const writingSubject = state.subjects.find((item) => item.id === "english") || null;
+    const spellingCount = getSpellingPendingActivityCount(subject);
+    const writingCount = writingSubject ? getSubjectWritingPendingSectionCount(writingSubject) : 0;
+
+    host.innerHTML = `
+      <section class="subject-landing">
+        <div class="subject-landing__bar">
+          <div class="subject-landing__bar-copy subject-landing__bar-copy--menu">
+            <button type="button" class="subject-landing__subject-pill" data-subject-landing-subject-toggle="true" aria-expanded="${state.subjectLandingSubjectMenuOpen ? "true" : "false"}">
+              <span class="subject-landing__subject-icon">${getSubjectTileCodeMarkup(subject)}</span>
+              <span>${escapeHtml(subject.name)}</span>
+              <span class="subject-landing__subject-caret" aria-hidden="true">▾</span>
+            </button>
+            ${state.subjectLandingSubjectMenuOpen
+              ? `
+                <div class="subject-landing__subject-menu" data-subject-landing-subject-menu>
+                  ${state.subjects.map((item) => `
+                    <button
+                      type="button"
+                      class="subject-landing__subject-option${item.id === subject.id ? " is-active" : ""}"
+                      data-subject-landing-subject-id="${escapeHtml(item.id)}"
+                    >
+                      <span class="subject-landing__subject-option-icon">${getSubjectTileCodeMarkup(item)}</span>
+                      <span>${escapeHtml(item.name)}</span>
+                    </button>
+                  `).join("")}
+                </div>
+              `
+              : ""}
+            <span class="subject-landing__year">${escapeHtml(`Year ${state.studentGrade}`)}</span>
+          </div>
+          <div class="subject-landing__bar-actions">
+            <button type="button" class="ghost-button subject-landing__nav-button" data-subject-landing-all-areas="true">← All areas</button>
+            <button type="button" class="primary-button primary-button--dark subject-landing__nav-button" data-subject-landing-upload="true">+ Upload</button>
+          </div>
+        </div>
+        <div class="subject-landing__content">
+          <div class="subject-landing__heading">
+            <p class="eyebrow">${escapeHtml(`${subject.name.toUpperCase()} · YEAR ${state.studentGrade}`)}</p>
+            <h2>Choose Spelling or Writing</h2>
+            <p>Pick the focused literacy space you want to open.</p>
+          </div>
+          <div class="subject-landing__list">
+            <button type="button" class="subject-landing-row" data-subject-landing-open-area="spelling">
+              <span class="subject-landing-row__cover subject-landing-row__cover--yellow">
+                <span class="subject-landing-row__sheet">
+                  <span class="subject-landing-row__sheet-bar"></span>
+                  <span class="subject-landing-row__sheet-line subject-landing-row__sheet-line--dark"></span>
+                  <span class="subject-landing-row__sheet-line"></span>
+                  <span class="subject-landing-row__sheet-line subject-landing-row__sheet-line--short"></span>
+                </span>
+              </span>
+              <span class="subject-landing-row__copy">
+                <strong>Spelling</strong>
+                <span>${escapeHtml(`${spellingCount} stage${spellingCount === 1 ? "" : "s"} left · spelling stables and pattern practice`)}</span>
+              </span>
+              <span class="subject-landing-row__action">Open →</span>
+            </button>
+            <button type="button" class="subject-landing-row" data-subject-landing-open-area="writing">
+              <span class="subject-landing-row__cover subject-landing-row__cover--lilac">
+                <span class="subject-landing-row__sheet">
+                  <span class="subject-landing-row__sheet-bar"></span>
+                  <span class="subject-landing-row__sheet-line subject-landing-row__sheet-line--dark"></span>
+                  <span class="subject-landing-row__sheet-line"></span>
+                  <span class="subject-landing-row__sheet-line subject-landing-row__sheet-line--short"></span>
+                </span>
+              </span>
+              <span class="subject-landing-row__copy">
+                <strong>Writing</strong>
+                <span>${escapeHtml(`${writingCount} section${writingCount === 1 ? "" : "s"} left · story builder and picture-book flow`)}</span>
+              </span>
+              <span class="subject-landing-row__action">Open →</span>
+            </button>
+          </div>
+        </div>
+      </section>
+    `;
+  } else if (!openDocument) {
     host.innerHTML = `
       <section class="subject-landing">
         <div class="subject-landing__bar">
@@ -3296,6 +3374,19 @@ function renderSubjectLanding() {
     });
   });
   host.querySelector("[data-subject-landing-upload]")?.addEventListener("click", openUploadModal);
+  host.querySelectorAll("[data-subject-landing-open-area]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const area = String(button.dataset.subjectLandingOpenArea || "");
+      if (area === "writing") {
+        state.selectedSubjectId = "english";
+        expandSubjectWorkspace("writing");
+        return;
+      }
+      if (area === "spelling") {
+        expandSubjectWorkspace("spelling");
+      }
+    });
+  });
   host.querySelectorAll("[data-subject-landing-open-document]").forEach((button) => {
     button.addEventListener("click", () => {
       const documentId = String(button.dataset.subjectLandingOpenDocument || "");
@@ -3684,12 +3775,7 @@ function renderSubjectFocusLaunchpad() {
 }
 
 function shouldShowSpellingLaunchpad(subject = getSelectedSubject()) {
-  return Boolean(
-    subject &&
-    state.currentView === "subjects" &&
-    subject.id === "spelling" &&
-    (!state.subjectWorkspaceExpanded || state.subjectWorkspaceExpandedSubjectId !== subject.id)
-  );
+  return false;
 }
 
 function openFocusLaunchpadArea(subject, area) {
@@ -9765,7 +9851,6 @@ function getPreferredSubjectTab(subject) {
 function shouldShowSubjectLanding(subject = getSelectedSubject()) {
   return Boolean(
     subject &&
-    subject.id !== "spelling" &&
     state.currentView === "subjects" &&
     (!state.subjectWorkspaceExpanded || state.subjectWorkspaceExpandedSubjectId !== subject.id)
   );
