@@ -1263,6 +1263,7 @@ const state = {
   focusAskOpen: false,
   subjectWorkspaceExpanded: false,
   subjectWorkspaceExpandedSubjectId: "",
+  subjectWorkspaceReturnLandingSubjectId: "",
   subjectLandingOpenDocumentId: "",
   subjectLandingView: "simple",
   subjectLandingPieceIndex: 0,
@@ -3381,12 +3382,11 @@ function renderSubjectLanding() {
     button.addEventListener("click", () => {
       const area = String(button.dataset.subjectLandingOpenArea || "");
       if (area === "writing") {
-        state.selectedSubjectId = "english";
-        expandSubjectWorkspace("writing");
+        openSubjectLandingArea(subject.id, "writing");
         return;
       }
       if (area === "spelling") {
-        expandSubjectWorkspace("spelling");
+        openSubjectLandingArea(subject.id, "spelling");
       }
     });
   });
@@ -3781,6 +3781,22 @@ function shouldShowSpellingLaunchpad(subject = getSelectedSubject()) {
   return false;
 }
 
+function openSubjectLandingArea(subjectId, area) {
+  if (!subjectId || !area) {
+    return;
+  }
+
+  state.subjectWorkspaceReturnLandingSubjectId = subjectId;
+  if (area === "writing") {
+    state.selectedSubjectId = "english";
+    expandSubjectWorkspace("writing");
+    return;
+  }
+
+  state.selectedSubjectId = subjectId;
+  expandSubjectWorkspace(area);
+}
+
 function openFocusLaunchpadArea(subject, area) {
   if (!subject || !area) {
     return;
@@ -3892,13 +3908,18 @@ function renderFocusMode() {
   const spellingFocus = shouldUseSpellingFocusUi(subject);
   const askOpen = spellingFocus && state.focusAskOpen;
   const drilledIn = spellingFocus && !askOpen;
+  const showWorkspaceBack = Boolean(
+    state.currentView === "subjects" &&
+    state.subjectWorkspaceExpanded &&
+    state.subjectWorkspaceReturnLandingSubjectId
+  );
 
   elements.subjectsView?.classList.toggle("focus-launchpad-open", spellingLaunchpad);
   elements.subjectsView?.classList.toggle("focus-drilled", drilledIn);
   elements.subjectsView?.classList.toggle("focus-reader-drilled", false);
   elements.subjectsView?.classList.toggle("focus-ask-open", askOpen);
   elements.subjectFocusLaunchpad?.classList.toggle("hidden", !spellingLaunchpad);
-  elements.focusBackButton?.classList.add("hidden");
+  elements.focusBackButton?.classList.toggle("hidden", !showWorkspaceBack);
 
   renderFocusHomeCard();
   renderFocusAskFab();
@@ -9862,6 +9883,7 @@ function shouldShowSubjectLanding(subject = getSelectedSubject()) {
 function resetSubjectWorkspaceView() {
   state.subjectWorkspaceExpanded = false;
   state.subjectWorkspaceExpandedSubjectId = "";
+  state.subjectWorkspaceReturnLandingSubjectId = "";
   state.subjectLandingOpenDocumentId = "";
   state.subjectLandingView = "simple";
   state.subjectLandingPieceIndex = 0;
@@ -17052,6 +17074,10 @@ elements.spellingSection?.addEventListener("click", (event) => {
 elements.focusBackButton?.addEventListener("click", () => {
   state.focusAskOpen = false;
   state.focusArea = null;
+  if (state.subjectWorkspaceReturnLandingSubjectId) {
+    state.selectedSubjectId = state.subjectWorkspaceReturnLandingSubjectId;
+    resetSubjectWorkspaceView();
+  }
   render();
 });
 elements.subjectsView?.addEventListener("click", (event) => {
