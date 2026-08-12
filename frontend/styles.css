@@ -4586,15 +4586,40 @@ input[type="date"] {
   background: #f6f1eb;
 }
 
+.subject-landing__page-preview--reader {
+  border-radius: 28px;
+  background: #ffffff;
+  box-shadow: inset 0 0 0 1px rgba(26, 23, 38, 0.06);
+}
+
 .subject-landing__page-image {
   display: block;
   width: 100%;
   height: auto;
 }
 
+.subject-landing__page-image--reader {
+  background: #fff;
+}
+
 .subject-landing__page-copy {
   display: grid;
   gap: 10px;
+}
+
+.subject-landing__reader-stage {
+  display: grid;
+  gap: 14px;
+}
+
+.subject-landing__page-fallback {
+  display: grid;
+  gap: 12px;
+  padding: 12px 4px 4px;
+}
+
+.subject-landing__page-fallback h3 {
+  margin: 0;
 }
 
 .subject-landing__explainer {

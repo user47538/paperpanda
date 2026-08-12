@@ -1892,7 +1892,7 @@ function getManualSubjectWatchItems(subject) {
 }
 
 function getWatchSourceDocuments(subject) {
-  return getVisibleSubjectDocuments(subject).filter((documentRecord) => !documentRecord?.flags?.assessment);
+  return getReaderDocuments(subject).filter((documentRecord) => !documentRecord?.flags?.assessment);
 }
 
 function getAutoSubjectWatchItems(subject, { suppressManualUrls = true } = {}) {
@@ -1964,6 +1964,12 @@ function getReaderDocuments(subject) {
 
 function getRevisionReaderDocuments(subject) {
   return getAllReaderDocuments(subject).filter((documentRecord) => isRevisionArchivedDocument(documentRecord));
+}
+
+function isRevisionSectionExpanded(subject) {
+  const activeDocuments = getReaderDocuments(subject || { documents: [] });
+  const revisionDocuments = getRevisionReaderDocuments(subject || { documents: [] });
+  return state.documentsRevisionExpanded || (!activeDocuments.length && revisionDocuments.length > 0);
 }
 
 function getSubjectHomeworkBundles(subject) {
@@ -2350,7 +2356,7 @@ function getDocumentGroupsFromDocuments(documents) {
 }
 
 function getDocumentGroups(subject) {
-  return getDocumentGroupsFromDocuments(getVisibleSubjectDocuments(subject || { documents: [] }));
+  return getDocumentGroupsFromDocuments(getAllReaderDocuments(subject || { documents: [] }));
 }
 
 function getDocumentBundlesByFilter(subject, predicate) {
@@ -3020,6 +3026,12 @@ function sanitiseInlineJson(value) {
     .replace(/\u2029/g, "\\u2029");
 }
 
+function getStandaloneDocumentStylesMarkup() {
+  return Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
+    .map((node) => node.outerHTML)
+    .join("\n");
+}
+
 function getSubjectLandingStandalonePayload(subject, documentRecord, initialView = "simple") {
   const pieces = getSubjectLandingSimplifiedPieces(documentRecord);
   const pages = getDocumentPages(documentRecord).map((page, index) => ({
@@ -3041,14 +3053,14 @@ function getSubjectLandingStandalonePayload(subject, documentRecord, initialView
   };
 }
 
-function buildStandaloneDocumentPageHtml(payload) {
+function buildStandaloneDocumentPageHtml(payload, stylesMarkup = "") {
   return `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>${escapeHtml(payload.documentTitle)} · PaperPanda</title>
-    <link rel="stylesheet" href="/styles.css" />
+    ${stylesMarkup}
   </head>
   <body class="standalone-document-page">
     <main id="standalone-document-root"></main>
@@ -3143,12 +3155,19 @@ function buildStandaloneDocumentPageHtml(payload) {
                   <button type="button" class="subject-landing__arrow" data-standalone-page-move="-1" \${pageIndex <= 0 ? "disabled" : ""}>←</button>
                   <article class="subject-landing__summary-card subject-landing__summary-card--original subject-landing__summary-card--page">
                     <span class="subject-landing__summary-pill">\${escapeHtml(currentPage ? \`Page \${currentPage.pageNumber} of \${Math.max(1, pages.length)}\` : "Original document")}</span>
-                    \${currentPage?.imageUrl
-                      ? \`<figure class="subject-landing__page-preview"><img src="\${escapeHtml(currentPage.imageUrl)}" alt="\${escapeHtml(\`\${payload.documentTitle} page \${currentPage.pageNumber}\`)}" class="subject-landing__page-image" /></figure>\`
-                      : ""}
-                    <div class="subject-landing__page-copy">
-                      <h3>\${escapeHtml(currentPage ? \`Page \${currentPage.pageNumber}\` : "Original document")}</h3>
-                      <p>\${escapeHtml((currentPage && currentPage.text) || "No page preview is available for this document yet.")}</p>
+                    <div class="subject-landing__reader-stage">
+                      \${currentPage?.imageUrl
+                        ? \`
+                          <figure class="subject-landing__page-preview subject-landing__page-preview--reader">
+                            <img src="\${escapeHtml(currentPage.imageUrl)}" alt="\${escapeHtml(\`\${payload.documentTitle} page \${currentPage.pageNumber}\`)}" class="subject-landing__page-image subject-landing__page-image--reader" />
+                          </figure>
+                        \`
+                        : \`
+                          <div class="subject-landing__page-fallback">
+                            <h3>\${escapeHtml(currentPage ? \`Page \${currentPage.pageNumber}\` : "Original document")}</h3>
+                            <p>\${escapeHtml((currentPage && currentPage.text) || "No page preview is available for this document yet.")}</p>
+                          </div>
+                        \`}
                     </div>
                   </article>
                   <button type="button" class="subject-landing__arrow" data-standalone-page-move="1" \${!pages.length || pageIndex >= pages.length - 1 ? "disabled" : ""}>→</button>
@@ -3196,7 +3215,12 @@ function openSubjectLandingStandalonePage(subject, documentRecord, initialView =
 
   popup.opener = null;
   popup.document.open();
-  popup.document.write(buildStandaloneDocumentPageHtml(getSubjectLandingStandalonePayload(subject, documentRecord, initialView)));
+  popup.document.write(
+    buildStandaloneDocumentPageHtml(
+      getSubjectLandingStandalonePayload(subject, documentRecord, initialView),
+      getStandaloneDocumentStylesMarkup()
+    )
+  );
   popup.document.close();
 }
 
@@ -8693,7 +8717,10 @@ function restoreSubjectsForAccount(account, subjectsOverride = null, { skipRemot
   }
   normalizeManualWatchItemsAcrossSubjects();
   const selectedSubject = state.subjects.find((subject) => subject.id === state.selectedSubjectId);
-  const firstDocumentId = getVisibleSubjectDocuments(selectedSubject || { documents: [] })[0]?.id || null;
+  const firstDocumentId =
+    getReaderDocuments(selectedSubject || { documents: [] })[0]?.id ||
+    getRevisionReaderDocuments(selectedSubject || { documents: [] })[0]?.id ||
+    null;
   state.selectedDocumentId = firstDocumentId;
   state.askDocumentId = firstDocumentId;
   state.selectedDocumentIds = [];
@@ -9035,7 +9062,7 @@ function getAllRevisionDocumentBundles(subject) {
 function getSelectableDocumentsForTable(subject) {
   return [
     ...getReaderDocuments(subject || { documents: [] }),
-    ...(state.documentsRevisionExpanded ? getRevisionReaderDocuments(subject || { documents: [] }) : [])
+    ...(isRevisionSectionExpanded(subject) ? getRevisionReaderDocuments(subject || { documents: [] }) : [])
   ];
 }
 
@@ -10570,6 +10597,9 @@ function renderDocumentGroupRows(group, { reviewedSection = false, revisionSecti
                 ${state.listeningDocumentId === document.id ? "Stop" : "Listen"}
               </button>
               <button type="button" class="table-action" data-action="ask" data-document-id="${document.id}">Ask</button>
+              <button type="button" class="table-action" data-action="revision" data-document-id="${document.id}">
+                ${document.revisionArchived ? "Remove from revision" : "Add to revision"}
+              </button>
               <button type="button" class="table-action table-action--danger" data-action="delete" data-document-id="${document.id}">Delete</button>
             </div>
           </td>
@@ -10588,6 +10618,7 @@ function renderDocuments() {
   const sortedDocuments = getReaderDocuments(subject);
   const revisionDocuments = getRevisionReaderDocuments(subject);
   const allReaderDocuments = [...sortedDocuments, ...revisionDocuments];
+  const revisionSectionExpanded = isRevisionSectionExpanded(subject);
 
   if (!allReaderDocuments.length) {
     elements.documentsBody.innerHTML = `
@@ -10624,7 +10655,7 @@ function renderDocuments() {
 
   const visibleUnreadGroups = state.documentsExpanded ? unreadGroups : unreadGroups.slice(0, 6);
   const combinedGroupMap = new Map(
-    [...visibleUnreadGroups, ...reviewedGroups, ...(state.documentsRevisionExpanded ? revisionGroups : [])]
+    [...visibleUnreadGroups, ...reviewedGroups, ...(revisionSectionExpanded ? revisionGroups : [])]
       .map((group) => [group.id, group])
   );
   const rowsMarkup = [
@@ -10652,13 +10683,13 @@ function renderDocuments() {
       ? `
         <tr class="documents-section-row documents-section-row--revision">
           <td colspan="7">
-            <button type="button" class="documents-folder-toggle" data-documents-revision-toggle="true" aria-expanded="${state.documentsRevisionExpanded ? "true" : "false"}">
+            <button type="button" class="documents-folder-toggle" data-documents-revision-toggle="true" aria-expanded="${revisionSectionExpanded ? "true" : "false"}">
               <span>Revision</span>
               <span>${escapeHtml(`${revisionGroups.length} item${revisionGroups.length === 1 ? "" : "s"}`)}</span>
             </button>
           </td>
         </tr>
-        ${state.documentsRevisionExpanded
+        ${revisionSectionExpanded
           ? revisionGroups.map((group) => renderDocumentGroupRows(group, { revisionSection: true })).join("")
           : ""}
       `
@@ -10769,6 +10800,15 @@ function renderDocuments() {
         renderAskContext();
         elements.askResponse.textContent = "Ask a question about the selected document.";
         focusAskComposer();
+      }
+
+      if (button.dataset.action === "revision") {
+        setDocumentRevisionArchivedState(subject, [documentRecord.id], !documentRecord.revisionArchived);
+        renderDocuments();
+        renderReader();
+        renderSubjectsHero();
+        renderDockContext();
+        return;
       }
 
       if (button.dataset.action === "delete") {
