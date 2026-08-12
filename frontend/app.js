@@ -1295,6 +1295,7 @@ const state = {
   activeEditAssessment: null,
   watchExpanded: false,
   documentsExpanded: false,
+  documentsRevisionExpanded: false,
   currentView: "home",
   activeTask: null,
   taskAskResponse: "",
@@ -1949,8 +1950,20 @@ function isHomeworkDocument(documentRecord) {
   return Boolean(documentRecord?.flags?.homework || String(documentRecord?.type || "").toLowerCase() === "homework");
 }
 
+function isRevisionArchivedDocument(documentRecord) {
+  return Boolean(documentRecord?.revisionArchived);
+}
+
+function getAllReaderDocuments(subject) {
+  return getSortedDocuments(subject).filter((documentRecord) => !isHomeworkDocument(documentRecord));
+}
+
 function getReaderDocuments(subject) {
-  return getVisibleSubjectDocuments(subject);
+  return getAllReaderDocuments(subject).filter((documentRecord) => !isRevisionArchivedDocument(documentRecord));
+}
+
+function getRevisionReaderDocuments(subject) {
+  return getAllReaderDocuments(subject).filter((documentRecord) => isRevisionArchivedDocument(documentRecord));
 }
 
 function getSubjectHomeworkBundles(subject) {
@@ -1966,12 +1979,12 @@ function getActiveSubjectAssessments(subject) {
 }
 
 function getVisibleSubjectDocuments(subject) {
-  return getSortedDocuments(subject).filter((documentRecord) => !isHomeworkDocument(documentRecord));
+  return getReaderDocuments(subject);
 }
 
 function getSelectedDocument() {
   const subject = getSelectedSubject();
-  return getVisibleSubjectDocuments(subject || { documents: [] }).find((doc) => doc.id === state.selectedDocumentId) || null;
+  return getAllReaderDocuments(subject || { documents: [] }).find((doc) => doc.id === state.selectedDocumentId) || null;
 }
 
 function isWholeStudyDocument(documentRecord) {
@@ -2164,7 +2177,7 @@ function awardDocumentQuizPointsIfNeeded(documentRecord) {
 
 function getAskDocument() {
   const subject = getSelectedSubject();
-  return getVisibleSubjectDocuments(subject || { documents: [] }).find((doc) => doc.id === state.askDocumentId) || null;
+  return getAllReaderDocuments(subject || { documents: [] }).find((doc) => doc.id === state.askDocumentId) || null;
 }
 
 function getUploadSubject() {
@@ -2783,8 +2796,32 @@ function setDocumentReviewedState(subject, documentIds, reviewed) {
   persistSubjects();
 }
 
+function setDocumentRevisionArchivedState(subject, documentIds, revisionArchived) {
+  const targetIds = new Set((documentIds || []).filter(Boolean));
+  if (!subject || !targetIds.size) {
+    return;
+  }
+
+  (subject.documents || []).forEach((documentRecord) => {
+    if (!targetIds.has(documentRecord.id) || isHomeworkDocument(documentRecord)) {
+      return;
+    }
+    documentRecord.revisionArchived = Boolean(revisionArchived);
+  });
+
+  const allReaderDocuments = getAllReaderDocuments(subject);
+  if (!allReaderDocuments.some((documentRecord) => documentRecord.id === state.selectedDocumentId)) {
+    state.selectedDocumentId = getReaderDocuments(subject)[0]?.id || getRevisionReaderDocuments(subject)[0]?.id || null;
+  }
+  if (!allReaderDocuments.some((documentRecord) => documentRecord.id === state.askDocumentId)) {
+    state.askDocumentId = getReaderDocuments(subject)[0]?.id || getRevisionReaderDocuments(subject)[0]?.id || null;
+  }
+
+  persistSubjects();
+}
+
 function getSelectedDocumentIndex() {
-  const documents = getVisibleSubjectDocuments(getSelectedSubject() || { documents: [] });
+  const documents = getAllReaderDocuments(getSelectedSubject() || { documents: [] });
   return documents.findIndex((documentRecord) => documentRecord.id === state.selectedDocumentId);
 }
 
@@ -2825,7 +2862,7 @@ function getDocumentPageText(page) {
 }
 
 function selectAdjacentDocument(direction) {
-  const documents = getVisibleSubjectDocuments(getSelectedSubject() || { documents: [] });
+  const documents = getAllReaderDocuments(getSelectedSubject() || { documents: [] });
   if (!documents.length) {
     return;
   }
@@ -2903,7 +2940,7 @@ function getSubjectLandingTone(type = "") {
 }
 
 function getSubjectLandingResourceBundles(subject) {
-  return getDocumentGroupsFromDocuments(Array.isArray(subject?.documents) ? subject.documents : []);
+  return getDocumentGroupsFromDocuments(getReaderDocuments(subject || { documents: [] }));
 }
 
 function getSubjectLandingOpenDocument(subject) {
@@ -4301,9 +4338,13 @@ function renderRevisionPanel() {
   elements.revisionTopicWrap.classList.toggle("hidden", !topics.length);
 
   const selectedSubject = state.subjects.find((subject) => subject.id === state.revisionSelectedSubjectId) || getSelectedSubject();
-  const noteBundles = selectedSubject ? getAllDocumentBundles(selectedSubject) : [];
+  const noteBundles = selectedSubject ? getDocumentGroupsFromDocuments(getAllReaderDocuments(selectedSubject)) : [];
   elements.revisionNotesSelect.innerHTML = noteBundles
-    .map((bundle) => `<option value="${bundle.id}" ${state.revisionSelectedNoteIds.includes(bundle.id) ? "selected" : ""}>${escapeHtml(bundle.title)}</option>`)
+    .map((bundle) => {
+      const primaryDocument = getBundlePrimaryDocument(bundle);
+      const revisionLabel = isRevisionArchivedDocument(primaryDocument) ? " · Revision" : "";
+      return `<option value="${bundle.id}" ${state.revisionSelectedNoteIds.includes(bundle.id) ? "selected" : ""}>${escapeHtml(`${bundle.title}${revisionLabel}`)}</option>`;
+    })
     .join("");
 
   const isEnglish = selectedEntry?.subjectId === "english";
@@ -4317,7 +4358,7 @@ function renderRevisionPanel() {
 }
 
 function getSelectedRevisionNoteBundles(subject = state.subjects.find((item) => item.id === state.revisionSelectedSubjectId)) {
-  const allBundles = subject ? getAllDocumentBundles(subject) : [];
+  const allBundles = subject ? getDocumentGroupsFromDocuments(getAllReaderDocuments(subject)) : [];
   return allBundles.filter((bundle) => state.revisionSelectedNoteIds.includes(bundle.id));
 }
 
@@ -5167,6 +5208,7 @@ async function hydratePreviewImages() {
 function createPersistableDocument(documentRecord) {
   return {
     ...documentRecord,
+    revisionArchived: Boolean(documentRecord.revisionArchived),
     pages: Array.isArray(documentRecord.pages)
       ? documentRecord.pages.map((page) => ({
           pageNumber: Number(page?.pageNumber || 0),
@@ -5193,6 +5235,7 @@ function createQuotaFallbackDocument(documentRecord) {
     addedAt: documentRecord.addedAt,
     content: typeof documentRecord.content === "string" ? documentRecord.content.slice(0, 4000) : "",
     workNotes: typeof documentRecord.workNotes === "string" ? documentRecord.workNotes.slice(0, 4000) : "",
+    revisionArchived: Boolean(documentRecord.revisionArchived),
     flags: { ...(documentRecord.flags || {}) },
     pageNumber: documentRecord.pageNumber || null,
     pages: Array.isArray(documentRecord.pages)
@@ -8586,6 +8629,7 @@ function normaliseDocument(documentRecord) {
     ...documentRecord,
     workNotes: documentRecord.workNotes || "",
     externalWorkspace: normaliseExternalWorkspace(documentRecord.externalWorkspace),
+    revisionArchived: Boolean(documentRecord.revisionArchived),
     reviewed: Boolean(documentRecord.reviewed),
     reviewMode: documentRecord.reviewMode || "",
     pages: Array.isArray(documentRecord.pages)
@@ -8982,6 +9026,17 @@ function getAllHomeworkBundles() {
 
 function getAllDocumentBundles(subject) {
   return getDocumentGroupsFromDocuments(getReaderDocuments(subject));
+}
+
+function getAllRevisionDocumentBundles(subject) {
+  return getDocumentGroupsFromDocuments(getRevisionReaderDocuments(subject));
+}
+
+function getSelectableDocumentsForTable(subject) {
+  return [
+    ...getReaderDocuments(subject || { documents: [] }),
+    ...(state.documentsRevisionExpanded ? getRevisionReaderDocuments(subject || { documents: [] }) : [])
+  ];
 }
 
 function getUnreadDocumentMetrics() {
@@ -10298,7 +10353,7 @@ function renderSubjectList() {
 }
 
 function renderDocumentBulkActions(subject) {
-  const documentIds = getVisibleSubjectDocuments(subject).map((documentRecord) => documentRecord.id);
+  const documentIds = getSelectableDocumentsForTable(subject).map((documentRecord) => documentRecord.id);
   state.selectedDocumentIds = state.selectedDocumentIds.filter((documentId) => documentIds.includes(documentId));
   const allSelected = Boolean(documentIds.length) && state.selectedDocumentIds.length === documentIds.length;
   elements.documentsSelectAllButton.disabled = !documentIds.length;
@@ -10426,7 +10481,7 @@ function openSavedRevisionTest(savedTestId) {
 function getReaderToolbarMarkup() {
   const selectedDocument = getSelectedDocument();
   const selectedIndex = getSelectedDocumentIndex();
-  const documentCount = getVisibleSubjectDocuments(getSelectedSubject() || { documents: [] }).length || 0;
+  const documentCount = getAllReaderDocuments(getSelectedSubject() || { documents: [] }).length || 0;
   const hasDocument = Boolean(selectedDocument);
   const pageCount = getDocumentPages(selectedDocument).length;
   const pageIndex = getCurrentDocumentPageIndex(selectedDocument);
@@ -10444,7 +10499,7 @@ function getReaderToolbarMarkup() {
   `;
 }
 
-function renderDocumentGroupRows(group, { reviewedSection = false } = {}) {
+function renderDocumentGroupRows(group, { reviewedSection = false, revisionSection = false } = {}) {
   const isExpanded = Boolean(state.expandedDocumentGroups[group.id]);
   const visibleDocuments =
     group.isPageGroup && !isExpanded ? [group.documents[0]] : group.documents;
@@ -10462,7 +10517,7 @@ function renderDocumentGroupRows(group, { reviewedSection = false } = {}) {
   return visibleDocuments
     .map(
       (document, index) => `
-        <tr class="${document.id === state.selectedDocumentId ? "is-selected" : ""}${state.selectedDocumentIds.includes(document.id) ? " is-bulk-selected" : ""}${reviewedSection ? " documents-row--reviewed" : ""}">
+        <tr class="${document.id === state.selectedDocumentId ? "is-selected" : ""}${state.selectedDocumentIds.includes(document.id) ? " is-bulk-selected" : ""}${reviewedSection ? " documents-row--reviewed" : ""}${revisionSection ? " documents-row--revision" : ""}">
           ${
             index === 0
               ? `<td rowspan="${visibleDocuments.length}">
@@ -10499,6 +10554,16 @@ function renderDocumentGroupRows(group, { reviewedSection = false } = {}) {
             </label>
           </td>
           <td>
+            <label class="document-review-toggle document-review-toggle--revision">
+              <input
+                type="checkbox"
+                data-document-revision-id="${document.id}"
+                ${document.revisionArchived ? "checked" : ""}
+              />
+              <span>${document.revisionArchived ? "In revision" : "Add to revision"}</span>
+            </label>
+          </td>
+          <td>
             <div class="table-actions">
               <button type="button" class="table-action" data-action="read" data-document-id="${document.id}">Read</button>
               <button type="button" class="table-action" data-action="listen" data-document-id="${document.id}">
@@ -10520,12 +10585,14 @@ function renderDocuments() {
     return;
   }
 
-  const sortedDocuments = getVisibleSubjectDocuments(subject);
+  const sortedDocuments = getReaderDocuments(subject);
+  const revisionDocuments = getRevisionReaderDocuments(subject);
+  const allReaderDocuments = [...sortedDocuments, ...revisionDocuments];
 
-  if (!sortedDocuments.length) {
+  if (!allReaderDocuments.length) {
     elements.documentsBody.innerHTML = `
       <tr>
-        <td colspan="6">
+        <td colspan="7">
           <div class="empty-state">
             No documents uploaded for this subject yet. Add worksheets, rubrics, or weekly notes.
           </div>
@@ -10543,38 +10610,57 @@ function renderDocuments() {
 
   const unreadDocuments = sortedDocuments.filter((document) => !document.reviewed);
   const reviewedDocuments = sortedDocuments.filter((document) => document.reviewed);
+  const revisionGroups = getDocumentGroupsFromDocuments(revisionDocuments);
   const unreadGroups = getDocumentGroupsFromDocuments(unreadDocuments);
   const reviewedGroups = getDocumentGroupsFromDocuments(reviewedDocuments);
 
-  if (!sortedDocuments.find((doc) => doc.id === state.selectedDocumentId)) {
-    state.selectedDocumentId = sortedDocuments[0].id;
+  if (!allReaderDocuments.find((doc) => doc.id === state.selectedDocumentId)) {
+    state.selectedDocumentId = sortedDocuments[0]?.id || revisionDocuments[0]?.id || null;
   }
 
-  if (!sortedDocuments.find((doc) => doc.id === state.askDocumentId)) {
-    state.askDocumentId = sortedDocuments[0].id;
+  if (!allReaderDocuments.find((doc) => doc.id === state.askDocumentId)) {
+    state.askDocumentId = sortedDocuments[0]?.id || revisionDocuments[0]?.id || null;
   }
 
   const visibleUnreadGroups = state.documentsExpanded ? unreadGroups : unreadGroups.slice(0, 6);
-  const combinedGroupMap = new Map([...visibleUnreadGroups, ...reviewedGroups].map((group) => [group.id, group]));
+  const combinedGroupMap = new Map(
+    [...visibleUnreadGroups, ...reviewedGroups, ...(state.documentsRevisionExpanded ? revisionGroups : [])]
+      .map((group) => [group.id, group])
+  );
   const rowsMarkup = [
     `
       <tr class="documents-section-row">
-        <td colspan="6">Newly uploaded</td>
+        <td colspan="7">Newly uploaded</td>
       </tr>
     `,
     visibleUnreadGroups.length
       ? visibleUnreadGroups.map((group) => renderDocumentGroupRows(group)).join("")
       : `
         <tr class="documents-empty-row">
-          <td colspan="6"><div class="empty-state">No new documents waiting to be read.</div></td>
+          <td colspan="7"><div class="empty-state">No new documents waiting to be read.</div></td>
         </tr>
       `,
     reviewedGroups.length
       ? `
         <tr class="documents-section-row documents-section-row--reviewed">
-          <td colspan="6">Read / listened</td>
+          <td colspan="7">Read / listened</td>
         </tr>
         ${reviewedGroups.map((group) => renderDocumentGroupRows(group, { reviewedSection: true })).join("")}
+      `
+      : "",
+    revisionGroups.length
+      ? `
+        <tr class="documents-section-row documents-section-row--revision">
+          <td colspan="7">
+            <button type="button" class="documents-folder-toggle" data-documents-revision-toggle="true" aria-expanded="${state.documentsRevisionExpanded ? "true" : "false"}">
+              <span>Revision</span>
+              <span>${escapeHtml(`${revisionGroups.length} item${revisionGroups.length === 1 ? "" : "s"}`)}</span>
+            </button>
+          </td>
+        </tr>
+        ${state.documentsRevisionExpanded
+          ? revisionGroups.map((group) => renderDocumentGroupRows(group, { revisionSection: true })).join("")
+          : ""}
       `
       : ""
   ].join("");
@@ -10636,6 +10722,25 @@ function renderDocuments() {
       persistSubjects();
       renderDocuments();
     });
+  });
+
+  elements.documentsBody.querySelectorAll("[data-document-revision-id]").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      const documentRecord = subject.documents.find((doc) => doc.id === checkbox.dataset.documentRevisionId);
+      if (!documentRecord) {
+        return;
+      }
+      setDocumentRevisionArchivedState(subject, [documentRecord.id], checkbox.checked);
+      renderDocuments();
+      renderReader();
+      renderSubjectsHero();
+      renderDockContext();
+    });
+  });
+
+  elements.documentsBody.querySelector("[data-documents-revision-toggle]")?.addEventListener("click", () => {
+    state.documentsRevisionExpanded = !state.documentsRevisionExpanded;
+    renderDocuments();
   });
 
   elements.documentsBody.querySelectorAll("[data-action]").forEach((button) => {
@@ -11297,10 +11402,10 @@ function deleteDocuments(documentIds) {
   subject.assessments = subject.assessments.filter((assessment) => assessment.linkedDocumentIds.length || !assessment.autoCreated);
   state.selectedDocumentIds = state.selectedDocumentIds.filter((documentId) => !uniqueDocumentIds.includes(documentId));
   if (uniqueDocumentIds.includes(state.selectedDocumentId)) {
-    state.selectedDocumentId = getVisibleSubjectDocuments(subject)[0]?.id || null;
+    state.selectedDocumentId = getReaderDocuments(subject)[0]?.id || getRevisionReaderDocuments(subject)[0]?.id || null;
   }
   if (uniqueDocumentIds.includes(state.askDocumentId)) {
-    state.askDocumentId = getVisibleSubjectDocuments(subject)[0]?.id || null;
+    state.askDocumentId = getReaderDocuments(subject)[0]?.id || getRevisionReaderDocuments(subject)[0]?.id || null;
   }
   syncAutoWatchForSubject(subject);
   persistSubjects();
@@ -15495,6 +15600,7 @@ function createDocumentRecord({ title, type, content }) {
     uploadGroupId: null,
     originalFile: null,
     previewImageUrl: null,
+    revisionArchived: false,
     reviewed: false,
     reviewMode: "",
     pages: [],
@@ -16637,7 +16743,7 @@ async function processFiles(fileList) {
       state.activeSubjectTab = "reader";
       state.focusArea = null;
     }
-    state.selectedDocumentId = getVisibleSubjectDocuments(subject)[0]?.id || null;
+    state.selectedDocumentId = getReaderDocuments(subject)[0]?.id || getRevisionReaderDocuments(subject)[0]?.id || null;
     elements.documentUpload.value = "";
     clearUploadOptions();
     render();
@@ -17465,7 +17571,7 @@ elements.documentsToggleButton.addEventListener("click", () => {
 });
 elements.documentsSelectAllButton.addEventListener("click", () => {
   const subject = getSelectedSubject();
-  const visibleDocuments = getVisibleSubjectDocuments(subject || { documents: [] });
+  const visibleDocuments = getSelectableDocumentsForTable(subject || { documents: [] });
   if (!visibleDocuments.length) {
     return;
   }
