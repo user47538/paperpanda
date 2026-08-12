@@ -2917,32 +2917,15 @@ function getSubjectLandingOpenDocument(subject) {
 }
 
 function buildSubjectLandingSectionBullets(section) {
-  const summary = String(section?.summary || "").trim().toLowerCase();
-  const sourceText = String(section?.sectionText || "").trim();
-  const sentences = sourceText
-    .split(/[\n•]+/)
-    .flatMap((chunk) => String(chunk || "").split(/(?<=[.!?])\s+/))
-    .map((sentence) => String(sentence || "").replace(/\s+/g, " ").trim())
-    .filter(Boolean)
-    .filter((sentence) => sentence.toLowerCase() !== summary);
-
-  const uniqueSentences = [];
-  sentences.forEach((sentence) => {
-    if (uniqueSentences.some((candidate) => candidate.toLowerCase() === sentence.toLowerCase())) {
-      return;
-    }
-    uniqueSentences.push(sentence.replace(/[.!?]+$/, ""));
-  });
-
-  if (uniqueSentences.length) {
-    return uniqueSentences.slice(0, 3);
+  if (Array.isArray(section?.bullets) && section.bullets.length) {
+    return section.bullets.slice(0, 3);
   }
 
-  if (section?.importantTerms?.length) {
-    return section.importantTerms.slice(0, 3).map((term) => `Focus on ${term}`);
-  }
-
-  return ["Read the main idea closely", "Pull out the strongest detail", "Keep the key terms in mind"];
+  return buildCoreStudyBullets(
+    String(section?.sectionText || ""),
+    Array.isArray(section?.importantTerms) ? section.importantTerms : [],
+    3
+  );
 }
 
 function buildSubjectLandingBeats(section, bullets) {
@@ -2970,7 +2953,9 @@ function getSubjectLandingSimplifiedPieces(documentRecord) {
     return {
       id: section.id || `piece-${index + 1}`,
       title: section.title || `Section ${index + 1}`,
-      summary: String(section.summary || summariseSectionText(section.sectionText || "")).trim(),
+      summary: String(
+        section.summary || buildCoreStudySummary(section.sectionText || "", section.importantTerms || [])
+      ).trim(),
       bullets,
       beats,
       badge: `Piece ${index + 1} of ${sections.length} · ${pageLabel}`
@@ -2987,6 +2972,195 @@ function buildSubjectLandingPieceListenText(documentRecord, piece) {
   ]
     .filter(Boolean)
     .join(". ");
+}
+
+function sanitiseInlineJson(value) {
+  return JSON.stringify(value)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/&/g, "\\u0026")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}
+
+function getSubjectLandingStandalonePayload(subject, documentRecord, initialView = "simple") {
+  const pieces = getSubjectLandingSimplifiedPieces(documentRecord);
+  const pages = getDocumentPages(documentRecord).map((page, index) => ({
+    pageNumber: Number(page?.pageNumber || index + 1) || index + 1,
+    imageUrl: page?.imageUrl || "",
+    text: getDocumentPageText(page)
+  }));
+
+  return {
+    subjectName: subject?.name || "Subject",
+    subjectIconMarkup: getSubjectTileCodeMarkup(subject),
+    yearLabel: `Year ${state.studentGrade}`,
+    documentTitle: documentRecord?.title || "Document",
+    pieces,
+    pages,
+    initialPieceIndex: Math.max(0, Math.min(state.subjectLandingPieceIndex, Math.max(0, pieces.length - 1))),
+    initialPageIndex: Math.max(0, Math.min(getCurrentDocumentPageIndex(documentRecord), Math.max(0, pages.length - 1))),
+    initialView: initialView === "original" ? "original" : "simple"
+  };
+}
+
+function buildStandaloneDocumentPageHtml(payload) {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>${escapeHtml(payload.documentTitle)} · PaperPanda</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="standalone-document-page">
+    <main id="standalone-document-root"></main>
+    <script>
+      const payload = ${sanitiseInlineJson(payload)};
+      const state = {
+        view: payload.initialView || "simple",
+        pieceIndex: Number(payload.initialPieceIndex || 0) || 0,
+        pageIndex: Number(payload.initialPageIndex || 0) || 0
+      };
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
+
+      function renderStandalone() {
+        const host = document.getElementById("standalone-document-root");
+        const pieces = Array.isArray(payload.pieces) ? payload.pieces : [];
+        const pages = Array.isArray(payload.pages) ? payload.pages : [];
+        const pieceIndex = Math.max(0, Math.min(state.pieceIndex, Math.max(0, pieces.length - 1)));
+        const pageIndex = Math.max(0, Math.min(state.pageIndex, Math.max(0, pages.length - 1)));
+        const currentPiece = pieces[pieceIndex] || {
+          title: "Overview",
+          summary: "PaperPanda is preparing the document summary.",
+          bullets: [],
+          beats: [],
+          badge: "Piece 1 of 1"
+        };
+        const currentPage = pages[pageIndex] || null;
+
+        host.innerHTML = \`
+          <section class="subject-landing subject-landing--open subject-landing--standalone">
+            <div class="subject-landing__bar">
+              <div class="subject-landing__bar-copy subject-landing__bar-copy--menu">
+                <span class="subject-landing__subject-pill subject-landing__subject-pill--static">
+                  <span class="subject-landing__subject-icon">\${payload.subjectIconMarkup || ""}</span>
+                  <span>\${escapeHtml(payload.subjectName || "Subject")}</span>
+                </span>
+                <span class="subject-landing__year">\${escapeHtml(payload.yearLabel || "")}</span>
+              </div>
+              <div class="subject-landing__bar-actions">
+                <button type="button" class="ghost-button subject-landing__nav-button" data-standalone-close="true">Close</button>
+              </div>
+            </div>
+            <div class="subject-landing__document-head">
+              <div class="subject-landing__document-copy">
+                <div>
+                  <h2>\${escapeHtml(payload.documentTitle || "Document")}</h2>
+                  <p>\${escapeHtml(\`\${Math.max(1, pages.length || 1)} pages · simplified into \${Math.max(1, pieces.length || 1)} bite-size pieces\`)}</p>
+                </div>
+              </div>
+              <div class="subject-landing__switch" role="tablist" aria-label="Document view">
+                <button type="button" class="\${state.view === "simple" ? "is-active" : ""}" data-standalone-view="simple">Simplified</button>
+                <button type="button" class="\${state.view === "original" ? "is-active" : ""}" data-standalone-view="original">Original doc</button>
+              </div>
+            </div>
+            \${state.view === "simple"
+              ? \`
+                <div class="subject-landing__progress-dots">
+                  \${pieces.map((_, index) => \`<span class="subject-landing__progress-dot\${index === pieceIndex ? " is-active" : index < pieceIndex ? " is-done" : ""}"></span>\`).join("")}
+                </div>
+                <div class="subject-landing__summary-layout">
+                  <button type="button" class="subject-landing__arrow" data-standalone-piece-move="-1" \${pieceIndex <= 0 ? "disabled" : ""}>←</button>
+                  <article class="subject-landing__summary-card">
+                    <span class="subject-landing__summary-pill">\${escapeHtml(currentPiece.badge || "")}</span>
+                    <h3>\${escapeHtml(currentPiece.title || "")}</h3>
+                    <p>\${escapeHtml(currentPiece.summary || "")}</p>
+                    <ul>
+                      \${(Array.isArray(currentPiece.bullets) ? currentPiece.bullets : []).map((bullet) => \`<li>\${escapeHtml(bullet)}</li>\`).join("")}
+                    </ul>
+                    <section class="subject-landing__explainer">
+                      <div class="subject-landing__explainer-beats">
+                        \${(Array.isArray(currentPiece.beats) ? currentPiece.beats : []).map((beat) => \`
+                          <article class="subject-landing__explainer-beat subject-landing__explainer-beat--visible">
+                            <span class="subject-landing__explainer-icon">\${escapeHtml(beat.icon || "📘")}</span>
+                            <strong>\${escapeHtml(beat.label || "")}</strong>
+                          </article>
+                        \`).join("")}
+                      </div>
+                    </section>
+                  </article>
+                  <button type="button" class="subject-landing__arrow" data-standalone-piece-move="1" \${pieceIndex >= pieces.length - 1 ? "disabled" : ""}>→</button>
+                </div>
+              \`
+              : \`
+                <div class="subject-landing__original-wrap">
+                  <button type="button" class="subject-landing__arrow" data-standalone-page-move="-1" \${pageIndex <= 0 ? "disabled" : ""}>←</button>
+                  <article class="subject-landing__summary-card subject-landing__summary-card--original subject-landing__summary-card--page">
+                    <span class="subject-landing__summary-pill">\${escapeHtml(currentPage ? \`Page \${currentPage.pageNumber} of \${Math.max(1, pages.length)}\` : "Original document")}</span>
+                    \${currentPage?.imageUrl
+                      ? \`<figure class="subject-landing__page-preview"><img src="\${escapeHtml(currentPage.imageUrl)}" alt="\${escapeHtml(\`\${payload.documentTitle} page \${currentPage.pageNumber}\`)}" class="subject-landing__page-image" /></figure>\`
+                      : ""}
+                    <div class="subject-landing__page-copy">
+                      <h3>\${escapeHtml(currentPage ? \`Page \${currentPage.pageNumber}\` : "Original document")}</h3>
+                      <p>\${escapeHtml((currentPage && currentPage.text) || "No page preview is available for this document yet.")}</p>
+                    </div>
+                  </article>
+                  <button type="button" class="subject-landing__arrow" data-standalone-page-move="1" \${!pages.length || pageIndex >= pages.length - 1 ? "disabled" : ""}>→</button>
+                </div>
+              \`}
+          </section>
+        \`;
+
+        host.querySelectorAll("[data-standalone-view]").forEach((button) => {
+          button.addEventListener("click", () => {
+            state.view = button.dataset.standaloneView || "simple";
+            renderStandalone();
+          });
+        });
+        host.querySelectorAll("[data-standalone-piece-move]").forEach((button) => {
+          button.addEventListener("click", () => {
+            state.pieceIndex += Number(button.dataset.standalonePieceMove || 0) || 0;
+            renderStandalone();
+          });
+        });
+        host.querySelectorAll("[data-standalone-page-move]").forEach((button) => {
+          button.addEventListener("click", () => {
+            state.pageIndex += Number(button.dataset.standalonePageMove || 0) || 0;
+            renderStandalone();
+          });
+        });
+        host.querySelector("[data-standalone-close]")?.addEventListener("click", () => window.close());
+      }
+
+      renderStandalone();
+    </script>
+  </body>
+</html>`;
+}
+
+function openSubjectLandingStandalonePage(subject, documentRecord, initialView = "simple") {
+  if (!subject || !documentRecord) {
+    return;
+  }
+
+  const popup = window.open("", "_blank");
+  if (!popup) {
+    return;
+  }
+
+  popup.opener = null;
+  popup.document.open();
+  popup.document.write(buildStandaloneDocumentPageHtml(getSubjectLandingStandalonePayload(subject, documentRecord, initialView)));
+  popup.document.close();
 }
 
 function openSubjectLandingDocument(subject, documentId) {
@@ -3301,6 +3475,7 @@ function renderSubjectLanding() {
                 <span class="subject-landing__dock-label">This piece</span>
                 <button type="button" class="subject-landing__dock-listen" data-subject-landing-listen-piece="true">▶ Listen</button>
                 <button type="button" class="subject-landing__dock-ask" data-subject-landing-ask="true">Ask Panda</button>
+                <button type="button" class="subject-landing__dock-open" data-subject-landing-open-full-page="simple">Open full page</button>
               </div>
             </div>
             ${state.subjectLandingAskOpen
@@ -3351,7 +3526,7 @@ function renderSubjectLanding() {
               <div class="subject-landing__dock-inner">
                 <span class="subject-landing__dock-label">Full doc</span>
                 <button type="button" class="subject-landing__dock-listen" data-subject-landing-listen-full="true">▶ Listen</button>
-                <button type="button" class="subject-landing__dock-ask" data-subject-landing-open-reader="true">Open in reader</button>
+                <button type="button" class="subject-landing__dock-open" data-subject-landing-open-full-page="original">Open full page</button>
               </div>
             </div>
           `}
@@ -3492,8 +3667,14 @@ function renderSubjectLanding() {
   });
   host.querySelector("[data-subject-landing-ask-mic]")?.addEventListener("click", handleAskMicToggle);
   host.querySelector("[data-subject-landing-ask-listen]")?.addEventListener("click", handleAskListen);
-  host.querySelector("[data-subject-landing-open-reader]")?.addEventListener("click", () => {
-    expandSubjectWorkspace("reader");
+  host.querySelectorAll("[data-subject-landing-open-full-page]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const documentRecord = getSubjectLandingOpenDocument(subject);
+      if (!documentRecord) {
+        return;
+      }
+      openSubjectLandingStandalonePage(subject, documentRecord, String(button.dataset.subjectLandingOpenFullPage || "simple"));
+    });
   });
 }
 
@@ -5030,6 +5211,7 @@ function createQuotaFallbackDocument(documentRecord) {
           sectionText: String(section?.sectionText || "").slice(0, 2000),
           pageStart: Number(section?.pageStart || 0) || null,
           pageEnd: Number(section?.pageEnd || 0) || null,
+          bullets: Array.isArray(section?.bullets) ? section.bullets.slice(0, 4) : [],
           importantTerms: Array.isArray(section?.importantTerms) ? section.importantTerms.slice(0, 8) : []
         }))
       : [],
@@ -7431,7 +7613,7 @@ function buildSpellingPaddockMarkup(spelling) {
         <div class="ss-stalls-panel">
         <div class="ss-stalls-head">
           <h4>The stalls</h4>
-          <span>${escapeHtml(roamingCount ? `${roamingCount} roaming in the paddock · tap a horse to bring it back` : "Scroll to see every horse · tap a horse to send it out · tap it again in the paddock to bring it back")}</span>
+          <span>${escapeHtml(roamingCount ? `${roamingCount} roaming in the paddock · tap a horse to bring it back` : "Every earned horse appears below · tap a horse to send it out · tap it again in the paddock to bring it back")}</span>
         </div>
         ${roamingCount ? '<div class="spelling-stage-actions spelling-stage-actions--compact"><button type="button" class="ghost-button ghost-button--small" data-spelling-return-all-stalls="true">Return all to stalls</button></div>' : ""}
           <div class="ss-stall-grid-wrap">
@@ -15341,6 +15523,9 @@ function normaliseStudySection(section, index) {
     sectionText: String(section?.sectionText || "").trim(),
     pageStart: Number(section?.pageStart || 0) || null,
     pageEnd: Number(section?.pageEnd || 0) || null,
+    bullets: Array.isArray(section?.bullets)
+      ? section.bullets.map((bullet) => String(bullet || "").trim()).filter(Boolean).slice(0, 4)
+      : [],
     importantTerms: Array.isArray(section?.importantTerms)
       ? section.importantTerms.map((term) => String(term || "").trim()).filter(Boolean)
       : []
@@ -15398,6 +15583,87 @@ function summariseSectionText(value, maxLength = 180) {
   return `${text.slice(0, maxLength).trim()}…`;
 }
 
+function extractStudySentences(value) {
+  return String(value || "")
+    .split(/[\n•]+/)
+    .flatMap((chunk) => String(chunk || "").split(/(?<=[.!?])\s+/))
+    .map((sentence) => normaliseWhitespace(sentence))
+    .filter(Boolean)
+    .filter((sentence) => !/^page\s+\d+\b/i.test(sentence));
+}
+
+function scoreStudySentence(sentence, importantTerms = []) {
+  const lowerSentence = String(sentence || "").toLowerCase();
+  const termHits = importantTerms.reduce((count, term) => {
+    const lowerTerm = String(term || "").trim().toLowerCase();
+    return lowerTerm && lowerSentence.includes(lowerTerm) ? count + 1 : count;
+  }, 0);
+  const cueHits = (lowerSentence.match(/\b(is|means|shows|explains|because|therefore|causes|includes|uses|forms|affects|results|theme|evidence|process|formula|definition|function|purpose|structure)\b/g) || []).length;
+  const numberHits = (lowerSentence.match(/\b\d+(?:\.\d+)?\b/g) || []).length;
+  const lengthScore = Math.min(4, Math.max(0, Math.round(lowerSentence.length / 40)));
+  return termHits * 4 + cueHits * 2 + numberHits + lengthScore;
+}
+
+function buildCoreStudySummary(value, importantTerms = [], maxLength = 220) {
+  const sentences = extractStudySentences(value)
+    .filter((sentence) => sentence.length >= 28)
+    .map((sentence, index) => ({
+      sentence,
+      index,
+      score: scoreStudySentence(sentence, importantTerms)
+    }))
+    .sort((left, right) => right.score - left.score || left.index - right.index);
+
+  if (!sentences.length) {
+    return summariseSectionText(value, maxLength);
+  }
+
+  const chosen = sentences
+    .slice(0, 2)
+    .sort((left, right) => left.index - right.index)
+    .map((entry) => entry.sentence.replace(/[.!?]+$/, "").trim());
+  const combined = normaliseWhitespace(chosen.join(". "));
+  if (!combined) {
+    return summariseSectionText(value, maxLength);
+  }
+  if (combined.length <= maxLength) {
+    return combined;
+  }
+  return summariseSectionText(combined, maxLength);
+}
+
+function buildCoreStudyBullets(value, importantTerms = [], limit = 3) {
+  const rankedSentences = extractStudySentences(value)
+    .map((sentence, index) => ({
+      sentence: sentence.replace(/[.!?]+$/, "").trim(),
+      index,
+      score: scoreStudySentence(sentence, importantTerms)
+    }))
+    .filter((entry) => entry.sentence.length >= 18)
+    .sort((left, right) => right.score - left.score || left.index - right.index);
+
+  const chosen = [];
+  rankedSentences.forEach((entry) => {
+    if (chosen.length >= limit) {
+      return;
+    }
+    if (chosen.some((candidate) => candidate.toLowerCase() === entry.sentence.toLowerCase())) {
+      return;
+    }
+    chosen.push(entry.sentence);
+  });
+
+  if (chosen.length) {
+    return chosen;
+  }
+
+  if (importantTerms.length) {
+    return importantTerms.slice(0, limit).map((term) => `Focus on ${term}`);
+  }
+
+  return ["Read the main idea closely", "Pull out the strongest detail", "Keep the key terms in mind"];
+}
+
 function buildFallbackStudyPlan(documentRecord) {
   const sourceText = String(documentRecord.content || "").trim();
   const pages = Array.isArray(documentRecord.pages) ? documentRecord.pages : [];
@@ -15428,15 +15694,20 @@ function buildFallbackStudyPlan(documentRecord) {
     : [{ title: "Overview", summary: summariseSectionText(sourceText), sectionText: sourceText, pageStart: null, pageEnd: null }];
 
   const usableSections = rawSections
-    .map((section, index) => normaliseStudySection({
-      id: `section-${index + 1}`,
-      title: section.title,
-      summary: section.summary || "",
-      sectionText: section.sectionText || sourceText,
-      pageStart: section.pageStart,
-      pageEnd: section.pageEnd,
-      importantTerms: extractImportantTermsFromText(section.sectionText || sourceText).slice(0, 8)
-    }, index))
+    .map((section, index) => {
+      const sectionText = section.sectionText || sourceText;
+      const importantTerms = extractImportantTermsFromText(sectionText).slice(0, 8);
+      return normaliseStudySection({
+        id: `section-${index + 1}`,
+        title: section.title,
+        summary: buildCoreStudySummary(section.summary || sectionText, importantTerms),
+        sectionText,
+        pageStart: section.pageStart,
+        pageEnd: section.pageEnd,
+        bullets: buildCoreStudyBullets(sectionText, importantTerms, 3),
+        importantTerms
+      }, index);
+    })
     .filter((section) => section.sectionText);
 
   const sections = usableSections.length
@@ -15444,8 +15715,9 @@ function buildFallbackStudyPlan(documentRecord) {
     : [normaliseStudySection({
         id: "section-1",
         title: "Overview",
-        summary: "",
+        summary: buildCoreStudySummary(sourceText),
         sectionText: sourceText || "No readable text is available for this document yet.",
+        bullets: buildCoreStudyBullets(sourceText, [], 3),
         importantTerms: []
       }, 0)];
 

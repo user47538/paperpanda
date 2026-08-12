@@ -191,6 +191,9 @@ function normaliseStudySections(sections) {
       title: String(section?.title || `Section ${index + 1}`).trim(),
       summary: String(section?.summary || "").trim(),
       sectionText: String(section?.sectionText || "").trim(),
+      bullets: Array.isArray(section?.bullets)
+        ? section.bullets.map((bullet) => String(bullet || "").trim()).filter(Boolean).slice(0, 4)
+        : [],
       importantTerms: Array.isArray(section?.importantTerms)
         ? section.importantTerms.map((term) => String(term || "").trim()).filter(Boolean).slice(0, 10)
         : []
@@ -1016,7 +1019,7 @@ app.post("/api/document/study-plan", async (request, response) => {
             {
               type: "input_text",
               text:
-                "You are organising a school study document for a student. Return only JSON. Break the document into sequential study sections. Make the section titles useful and specific. Preserve subject detail. For maths or science, name the actual concepts or topics covered. For humanities or English, name the actual themes, source skills, or content focus. Also create a short end-of-document quiz. Do not use markdown in the JSON."
+                "You are organising a school study document for a student. Return only JSON. Your main job is to surface the core knowledge, vocabulary, processes, evidence, and ideas the student must actually know to succeed in the unit. Break the document into sequential study sections. Make the section titles useful and specific. Preserve subject detail. For maths or science, name the actual concepts, formulas, processes, and examples covered. For humanities or English, name the actual themes, source skills, arguments, text ideas, and evidence focus. Do not waste space on filler, generic encouragement, or broad paraphrases. Also create a short end-of-document quiz. Do not use markdown in the JSON."
             }
           ]
         },
@@ -1043,6 +1046,7 @@ app.post("/api/document/study-plan", async (request, response) => {
                         title: "string",
                         summary: "string",
                         sectionText: "string",
+                        bullets: ["string"],
                         importantTerms: ["string"]
                       }
                     ],
@@ -1063,7 +1067,12 @@ app.post("/api/document/study-plan", async (request, response) => {
                   rules: [
                     "Create between 3 and 7 sections.",
                     "Keep sections in the same order as the document.",
+                    "Each section summary must explain the core knowledge or skill from that section in 1 to 2 student-friendly sentences.",
+                    "Each section bullets list must contain 2 to 4 specific takeaways the student genuinely needs to know from that section.",
+                    "Each bullet must name the actual concept, process, example, term, theme, or evidence focus instead of generic advice.",
                     "Make sectionText concise enough to study from, but specific enough to preserve the key teaching points.",
+                    "Prioritise what the student would need to remember to complete the unit, answer questions, or revise the topic later.",
+                    "Do not fill the summary or bullets with generic lines like understand this topic, revise your notes, or learn the key ideas.",
                     "The quiz must have exactly 4 multiple-choice questions.",
                     "Set passingScore to 3 unless the document is extremely short."
                   ]
