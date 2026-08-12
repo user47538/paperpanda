@@ -5428,6 +5428,227 @@ function hydrateStoredSubject(subject, index) {
   };
 }
 
+function getLatestCollectionTimestamp(items, fieldNames = ["addedAt", "savedAt", "completedAt", "dueDate"]) {
+  return (Array.isArray(items) ? items : []).reduce((latest, item) => {
+    const rawValue = fieldNames.map((fieldName) => String(item?.[fieldName] || "").trim()).find(Boolean);
+    if (!rawValue) {
+      return latest;
+    }
+    const timestamp = new Date(rawValue).getTime();
+    return Number.isFinite(timestamp) ? Math.max(latest, timestamp) : latest;
+  }, 0);
+}
+
+function getSubjectSnapshotPriority(subject) {
+  const documents = Array.isArray(subject?.documents) ? subject.documents : [];
+  const assessments = Array.isArray(subject?.assessments) ? subject.assessments : [];
+  const watchItems = Array.isArray(subject?.watch) ? subject.watch : [];
+  const savedTests = Array.isArray(subject?.savedRevisionTests) ? subject.savedRevisionTests : [];
+
+  return {
+    documents: documents.length,
+    pages: documents.reduce((total, documentRecord) => total + (Array.isArray(documentRecord?.pages) ? documentRecord.pages.length : 0), 0),
+    assessments: assessments.length,
+    watchItems: watchItems.length,
+    savedTests: savedTests.length,
+    studySections: documents.reduce((total, documentRecord) => total + (Array.isArray(documentRecord?.studySections) ? documentRecord.studySections.length : 0), 0),
+    latestActivity: Math.max(
+      getLatestCollectionTimestamp(documents, ["addedAt"]),
+      getLatestCollectionTimestamp(assessments, ["dueDate"]),
+      getLatestCollectionTimestamp(watchItems, ["addedAt"]),
+      getLatestCollectionTimestamp(savedTests, ["savedAt"])
+    )
+  };
+}
+
+function compareSubjectSnapshotPriority(leftSubject, rightSubject) {
+  const left = getSubjectSnapshotPriority(leftSubject);
+  const right = getSubjectSnapshotPriority(rightSubject);
+  const fields = ["documents", "pages", "assessments", "watchItems", "savedTests", "studySections", "latestActivity"];
+  for (const field of fields) {
+    if (left[field] !== right[field]) {
+      return left[field] - right[field];
+    }
+  }
+  return 0;
+}
+
+function mergeSubjectCollection(preferredItems, fallbackItems, getKey, choosePreferred) {
+  const mergedMap = new Map();
+  [...(Array.isArray(fallbackItems) ? fallbackItems : []), ...(Array.isArray(preferredItems) ? preferredItems : [])].forEach((item, index) => {
+    const key = getKey(item, index);
+    if (!key) {
+      return;
+    }
+    const currentItem = mergedMap.get(key);
+    mergedMap.set(key, currentItem ? choosePreferred(currentItem, item) : item);
+  });
+  return [...mergedMap.values()];
+}
+
+function getDocumentMergeKey(documentRecord, index) {
+  const id = String(documentRecord?.id || "").trim();
+  if (id) {
+    return `id:${id}`;
+  }
+  const title = String(documentRecord?.title || "").trim().toLowerCase();
+  if (title) {
+    return `title:${title}`;
+  }
+  return `index:${index}`;
+}
+
+function choosePreferredDocumentRecord(currentRecord, candidateRecord) {
+  const currentPages = Array.isArray(currentRecord?.pages) ? currentRecord.pages.length : 0;
+  const candidatePages = Array.isArray(candidateRecord?.pages) ? candidateRecord.pages.length : 0;
+  if (candidatePages !== currentPages) {
+    return candidatePages > currentPages ? candidateRecord : currentRecord;
+  }
+
+  const currentSections = Array.isArray(currentRecord?.studySections) ? currentRecord.studySections.length : 0;
+  const candidateSections = Array.isArray(candidateRecord?.studySections) ? candidateRecord.studySections.length : 0;
+  if (candidateSections !== currentSections) {
+    return candidateSections > currentSections ? candidateRecord : currentRecord;
+  }
+
+  const currentContentLength = String(currentRecord?.content || "").length;
+  const candidateContentLength = String(candidateRecord?.content || "").length;
+  if (candidateContentLength !== currentContentLength) {
+    return candidateContentLength > currentContentLength ? candidateRecord : currentRecord;
+  }
+
+  const currentTimestamp = new Date(String(currentRecord?.addedAt || "")).getTime() || 0;
+  const candidateTimestamp = new Date(String(candidateRecord?.addedAt || "")).getTime() || 0;
+  return candidateTimestamp >= currentTimestamp ? candidateRecord : currentRecord;
+}
+
+function mergeDocumentsForSubject(preferredSubject, fallbackSubject) {
+  return mergeSubjectCollection(
+    preferredSubject?.documents,
+    fallbackSubject?.documents,
+    getDocumentMergeKey,
+    choosePreferredDocumentRecord
+  );
+}
+
+function mergeAssessmentsForSubject(preferredSubject, fallbackSubject) {
+  return mergeSubjectCollection(
+    preferredSubject?.assessments,
+    fallbackSubject?.assessments,
+    (assessment, index) => {
+      const id = String(assessment?.id || "").trim();
+      if (id) {
+        return `id:${id}`;
+      }
+      const title = String(assessment?.title || assessment?.componentTask || "").trim().toLowerCase();
+      return title ? `title:${title}` : `index:${index}`;
+    },
+    (currentAssessment, candidateAssessment) => {
+      const currentLinks = Array.isArray(currentAssessment?.linkedDocumentIds) ? currentAssessment.linkedDocumentIds.length : 0;
+      const candidateLinks = Array.isArray(candidateAssessment?.linkedDocumentIds) ? candidateAssessment.linkedDocumentIds.length : 0;
+      if (candidateLinks !== currentLinks) {
+        return candidateLinks > currentLinks ? candidateAssessment : currentAssessment;
+      }
+      return String(candidateAssessment?.workNotes || "").length >= String(currentAssessment?.workNotes || "").length
+        ? candidateAssessment
+        : currentAssessment;
+    }
+  );
+}
+
+function mergeWatchItemsForSubject(preferredSubject, fallbackSubject) {
+  return mergeSubjectCollection(
+    preferredSubject?.watch,
+    fallbackSubject?.watch,
+    (watchItem, index) => {
+      const id = String(watchItem?.id || "").trim();
+      if (id) {
+        return `id:${id}`;
+      }
+      const url = normaliseWatchUrl(watchItem?.url);
+      return url ? `url:${url}` : `index:${index}`;
+    },
+    (currentWatchItem, candidateWatchItem) =>
+      String(candidateWatchItem?.title || "").length >= String(currentWatchItem?.title || "").length
+        ? candidateWatchItem
+        : currentWatchItem
+  );
+}
+
+function mergeSavedRevisionTestsForSubject(preferredSubject, fallbackSubject) {
+  return mergeSubjectCollection(
+    preferredSubject?.savedRevisionTests,
+    fallbackSubject?.savedRevisionTests,
+    (savedTest, index) => {
+      const id = String(savedTest?.id || "").trim();
+      if (id) {
+        return `id:${id}`;
+      }
+      const title = String(savedTest?.title || "").trim().toLowerCase();
+      const savedAt = String(savedTest?.savedAt || "").trim();
+      return title || savedAt ? `saved:${title}:${savedAt}` : `index:${index}`;
+    },
+    (currentSavedTest, candidateSavedTest) =>
+      String(candidateSavedTest?.savedAt || "") >= String(currentSavedTest?.savedAt || "")
+        ? candidateSavedTest
+        : currentSavedTest
+  );
+}
+
+function mergeStoredSubjectSnapshots(primarySubject, secondarySubject, index) {
+  if (!primarySubject) {
+    return hydrateStoredSubject(secondarySubject, index);
+  }
+  if (!secondarySubject) {
+    return hydrateStoredSubject(primarySubject, index);
+  }
+
+  const preferredSubject = compareSubjectSnapshotPriority(primarySubject, secondarySubject) >= 0
+    ? primarySubject
+    : secondarySubject;
+  const fallbackSubject = preferredSubject === primarySubject ? secondarySubject : primarySubject;
+
+  return hydrateStoredSubject({
+    ...fallbackSubject,
+    ...preferredSubject,
+    documents: mergeDocumentsForSubject(preferredSubject, fallbackSubject),
+    assessments: mergeAssessmentsForSubject(preferredSubject, fallbackSubject),
+    watch: mergeWatchItemsForSubject(preferredSubject, fallbackSubject),
+    savedRevisionTests: mergeSavedRevisionTestsForSubject(preferredSubject, fallbackSubject),
+    hiddenWatchUrls: [...new Set([...(fallbackSubject.hiddenWatchUrls || []), ...(preferredSubject.hiddenWatchUrls || [])])]
+  }, index);
+}
+
+function mergeSubjectSources(primarySubjects, secondarySubjects) {
+  if (!Array.isArray(primarySubjects) && !Array.isArray(secondarySubjects)) {
+    return null;
+  }
+
+  const primaryMap = new Map();
+  const secondaryMap = new Map();
+  const orderedIds = [];
+
+  const addSubjectsToMap = (subjects, targetMap) => {
+    (Array.isArray(subjects) ? subjects : []).forEach((subject, index) => {
+      const hydratedSubject = hydrateStoredSubject(subject, index);
+      if (!hydratedSubject.id) {
+        return;
+      }
+      targetMap.set(hydratedSubject.id, hydratedSubject);
+      if (!orderedIds.includes(hydratedSubject.id)) {
+        orderedIds.push(hydratedSubject.id);
+      }
+    });
+  };
+
+  addSubjectsToMap(primarySubjects, primaryMap);
+  addSubjectsToMap(secondarySubjects, secondaryMap);
+
+  return orderedIds.map((subjectId, index) =>
+    mergeStoredSubjectSnapshots(primaryMap.get(subjectId), secondaryMap.get(subjectId), index)
+  );
+}
+
 function createDefaultWritingSections() {
   return Array.from({ length: WRITING_STUDIO_SECTION_COUNT }, (_, index) => ({
     id: `section-${index + 1}`,
@@ -8747,7 +8968,11 @@ function restoreSubjectsForAccount(account, subjectsOverride = null, { skipRemot
   }
 
   const storedSubjectsMap = loadStoredSubjectsMap();
-  const resolvedSubjects = buildResolvedSubjectsFromStore(account, subjectsOverride ?? storedSubjectsMap[accountKey]);
+  const mergedSubjectsSource = mergeSubjectSources(subjectsOverride, storedSubjectsMap[accountKey]);
+  const resolvedSubjects = buildResolvedSubjectsFromStore(
+    account,
+    mergedSubjectsSource || subjectsOverride || storedSubjectsMap[accountKey]
+  );
   state.subjects = resolvedSubjects;
   saveStoredSubjectsMapForAccount(storedSubjectsMap, accountKey, state.subjects);
 
