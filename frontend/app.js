@@ -1988,6 +1988,17 @@ function getVisibleSubjectDocuments(subject) {
   return getReaderDocuments(subject);
 }
 
+function hasCurrentDocumentStudyPlan(documentRecord) {
+  const storedSections = Array.isArray(documentRecord?.studySections)
+    ? documentRecord.studySections.map(normaliseStudySection).filter((section) => section.sectionText)
+    : [];
+  return (
+    Number(documentRecord?.studyPlanVersion || 0) >= STUDY_PLAN_VERSION &&
+    storedSections.length > 0 &&
+    ["ready", "fallback"].includes(String(documentRecord?.studyPlanStatus || ""))
+  );
+}
+
 function getSelectedDocument() {
   const subject = getSelectedSubject();
   return getAllReaderDocuments(subject || { documents: [] }).find((doc) => doc.id === state.selectedDocumentId) || null;
@@ -2103,10 +2114,10 @@ async function ensureDocumentStudyPlan(documentRecord, subject, { force = false 
   if (!documentRecord || !subject || !isWholeStudyDocument(documentRecord)) {
     return;
   }
-  if (!force && documentRecord.studyPlanStatus === "ready" && getDocumentSections(documentRecord).length) {
+  if (documentRecord.studyPlanStatus === "loading") {
     return;
   }
-  if (documentRecord.studyPlanStatus === "loading") {
+  if (!force && hasCurrentDocumentStudyPlan(documentRecord)) {
     return;
   }
 
@@ -2131,6 +2142,7 @@ async function ensureDocumentStudyPlan(documentRecord, subject, { force = false 
       documentRecord.studySections = fallbackPlan.sections;
       documentRecord.studyPlanStatus = "fallback";
     }
+    documentRecord.studyPlanVersion = STUDY_PLAN_VERSION;
   } catch (error) {
     console.error("Document study plan failed.", error);
     const fallbackPlan = buildFallbackStudyPlan(documentRecord);
@@ -2139,6 +2151,7 @@ async function ensureDocumentStudyPlan(documentRecord, subject, { force = false 
     documentRecord.studySections = fallbackPlan.sections;
     documentRecord.endQuiz = fallbackPlan.quiz;
     documentRecord.studyPlanStatus = "fallback";
+    documentRecord.studyPlanVersion = STUDY_PLAN_VERSION;
   }
 
   persistSubjects();
@@ -2865,6 +2878,30 @@ function setCurrentDocumentPageIndex(documentRecord, nextIndex) {
 
 function getDocumentPageText(page) {
   return String(page?.text || "").replace(/^Page\s+\d+\s*/i, "").trim();
+}
+
+function getRecommendedStudySectionCount(pageCount) {
+  const totalPages = Math.max(1, Number(pageCount || 0) || 1);
+  if (totalPages <= 1) {
+    return 1;
+  }
+  if (totalPages <= 4) {
+    return totalPages;
+  }
+  if (totalPages <= 12) {
+    return Math.ceil(totalPages / 2);
+  }
+  if (totalPages <= 36) {
+    return Math.ceil(totalPages / 3);
+  }
+  return Math.min(18, Math.ceil(totalPages / 4));
+}
+
+function getRecommendedStudySectionCountForDocument(documentRecord) {
+  const pageTotal = Array.isArray(documentRecord?.pages) && documentRecord.pages.length
+    ? documentRecord.pages.length
+    : Math.max(1, Math.ceil(String(documentRecord?.content || "").trim().length / 1800));
+  return getRecommendedStudySectionCount(pageTotal);
 }
 
 function selectAdjacentDocument(direction) {
@@ -5270,6 +5307,7 @@ function createQuotaFallbackDocument(documentRecord) {
       : [],
     studyOverview: String(documentRecord.studyOverview || "").slice(0, 1200),
     studyPlanStatus: documentRecord.studyPlanStatus || "idle",
+    studyPlanVersion: Math.max(0, Number(documentRecord.studyPlanVersion || 0) || 0),
     studySections: Array.isArray(documentRecord.studySections)
       ? documentRecord.studySections.slice(0, 8).map((section, index) => ({
           id: String(section?.id || `section-${index + 1}`),
@@ -8665,6 +8703,7 @@ function normaliseDocument(documentRecord) {
       : [],
     studyOverview: String(documentRecord.studyOverview || "").trim(),
     studyPlanStatus: String(documentRecord.studyPlanStatus || "idle"),
+    studyPlanVersion: Math.max(0, Number(documentRecord.studyPlanVersion || 0) || 0),
     studySections: Array.isArray(documentRecord.studySections)
       ? documentRecord.studySections.map(normaliseStudySection).filter((section) => section.sectionText)
       : [],
@@ -9639,12 +9678,41 @@ async function requestApiFormData(endpoint, formData) {
 }
 
 async function requestDocumentStudyPlan(documentRecord, subject) {
+  const pageExcerpts = Array.isArray(documentRecord?.pages)
+    ? documentRecord.pages
+        .map((page, index) => ({
+          pageNumber: Number(page?.pageNumber || index + 1) || index + 1,
+          text: getDocumentPageText(page)
+        }))
+        .filter((page) => page.text)
+        .reduce((result, page) => {
+          const usedChars = result.reduce((total, entry) => total + entry.text.length + 24, 0);
+          if (result.length >= 90 || usedChars >= 24000) {
+            return result;
+          }
+          const remainingChars = 24000 - usedChars;
+          if (remainingChars < 160) {
+            return result;
+          }
+          const clippedText = clipText(page.text, Math.min(320, remainingChars - 24));
+          if (!clippedText) {
+            return result;
+          }
+          result.push({
+            pageNumber: page.pageNumber,
+            text: clippedText
+          });
+          return result;
+        }, [])
+    : [];
+
   return requestApi("/api/document/study-plan", {
     subjectName: subject.name,
     title: documentRecord.title,
     type: documentRecord.type,
     pageCount: Array.isArray(documentRecord.pages) ? documentRecord.pages.length : 0,
-    content: clipText(documentRecord.content || "", 18000)
+    content: clipText(documentRecord.content || "", pageExcerpts.length ? 5000 : 24000),
+    pageExcerpts
   });
 }
 
@@ -11029,7 +11097,7 @@ function renderReader() {
   }
 
   if (isWholeStudyDocument(selectedDocument)) {
-    if (selectedDocument.studyPlanStatus === "idle" && subject) {
+    if (subject && !hasCurrentDocumentStudyPlan(selectedDocument)) {
       void ensureDocumentStudyPlan(selectedDocument, subject);
     }
 
@@ -15629,6 +15697,8 @@ function createId() {
   return `doc-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+const STUDY_PLAN_VERSION = 2;
+
 function createDocumentRecord({ title, type, content }) {
   return {
     id: createId(),
@@ -15646,6 +15716,7 @@ function createDocumentRecord({ title, type, content }) {
     pages: [],
     studyOverview: "",
     studyPlanStatus: "idle",
+    studyPlanVersion: 0,
     studySections: [],
     completedSectionIds: [],
     currentSectionIndex: 0,
@@ -15819,9 +15890,9 @@ function buildFallbackStudyPlan(documentRecord) {
       text: getDocumentPageText(page)
     }))
     .filter((page) => page.text);
+  const targetSectionCount = getRecommendedStudySectionCountForDocument(documentRecord);
   const rawSections = usablePages.length
     ? (() => {
-        const targetSectionCount = Math.min(7, Math.max(3, Math.ceil(usablePages.length / 12)));
         const chunkSize = Math.max(1, Math.ceil(usablePages.length / targetSectionCount));
         return Array.from({ length: Math.ceil(usablePages.length / chunkSize) }, (_, index) => {
           const group = usablePages.slice(index * chunkSize, (index + 1) * chunkSize);
@@ -15837,7 +15908,27 @@ function buildFallbackStudyPlan(documentRecord) {
           };
         }).filter((section) => section.sectionText);
       })()
-    : [{ title: "Overview", summary: summariseSectionText(sourceText), sectionText: sourceText, pageStart: null, pageEnd: null }];
+    : (() => {
+        const textBlocks = String(documentRecord.content || "")
+          .split(/\n{2,}/)
+          .map((block) => normaliseWhitespace(block))
+          .filter((block) => block.length >= 60);
+        if (!textBlocks.length) {
+          return [{ title: "Overview", summary: summariseSectionText(sourceText), sectionText: sourceText, pageStart: null, pageEnd: null }];
+        }
+        const chunkSize = Math.max(1, Math.ceil(textBlocks.length / Math.min(targetSectionCount, textBlocks.length)));
+        return Array.from({ length: Math.ceil(textBlocks.length / chunkSize) }, (_, index) => {
+          const group = textBlocks.slice(index * chunkSize, (index + 1) * chunkSize);
+          const sectionText = group.join("\n\n");
+          return {
+            title: `Section ${index + 1}`,
+            summary: summariseSectionText(sectionText),
+            sectionText,
+            pageStart: null,
+            pageEnd: null
+          };
+        }).filter((section) => section.sectionText);
+      })();
 
   const usableSections = rawSections
     .map((section, index) => {
@@ -15867,7 +15958,8 @@ function buildFallbackStudyPlan(documentRecord) {
         importantTerms: []
       }, 0)];
 
-  const quizTerms = extractImportantTermsFromText(sourceText).slice(0, 4);
+  const allImportantTerms = extractImportantTermsFromText(sourceText).slice(0, 20);
+  const quizTerms = allImportantTerms.slice(0, 4);
   const quiz = normaliseStudyQuiz({
     title: `${documentRecord.title} quick check`,
     passingScore: Math.min(3, Math.max(1, quizTerms.length || 3)),
@@ -15886,8 +15978,8 @@ function buildFallbackStudyPlan(documentRecord) {
   });
 
   return {
-    overview: "",
-    importantTerms: extractImportantTermsFromText(sourceText).slice(0, 20),
+    overview: buildCoreStudySummary(sourceText, allImportantTerms.slice(0, 8), 260),
+    importantTerms: allImportantTerms,
     sections,
     quiz
   };

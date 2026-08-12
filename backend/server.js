@@ -180,6 +180,49 @@ function cleanDocumentStudyText(value) {
     .slice(0, 28000);
 }
 
+function cleanDocumentStudyPageExcerpts(pageExcerpts) {
+  if (!Array.isArray(pageExcerpts)) {
+    return [];
+  }
+
+  return pageExcerpts
+    .map((page, index) => ({
+      pageNumber: Math.max(1, Number(page?.pageNumber || index + 1) || index + 1),
+      text: clipText(String(page?.text || "").replace(/\s+/g, " ").trim(), 360)
+    }))
+    .filter((page) => page.text)
+    .slice(0, 90);
+}
+
+function getRecommendedStudySectionCount(pageCount) {
+  const totalPages = Math.max(1, Number(pageCount || 0) || 1);
+  if (totalPages <= 1) {
+    return 1;
+  }
+  if (totalPages <= 4) {
+    return totalPages;
+  }
+  if (totalPages <= 12) {
+    return Math.ceil(totalPages / 2);
+  }
+  if (totalPages <= 36) {
+    return Math.ceil(totalPages / 3);
+  }
+  return Math.min(18, Math.ceil(totalPages / 4));
+}
+
+function getStudyPlanSectionCountGuidance(pageCount) {
+  const target = getRecommendedStudySectionCount(pageCount);
+  if (target <= 4) {
+    return { min: target, max: target, target };
+  }
+  return {
+    min: Math.max(4, target - 1),
+    max: Math.min(18, target + 1),
+    target
+  };
+}
+
 function normaliseStudySections(sections) {
   if (!Array.isArray(sections)) {
     return [];
@@ -191,6 +234,8 @@ function normaliseStudySections(sections) {
       title: String(section?.title || `Section ${index + 1}`).trim(),
       summary: String(section?.summary || "").trim(),
       sectionText: String(section?.sectionText || "").trim(),
+      pageStart: Number(section?.pageStart || 0) || null,
+      pageEnd: Number(section?.pageEnd || 0) || null,
       bullets: Array.isArray(section?.bullets)
         ? section.bullets.map((bullet) => String(bullet || "").trim()).filter(Boolean).slice(0, 4)
         : [],
@@ -1004,6 +1049,9 @@ app.post("/api/document/study-plan", async (request, response) => {
     const type = String(request.body?.type || "").trim();
     const pageCount = Number(request.body?.pageCount || 0);
     const content = cleanDocumentStudyText(request.body?.content);
+    const pageExcerpts = cleanDocumentStudyPageExcerpts(request.body?.pageExcerpts);
+    const effectivePageCount = pageCount || pageExcerpts.length || Math.max(1, Math.ceil(content.length / 1800));
+    const sectionCountGuidance = getStudyPlanSectionCountGuidance(effectivePageCount);
 
     if (!subjectName || !title || !content) {
       response.status(400).json({ error: "subjectName, title, and content are required." });
@@ -1019,7 +1067,7 @@ app.post("/api/document/study-plan", async (request, response) => {
             {
               type: "input_text",
               text:
-                "You are organising a school study document for a student. Return only JSON. Your main job is to surface the core knowledge, vocabulary, processes, evidence, and ideas the student must actually know to succeed in the unit. Break the document into sequential study sections. Make the section titles useful and specific. Preserve subject detail. For maths or science, name the actual concepts, formulas, processes, and examples covered. For humanities or English, name the actual themes, source skills, arguments, text ideas, and evidence focus. Do not waste space on filler, generic encouragement, or broad paraphrases. Also create a short end-of-document quiz. Do not use markdown in the JSON."
+                "You are organising a school study document for a student. Return only JSON. Your job is to act like a sharp tutor who decides what is genuinely worth learning for the syllabus and assessed work. Surface the core knowledge, vocabulary, processes, evidence, examples, arguments, and success criteria the student must actually know to succeed in the unit. Break the document into sequential study sections. Make the section titles useful and specific. Preserve subject detail. For maths or science, name the actual concepts, formulas, processes, and examples covered. For humanities or English, name the actual themes, source skills, arguments, text ideas, and evidence focus. Ignore decorative, repetitive, or administrative text unless it directly affects the assessed task. Also create a short end-of-document quiz. Do not use markdown in the JSON."
             }
           ]
         },
@@ -1034,9 +1082,11 @@ app.post("/api/document/study-plan", async (request, response) => {
                     subjectName,
                     title,
                     type,
-                    pageCount,
+                    pageCount: effectivePageCount,
+                    targetSectionCount: sectionCountGuidance.target,
                     content
                   },
+                  pageExcerpts,
                   outputSchema: {
                     overview: "string",
                     importantTerms: ["string"],
@@ -1046,6 +1096,8 @@ app.post("/api/document/study-plan", async (request, response) => {
                         title: "string",
                         summary: "string",
                         sectionText: "string",
+                        pageStart: "number|null",
+                        pageEnd: "number|null",
                         bullets: ["string"],
                         importantTerms: ["string"]
                       }
@@ -1065,13 +1117,16 @@ app.post("/api/document/study-plan", async (request, response) => {
                     }
                   },
                   rules: [
-                    "Create between 3 and 7 sections.",
+                    `Create between ${sectionCountGuidance.min} and ${sectionCountGuidance.max} sections. Aim for ${sectionCountGuidance.target} sections for this document length.`,
                     "Keep sections in the same order as the document.",
                     "Each section summary must explain the core knowledge or skill from that section in 1 to 2 student-friendly sentences.",
                     "Each section bullets list must contain 2 to 4 specific takeaways the student genuinely needs to know from that section.",
                     "Each bullet must name the actual concept, process, example, term, theme, or evidence focus instead of generic advice.",
                     "Make sectionText concise enough to study from, but specific enough to preserve the key teaching points.",
-                    "Prioritise what the student would need to remember to complete the unit, answer questions, or revise the topic later.",
+                    "Prioritise what the student would need to remember to complete the unit, answer questions, write responses, or revise the topic later.",
+                    "Use the pageExcerpts to keep the section order correct and include pageStart and pageEnd whenever page numbers are available.",
+                    "For longer documents, do not compress a large number of pages into a tiny number of sections. Keep each section focused on a small sequential chunk of learning.",
+                    "If the document includes assignment directions, keep the parts that change what the student must know, show, explain, compare, or include for success.",
                     "Do not fill the summary or bullets with generic lines like understand this topic, revise your notes, or learn the key ideas.",
                     "The quiz must have exactly 4 multiple-choice questions.",
                     "Set passingScore to 3 unless the document is extremely short."
@@ -1089,7 +1144,7 @@ app.post("/api/document/study-plan", async (request, response) => {
           type: "json_object"
         }
       },
-      max_output_tokens: 5000
+      max_output_tokens: 7000
     });
 
     const parsed = extractResponseJson(responsePayload);
