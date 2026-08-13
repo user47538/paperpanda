@@ -3573,7 +3573,6 @@ function renderSubjectLanding() {
                 <span class="subject-landing__dock-label">This piece</span>
                 <button type="button" class="subject-landing__dock-listen" data-subject-landing-listen-piece="true">▶ Listen</button>
                 <button type="button" class="subject-landing__dock-ask" data-subject-landing-ask="true">Ask Panda</button>
-                <button type="button" class="subject-landing__dock-open" data-subject-landing-open-full-page="simple">Open full page</button>
               </div>
             </div>
             ${state.subjectLandingAskOpen
@@ -3631,13 +3630,6 @@ function renderSubjectLanding() {
                 </div>
               </article>
               <button type="button" class="subject-landing__arrow" data-subject-landing-page-move="1" ${!pageList.length || currentPageIndex >= pageList.length - 1 ? "disabled" : ""}>→</button>
-            </div>
-            <div class="subject-landing__dock">
-              <div class="subject-landing__dock-inner">
-                <span class="subject-landing__dock-label">Full doc</span>
-                <button type="button" class="subject-landing__dock-listen" data-subject-landing-listen-full="true">▶ Listen</button>
-                <button type="button" class="subject-landing__dock-open" data-subject-landing-open-full-page="original">Open full page</button>
-              </div>
             </div>
           `}
       </section>
