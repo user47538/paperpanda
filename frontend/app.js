@@ -8,6 +8,7 @@ const currentUiVersion = "2026-07-30-writing-launchpad-and-stage5-fix";
 const previewDatabaseName = "paperpanda-assets";
 const previewStoreName = "document-previews";
 const settingsAssetStoreName = "settings-assets";
+const subjectsSnapshotStoreName = "subjects-snapshots";
 const GOOGLE_DOCS_SCOPE = "https://www.googleapis.com/auth/documents";
 const GOOGLE_IDENTITY_SCRIPT_ID = "google-identity-client";
 const GOOGLE_IDENTITY_SCRIPT_URL = "https://accounts.google.com/gsi/client";
@@ -44,6 +45,8 @@ let currentAudioBufferSource = null;
 let aiSpeechPlaybackContext = null;
 let aiSpeechPlaybackPrimed = false;
 let previewDatabasePromise = null;
+let indexedDbSubjectsSaveQueuedSnapshot = null;
+let indexedDbSubjectsSaveInFlight = false;
 let currentListenSessionId = 0;
 let currentAudioContext = "";
 let currentSpeechRecognition = null;
@@ -5136,7 +5139,7 @@ function openPreviewDatabase() {
 
   if (!previewDatabasePromise) {
     previewDatabasePromise = new Promise((resolve, reject) => {
-      const request = window.indexedDB.open(previewDatabaseName, 2);
+      const request = window.indexedDB.open(previewDatabaseName, 3);
       request.onerror = () => reject(request.error || new Error("Preview storage could not be opened."));
       request.onupgradeneeded = () => {
         const database = request.result;
@@ -5145,6 +5148,9 @@ function openPreviewDatabase() {
         }
         if (!database.objectStoreNames.contains(settingsAssetStoreName)) {
           database.createObjectStore(settingsAssetStoreName, { keyPath: "id" });
+        }
+        if (!database.objectStoreNames.contains(subjectsSnapshotStoreName)) {
+          database.createObjectStore(subjectsSnapshotStoreName, { keyPath: "accountKey" });
         }
       };
       request.onsuccess = () => resolve(request.result);
@@ -5234,6 +5240,38 @@ async function getPreviewRecord(documentId) {
     const request = transaction.objectStore(previewStoreName).get(documentId);
     request.onsuccess = () => resolve(request.result || null);
     request.onerror = () => reject(request.error || new Error("Preview image could not be loaded."));
+  });
+}
+
+async function putSubjectsSnapshotRecord(accountKey, subjects) {
+  const database = await openPreviewDatabase();
+  if (!database || !accountKey) {
+    return;
+  }
+
+  await new Promise((resolve, reject) => {
+    const transaction = database.transaction(subjectsSnapshotStoreName, "readwrite");
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error || new Error("Subject snapshot could not be saved."));
+    transaction.objectStore(subjectsSnapshotStoreName).put({
+      accountKey,
+      subjects,
+      updatedAt: new Date().toISOString()
+    });
+  });
+}
+
+async function getSubjectsSnapshotRecord(accountKey) {
+  const database = await openPreviewDatabase();
+  if (!database || !accountKey) {
+    return null;
+  }
+
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(subjectsSnapshotStoreName, "readonly");
+    const request = transaction.objectStore(subjectsSnapshotStoreName).get(accountKey);
+    request.onsuccess = () => resolve(Array.isArray(request.result?.subjects) ? request.result.subjects : null);
+    request.onerror = () => reject(request.error || new Error("Subject snapshot could not be loaded."));
   });
 }
 
@@ -5427,6 +5465,35 @@ function createQuotaFallbackSubjects(subjects) {
       ? subject.documents.map(createQuotaFallbackDocument)
       : []
   }));
+}
+
+function queueIndexedDbSubjectsPersist(accountKey, subjectsSnapshot) {
+  if (!accountKey || !Array.isArray(subjectsSnapshot)) {
+    return;
+  }
+
+  indexedDbSubjectsSaveQueuedSnapshot = {
+    accountKey,
+    subjects: subjectsSnapshot
+  };
+  if (indexedDbSubjectsSaveInFlight) {
+    return;
+  }
+
+  indexedDbSubjectsSaveInFlight = true;
+  void (async () => {
+    while (indexedDbSubjectsSaveQueuedSnapshot) {
+      const snapshot = indexedDbSubjectsSaveQueuedSnapshot;
+      indexedDbSubjectsSaveQueuedSnapshot = null;
+      try {
+        await putSubjectsSnapshotRecord(snapshot.accountKey, snapshot.subjects);
+      } catch (error) {
+        console.error("IndexedDB subject snapshot sync failed.", error);
+      }
+    }
+
+    indexedDbSubjectsSaveInFlight = false;
+  })();
 }
 
 function loadStoredSubjectsMap() {
@@ -5726,6 +5793,18 @@ function mergeSubjectSources(primarySubjects, secondarySubjects) {
   return orderedIds.map((subjectId, index) =>
     mergeStoredSubjectSnapshots(primaryMap.get(subjectId), secondaryMap.get(subjectId), index)
   );
+}
+
+function mergeAvailableSubjectSources(...sources) {
+  return sources.reduce((mergedSubjects, source) => {
+    if (!Array.isArray(source)) {
+      return mergedSubjects;
+    }
+    if (!Array.isArray(mergedSubjects)) {
+      return source;
+    }
+    return mergeSubjectSources(mergedSubjects, source);
+  }, null);
 }
 
 function createDefaultWritingSections() {
@@ -8736,8 +8815,17 @@ function getStoredSubjectsForAccount(account) {
   return buildResolvedSubjectsFromStore(account, storedSubjectsMap[accountKey]);
 }
 
-function createCloudSyncFallbackSubjects(subjects) {
-  return createQuotaFallbackSubjects(subjects);
+async function getMergedStoredSubjectsForAccount(account, primarySubjects = null) {
+  const accountKey = normaliseAccountKey(account?.email);
+  const storedSubjectsMap = loadStoredSubjectsMap();
+  const indexedDbSubjects = accountKey
+    ? await getSubjectsSnapshotRecord(accountKey).catch((error) => {
+        console.error("IndexedDB subject snapshot could not be restored.", error);
+        return null;
+      })
+    : null;
+
+  return mergeAvailableSubjectSources(indexedDbSubjects, storedSubjectsMap[accountKey], primarySubjects);
 }
 
 function buildCloudAccountSettingsPayload() {
@@ -8780,36 +8868,28 @@ function applyCloudAccountSettings(settings) {
 }
 
 async function registerCloudAccountWithFallback({ name, email, password, grade, subjects, settings }) {
-  const subjectCandidates = [
-    createPersistableSubjects(subjects),
-    createCloudSyncFallbackSubjects(subjects),
-    createInitialSubjectsForAccount({ name, email, grade })
-  ];
-
-  let lastError = null;
-  for (const candidateSubjects of subjectCandidates) {
-    try {
-      return await requestApi("/api/auth/register", {
-        name,
-        email,
-        password,
-        grade,
-        subjects: candidateSubjects,
-        settings
-      });
-    } catch (error) {
-      lastError = error;
-      const shouldRetryWithSmallerPayload =
-        error instanceof Error &&
-        (error.status === 413 ||
-          /too large|payload|entity too large|request entity/i.test(error.message || ""));
-      if (!shouldRetryWithSmallerPayload) {
-        throw error;
-      }
+  try {
+    return await requestApi("/api/auth/register", {
+      name,
+      email,
+      password,
+      grade,
+      subjects: createPersistableSubjects(subjects),
+      settings
+    });
+  } catch (error) {
+    const payloadTooLarge =
+      error instanceof Error &&
+      (error.status === 413 || /too large|payload|entity too large|request entity/i.test(error.message || ""));
+    if (payloadTooLarge) {
+      const nextError = new Error(
+        "Your uploaded documents are too large to sync to the shared account in one request right now. They remain saved on this device."
+      );
+      nextError.status = 413;
+      throw nextError;
     }
+    throw error;
   }
-
-  throw lastError || new Error("Account creation failed.");
 }
 
 function queueRemoteSettingsPersist(settingsSnapshot) {
@@ -8864,48 +8944,26 @@ function queueRemoteSubjectsPersist(subjectsSnapshot) {
       const snapshot = remoteSubjectsSaveQueuedSnapshot;
       remoteSubjectsSaveQueuedSnapshot = null;
       try {
-        try {
-          await requestApi(
-            "/api/account/subjects",
-            { subjects: snapshot },
-            false,
-            {
-              headers: {
-                ...buildAuthHeaders()
-              },
-              method: "PUT"
-            }
-          );
-        } catch (primaryError) {
-          const shouldRetryWithFallback =
-            primaryError instanceof Error &&
-            (primaryError.status === 413 ||
-              /too large|payload|entity too large|request entity/i.test(primaryError.message || ""));
-          if (!shouldRetryWithFallback) {
-            throw primaryError;
+        await requestApi(
+          "/api/account/subjects",
+          { subjects: snapshot },
+          false,
+          {
+            headers: {
+              ...buildAuthHeaders()
+            },
+            method: "PUT"
           }
-
-          await requestApi(
-            "/api/account/subjects",
-            { subjects: createCloudSyncFallbackSubjects(state.subjects) },
-            false,
-            {
-              headers: {
-                ...buildAuthHeaders()
-              },
-              method: "PUT"
-            }
-          );
-          if (elements?.uploadStatus) {
-            elements.uploadStatus.textContent =
-              "Your account was synced with a lighter cloud copy so it can still open across devices.";
-          }
-        }
+        );
       } catch (error) {
         console.error("Remote subject sync failed.", error);
         if (elements?.uploadStatus) {
-          elements.uploadStatus.textContent =
-            "Your changes were saved on this device, but PaperPanda could not sync them to the shared account just now.";
+          const payloadTooLarge =
+            error instanceof Error &&
+            (error.status === 413 || /too large|payload|entity too large|request entity/i.test(error.message || ""));
+          elements.uploadStatus.textContent = payloadTooLarge
+            ? "Your changes were saved on this device, but the shared account copy is too large to sync in one request right now."
+            : "Your changes were saved on this device, but PaperPanda could not sync them to the shared account just now.";
         }
       }
     }
@@ -8922,16 +8980,17 @@ function persistSubjects({ skipRemoteSync = false } = {}) {
   const accountKey = normaliseAccountKey(state.currentUserEmail);
   const storedSubjectsMap = loadStoredSubjectsMap();
   const persistableSubjects = createPersistableSubjects(state.subjects);
+  queueIndexedDbSubjectsPersist(accountKey, persistableSubjects);
   const persistResult = saveStoredSubjectsMapForAccount(storedSubjectsMap, accountKey, state.subjects);
   if (persistResult === "fallback" && elements?.uploadStatus) {
     elements.uploadStatus.textContent =
-      "Large document previews will stay available in this session, but only a lighter saved version will persist after refresh.";
+      "PaperPanda kept a lighter browser backup, but the full document copy is still saved on this device.";
   } else if (persistResult === "pruned-fallback" && elements?.uploadStatus) {
     elements.uploadStatus.textContent =
-      "This device cleared older local cached accounts to free space. Your current account stays available and cloud-synced.";
+      "This device cleared older browser backups to free space. Your current account still has a full on-device copy.";
   } else if (persistResult === "failed" && elements?.uploadStatus) {
     elements.uploadStatus.textContent =
-      "Browser storage is full. Your latest changes will stay available until refresh, but they could not be saved persistently.";
+      "Browser storage is full. PaperPanda could not refresh the lightweight browser backup, but the on-device document cache was still updated.";
   }
 
   if (!skipRemoteSync) {
@@ -9099,9 +9158,10 @@ async function restoreSessionUser() {
         }
       });
       state.authToken = savedToken;
+      const mergedSubjects = await getMergedStoredSubjectsForAccount(session.account, session.subjects);
       applyAuthenticatedAccount(session.account, {
         token: savedToken,
-        subjects: session.subjects,
+        subjects: mergedSubjects,
         settings: session.settings,
         skipRemoteSync: true
       });
@@ -9125,20 +9185,21 @@ async function restoreSessionUser() {
     return;
   }
 
-  try {
-    let payload;
     try {
-      payload = await registerCloudAccountWithFallback({
-        name: account.name,
-        email: account.email,
-        password: account.password,
-        grade: normaliseGrade(account.grade),
-        subjects: getStoredSubjectsForAccount(account),
-        settings: buildCloudAccountSettingsPayload()
-      });
-    } catch (registerError) {
-      if (!(registerError instanceof Error) || registerError.status !== 409) {
-        throw registerError;
+      const durableLegacySubjects = await getMergedStoredSubjectsForAccount(account, getStoredSubjectsForAccount(account));
+      let payload;
+      try {
+        payload = await registerCloudAccountWithFallback({
+          name: account.name,
+          email: account.email,
+          password: account.password,
+          grade: normaliseGrade(account.grade),
+          subjects: durableLegacySubjects || getStoredSubjectsForAccount(account),
+          settings: buildCloudAccountSettingsPayload()
+        });
+      } catch (registerError) {
+        if (!(registerError instanceof Error) || registerError.status !== 409) {
+          throw registerError;
       }
       payload = await requestApi("/api/auth/signin", {
         email: account.email,
@@ -9149,7 +9210,7 @@ async function restoreSessionUser() {
     state.authToken = payload.token || "";
     applyAuthenticatedAccount(payload.account, {
       token: payload.token || "",
-      subjects: getStoredSubjectsForAccount(account),
+      subjects: durableLegacySubjects || getStoredSubjectsForAccount(account),
       settings: payload.settings,
       skipRemoteSync: false
     });
@@ -17670,9 +17731,10 @@ async function handleDashboardOpen() {
         });
         elements.signInStatus.textContent = "Loading your study space...";
         state.authToken = payload.token || "";
+        const mergedSubjects = await getMergedStoredSubjectsForAccount(payload.account, payload.subjects);
         applyAuthenticatedAccount(payload.account, {
           token: payload.token || "",
-          subjects: payload.subjects,
+          subjects: mergedSubjects,
           settings: payload.settings,
           skipRemoteSync: true
         });
@@ -17687,20 +17749,23 @@ async function handleDashboardOpen() {
         ) {
           try {
             elements.signInStatus.textContent = "Restoring your saved account...";
-            const legacySubjects = getStoredSubjectsForAccount(existingLegacyAccount);
+            const legacySubjects = await getMergedStoredSubjectsForAccount(
+              existingLegacyAccount,
+              getStoredSubjectsForAccount(existingLegacyAccount)
+            );
             const payload = await registerCloudAccountWithFallback({
               name: existingLegacyAccount.name,
               email: existingLegacyAccount.email,
               password,
               grade: normaliseGrade(existingLegacyAccount.grade),
-              subjects: legacySubjects,
+              subjects: legacySubjects || getStoredSubjectsForAccount(existingLegacyAccount),
               settings: buildCloudAccountSettingsPayload()
             });
             elements.signInStatus.textContent = "Loading your study space...";
             state.authToken = payload.token || "";
             applyAuthenticatedAccount(payload.account, {
               token: payload.token || "",
-              subjects: legacySubjects,
+              subjects: legacySubjects || getStoredSubjectsForAccount(existingLegacyAccount),
               settings: payload.settings,
               skipRemoteSync: false
             });
@@ -17719,7 +17784,7 @@ async function handleDashboardOpen() {
     }
 
     const desiredSubjects = existingLegacyAccount
-      ? getStoredSubjectsForAccount(existingLegacyAccount)
+      ? await getMergedStoredSubjectsForAccount(existingLegacyAccount, getStoredSubjectsForAccount(existingLegacyAccount))
       : createInitialSubjectsForAccount({
           email: studentEmail,
           grade: studentGrade,
@@ -17737,7 +17802,11 @@ async function handleDashboardOpen() {
     state.authToken = payload.token || "";
     applyAuthenticatedAccount(payload.account, {
       token: payload.token || "",
-      subjects: desiredSubjects,
+      subjects: desiredSubjects || createInitialSubjectsForAccount({
+        email: studentEmail,
+        grade: studentGrade,
+        name: studentName
+      }),
       settings: payload.settings,
       skipRemoteSync: false
     });
