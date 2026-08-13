@@ -1296,6 +1296,7 @@ const state = {
   watchExpanded: false,
   documentsExpanded: false,
   documentsRevisionExpanded: false,
+  subjectLandingRevisionExpanded: false,
   currentView: "home",
   activeTask: null,
   taskAskResponse: "",
@@ -2846,7 +2847,15 @@ function getSelectedDocumentIndex() {
 
 function getDocumentPages(documentRecord) {
   return Array.isArray(documentRecord?.pages)
-    ? documentRecord.pages.filter((page) => page?.imageUrl)
+    ? documentRecord.pages
+        .filter((page) => page && (page.imageUrl || page.text || page.pageNumber))
+        .map((page, index) => ({
+          ...page,
+          pageNumber: Number(page?.pageNumber || index + 1) || index + 1,
+          imageUrl:
+            page?.imageUrl ||
+            (index === 0 && documentRecord?.previewImageUrl ? documentRecord.previewImageUrl : null)
+        }))
     : [];
 }
 
@@ -2984,6 +2993,59 @@ function getSubjectLandingTone(type = "") {
 
 function getSubjectLandingResourceBundles(subject) {
   return getDocumentGroupsFromDocuments(getReaderDocuments(subject || { documents: [] }));
+}
+
+function getSubjectLandingRevisionBundles(subject) {
+  return getDocumentGroupsFromDocuments(getRevisionReaderDocuments(subject || { documents: [] }));
+}
+
+function getSubjectLandingResourceRowMarkup(bundle, { revisionArchived = false } = {}) {
+  const primaryDocument = getBundlePrimaryDocument(bundle);
+  const tone = getSubjectLandingTone(bundle?.type);
+  const bundleId = bundle?.id || primaryDocument?.id || "";
+  const pageCount = getBundlePageCount(bundle);
+  return `
+    <article class="subject-landing-row subject-landing-row--resource${revisionArchived ? " subject-landing-row--revision" : ""}">
+      <button
+        type="button"
+        class="subject-landing-row__main"
+        data-subject-landing-open-document="${escapeHtml(bundleId)}"
+      >
+        <span class="subject-landing-row__cover subject-landing-row__cover--${escapeHtml(tone)}">
+          ${primaryDocument?.previewImageUrl
+            ? `<img src="${escapeHtml(primaryDocument.previewImageUrl)}" alt="${escapeHtml(bundle.title)}" />`
+            : `
+              <span class="subject-landing-row__sheet">
+                <span class="subject-landing-row__sheet-bar"></span>
+                <span class="subject-landing-row__sheet-line subject-landing-row__sheet-line--dark"></span>
+                <span class="subject-landing-row__sheet-line"></span>
+                <span class="subject-landing-row__sheet-line subject-landing-row__sheet-line--short"></span>
+              </span>
+            `}
+        </span>
+        <span class="subject-landing-row__copy">
+          <strong>${escapeHtml(bundle.title)}</strong>
+          <span>${escapeHtml(`${bundle.type || "Notes"} · ${bundle.added || "Recently added"}${pageCount ? ` · ${pageCount} pages` : ""}`)}</span>
+        </span>
+      </button>
+      <div class="subject-landing-row__actions">
+        <button
+          type="button"
+          class="subject-landing-row__revision-button"
+          data-subject-landing-toggle-revision="${escapeHtml(bundleId)}"
+        >
+          ${revisionArchived ? "Remove from revision" : "Add to revision"}
+        </button>
+        <button
+          type="button"
+          class="subject-landing-row__open-button"
+          data-subject-landing-open-document="${escapeHtml(bundleId)}"
+        >
+          Open →
+        </button>
+      </div>
+    </article>
+  `;
 }
 
 function getSubjectLandingOpenDocument(subject) {
@@ -3308,6 +3370,8 @@ function renderSubjectLanding() {
   }
 
   const resourceBundles = getSubjectLandingResourceBundles(subject);
+  const revisionResourceBundles = getSubjectLandingRevisionBundles(subject);
+  const landingResourceBundleMap = new Map([...resourceBundles, ...revisionResourceBundles].map((bundle) => [bundle.id, bundle]));
   const openDocument = getSubjectLandingOpenDocument(subject);
 
   if (!openDocument && subject.id === "spelling") {
@@ -3426,45 +3490,39 @@ function renderSubjectLanding() {
           <div class="subject-landing__heading">
             <p class="eyebrow">${escapeHtml(`${subject.name.toUpperCase()} · YEAR ${state.studentGrade}`)}</p>
             <h2>Pick something to open</h2>
-            <p>Panda will break it into bite-size pieces for you.</p>
+            <p>Keep this term&apos;s files here and move older ones into the revision folder.</p>
           </div>
           <div class="subject-landing__list">
             ${resourceBundles.length
-              ? resourceBundles.map((bundle) => {
-                const primaryDocument = getBundlePrimaryDocument(bundle);
-                const tone = getSubjectLandingTone(bundle.type);
-                return `
-                  <button
-                    type="button"
-                    class="subject-landing-row"
-                    data-subject-landing-open-document="${escapeHtml(bundle.id || primaryDocument?.id || "")}"
-                  >
-                    <span class="subject-landing-row__cover subject-landing-row__cover--${escapeHtml(tone)}">
-                      ${primaryDocument?.previewImageUrl
-                        ? `<img src="${escapeHtml(primaryDocument.previewImageUrl)}" alt="${escapeHtml(bundle.title)}" />`
-                        : `
-                          <span class="subject-landing-row__sheet">
-                            <span class="subject-landing-row__sheet-bar"></span>
-                            <span class="subject-landing-row__sheet-line subject-landing-row__sheet-line--dark"></span>
-                            <span class="subject-landing-row__sheet-line"></span>
-                            <span class="subject-landing-row__sheet-line subject-landing-row__sheet-line--short"></span>
-                          </span>
-                        `}
-                    </span>
-                    <span class="subject-landing-row__copy">
-                      <strong>${escapeHtml(bundle.title)}</strong>
-                      <span>${escapeHtml(`${bundle.type || "Notes"} · ${bundle.added || "Recently added"}${getBundlePageCount(bundle) ? ` · ${getBundlePageCount(bundle)} pages` : ""}`)}</span>
-                    </span>
-                    <span class="subject-landing-row__action">Open →</span>
-                  </button>
-                `;
-              }).join("")
+              ? resourceBundles.map((bundle) => getSubjectLandingResourceRowMarkup(bundle)).join("")
               : `
                 <article class="subject-landing__empty">
-                  <strong>No resources uploaded yet</strong>
+                  <strong>No current-term resources uploaded yet</strong>
                   <span>Upload notes, homework, or assessment files to start the simplified summary view.</span>
                 </article>
               `}
+            ${revisionResourceBundles.length
+              ? `
+                <section class="subject-landing-folder">
+                  <button
+                    type="button"
+                    class="documents-folder-toggle subject-landing-folder__toggle"
+                    data-subject-landing-revision-folder-toggle="true"
+                    aria-expanded="${state.subjectLandingRevisionExpanded ? "true" : "false"}"
+                  >
+                    <span>Revision folder</span>
+                    <span>${escapeHtml(`${revisionResourceBundles.length} item${revisionResourceBundles.length === 1 ? "" : "s"}`)}</span>
+                  </button>
+                  ${state.subjectLandingRevisionExpanded
+                    ? `
+                      <div class="subject-landing-folder__list">
+                        ${revisionResourceBundles.map((bundle) => getSubjectLandingResourceRowMarkup(bundle, { revisionArchived: true })).join("")}
+                      </div>
+                    `
+                    : ""}
+                </section>
+              `
+              : ""}
           </div>
         </div>
       </section>
@@ -3675,6 +3733,25 @@ function renderSubjectLanding() {
       }
     });
   });
+  host.querySelectorAll("[data-subject-landing-toggle-revision]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const bundleId = String(button.dataset.subjectLandingToggleRevision || "");
+      const bundle = landingResourceBundleMap.get(bundleId);
+      if (!bundle) {
+        return;
+      }
+      setDocumentRevisionArchivedState(
+        subject,
+        bundle.documents.map((documentRecord) => documentRecord.id),
+        !bundle.documents.every((documentRecord) => Boolean(documentRecord.revisionArchived))
+      );
+      render();
+    });
+  });
+  host.querySelector("[data-subject-landing-revision-folder-toggle]")?.addEventListener("click", () => {
+    state.subjectLandingRevisionExpanded = !state.subjectLandingRevisionExpanded;
+    render();
+  });
   host.querySelector("[data-subject-landing-back]")?.addEventListener("click", () => {
     state.subjectLandingOpenDocumentId = "";
     state.subjectLandingView = "simple";
@@ -3769,15 +3846,6 @@ function renderSubjectLanding() {
   });
   host.querySelector("[data-subject-landing-ask-mic]")?.addEventListener("click", handleAskMicToggle);
   host.querySelector("[data-subject-landing-ask-listen]")?.addEventListener("click", handleAskListen);
-  host.querySelectorAll("[data-subject-landing-open-full-page]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const documentRecord = getSubjectLandingOpenDocument(subject);
-      if (!documentRecord) {
-        return;
-      }
-      openSubjectLandingStandalonePage(subject, documentRecord, String(button.dataset.subjectLandingOpenFullPage || "simple"));
-    });
-  });
 }
 
 function renderSubjectTabs() {
@@ -5257,6 +5325,13 @@ async function hydratePreviewImages() {
         const pagePreviewRecord = await getPreviewRecord(createPagePreviewRecordId(documentRecord.id, page.pageNumber));
         if (pagePreviewRecord?.previewImageUrl) {
           page.imageUrl = pagePreviewRecord.previewImageUrl;
+          hydratedAnyPreview = true;
+        }
+      }
+      if (documentRecord.previewImageUrl && Array.isArray(documentRecord.pages) && documentRecord.pages.length) {
+        const firstPage = documentRecord.pages[0];
+        if (firstPage && !firstPage.imageUrl) {
+          firstPage.imageUrl = documentRecord.previewImageUrl;
           hydratedAnyPreview = true;
         }
       }

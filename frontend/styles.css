@@ -4306,6 +4306,55 @@ input[type="date"] {
   cursor: pointer;
 }
 
+.subject-landing-row--resource {
+  align-items: stretch;
+  cursor: default;
+}
+
+.subject-landing-row__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.subject-landing-row__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.subject-landing-row__revision-button,
+.subject-landing-row__open-button {
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.subject-landing-row__revision-button {
+  background: #f6f1eb;
+  color: #5c5668;
+}
+
+.subject-landing-row__open-button {
+  background: #1b1825;
+  color: #fff;
+}
+
+.subject-landing-row--revision .subject-landing-row__revision-button {
+  background: #ece5fb;
+  color: #433d55;
+}
+
 .subject-landing-row__cover {
   width: 52px;
   height: 68px;
@@ -4392,6 +4441,21 @@ input[type="date"] {
   color: #696477;
   font-size: 14px;
   font-weight: 800;
+}
+
+.subject-landing-folder {
+  display: grid;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.subject-landing-folder__toggle {
+  width: 100%;
+}
+
+.subject-landing-folder__list {
+  display: grid;
+  gap: 10px;
 }
 
 .subject-landing__empty {
@@ -5031,6 +5095,16 @@ input[type="date"] {
     font-size: 30px;
   }
 
+  .subject-landing-row__actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .subject-landing-row__revision-button,
+  .subject-landing-row__open-button {
+    flex: 1;
+  }
+
   .subject-landing-row__action {
     display: none;
   }
@@ -5046,6 +5120,17 @@ input[type="date"] {
   .subject-landing__summary-card p,
   .subject-landing__summary-card li {
     font-size: 16px;
+  }
+
+  .subject-landing-row--resource,
+  .subject-landing-row__main {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .subject-landing-row__actions {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .subject-landing__explainer-beats {
