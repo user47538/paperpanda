@@ -3613,10 +3613,22 @@ function renderSubjectLanding() {
           : `
             <div class="subject-landing__original-wrap">
               <button type="button" class="subject-landing__arrow" data-subject-landing-page-move="-1" ${currentPageIndex <= 0 ? "disabled" : ""}>←</button>
-              <article class="subject-landing__summary-card subject-landing__summary-card--original">
+              <article class="subject-landing__summary-card subject-landing__summary-card--original subject-landing__summary-card--page">
                 <span class="subject-landing__summary-pill">${escapeHtml(currentPage ? `Page ${currentPage.pageNumber || currentPageIndex + 1} of ${Math.max(1, pageList.length)}` : "Original document")}</span>
-                <h3>${escapeHtml(currentPage ? `Page ${currentPage.pageNumber || currentPageIndex + 1}` : "Original document")}</h3>
-                <p>${escapeHtml(currentPageText || "Open the full workspace to see the original pages and document tools.")}</p>
+                <div class="subject-landing__reader-stage">
+                  ${currentPage?.imageUrl
+                    ? `
+                      <figure class="subject-landing__page-preview subject-landing__page-preview--reader">
+                        <img src="${escapeHtml(currentPage.imageUrl)}" alt="${escapeHtml(`${openDocument.title} page ${currentPage.pageNumber || currentPageIndex + 1}`)}" class="subject-landing__page-image subject-landing__page-image--reader" />
+                      </figure>
+                    `
+                    : `
+                      <div class="subject-landing__page-fallback">
+                        <h3>${escapeHtml(currentPage ? `Page ${currentPage.pageNumber || currentPageIndex + 1}` : "Original document")}</h3>
+                        <p>${escapeHtml(currentPageText || "No page preview is available for this document yet.")}</p>
+                      </div>
+                    `}
+                </div>
               </article>
               <button type="button" class="subject-landing__arrow" data-subject-landing-page-move="1" ${!pageList.length || currentPageIndex >= pageList.length - 1 ? "disabled" : ""}>→</button>
             </div>
