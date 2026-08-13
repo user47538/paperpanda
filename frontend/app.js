@@ -52,6 +52,11 @@ let currentAudioContext = "";
 let currentSpeechRecognition = null;
 let remoteSubjectsSaveQueuedSnapshot = null;
 let remoteSubjectsSaveInFlight = false;
+let remoteSubjectsSaveSequence = 0;
+let remoteSubjectsCommittedSequence = 0;
+let remoteSubjectsFailedSequence = 0;
+let remoteSubjectsLastError = null;
+let remoteSubjectsSaveWaiters = [];
 let remoteSettingsSaveQueuedSnapshot = null;
 let remoteSettingsSaveInFlight = false;
 let googleIdentityClientPromise = null;
@@ -8928,14 +8933,70 @@ function queueRemoteSettingsPersist(settingsSnapshot) {
   })();
 }
 
-function queueRemoteSubjectsPersist(subjectsSnapshot) {
-  if (!state.authToken) {
-    return;
+function createRemoteSubjectsSyncError(error) {
+  const payloadTooLarge =
+    error instanceof Error &&
+    (error.status === 413 || /too large|payload|entity too large|request entity/i.test(error.message || ""));
+  if (payloadTooLarge) {
+    const nextError = new Error(
+      "PaperPanda saved these documents on this device, but the shared account copy is still too large to sync in one request right now."
+    );
+    nextError.status = 413;
+    return nextError;
   }
 
-  remoteSubjectsSaveQueuedSnapshot = subjectsSnapshot;
+  if (error instanceof Error && String(error.message || "").trim()) {
+    return error;
+  }
+
+  return new Error("PaperPanda could not sync these documents to the shared account just now.");
+}
+
+function updateRemoteSubjectsSaveWaiters() {
+  const hasPendingSync = remoteSubjectsSaveInFlight || Boolean(remoteSubjectsSaveQueuedSnapshot);
+  remoteSubjectsSaveWaiters = remoteSubjectsSaveWaiters.filter((waiter) => {
+    if (waiter.sequence <= remoteSubjectsCommittedSequence) {
+      waiter.resolve();
+      return false;
+    }
+
+    if (!hasPendingSync && waiter.sequence <= remoteSubjectsFailedSequence) {
+      waiter.reject(remoteSubjectsLastError || new Error("PaperPanda could not sync these documents to the shared account."));
+      return false;
+    }
+
+    return true;
+  });
+}
+
+function waitForRemoteSubjectsPersist(sequence = remoteSubjectsSaveSequence) {
+  if (!state.authToken || !sequence || sequence <= remoteSubjectsCommittedSequence) {
+    return Promise.resolve();
+  }
+
+  const hasPendingSync = remoteSubjectsSaveInFlight || Boolean(remoteSubjectsSaveQueuedSnapshot);
+  if (!hasPendingSync && sequence <= remoteSubjectsFailedSequence) {
+    return Promise.reject(remoteSubjectsLastError || new Error("PaperPanda could not sync these documents to the shared account."));
+  }
+
+  return new Promise((resolve, reject) => {
+    remoteSubjectsSaveWaiters.push({ sequence, resolve, reject });
+  });
+}
+
+function queueRemoteSubjectsPersist(subjectsSnapshot) {
+  if (!state.authToken) {
+    return 0;
+  }
+
+  const sequence = remoteSubjectsSaveSequence + 1;
+  remoteSubjectsSaveSequence = sequence;
+  remoteSubjectsSaveQueuedSnapshot = {
+    sequence,
+    subjects: subjectsSnapshot
+  };
   if (remoteSubjectsSaveInFlight) {
-    return;
+    return sequence;
   }
 
   remoteSubjectsSaveInFlight = true;
@@ -8946,7 +9007,7 @@ function queueRemoteSubjectsPersist(subjectsSnapshot) {
       try {
         await requestApi(
           "/api/account/subjects",
-          { subjects: snapshot },
+          { subjects: snapshot.subjects },
           false,
           {
             headers: {
@@ -8955,26 +9016,31 @@ function queueRemoteSubjectsPersist(subjectsSnapshot) {
             method: "PUT"
           }
         );
+        remoteSubjectsCommittedSequence = Math.max(remoteSubjectsCommittedSequence, snapshot.sequence);
+        if (remoteSubjectsCommittedSequence >= remoteSubjectsFailedSequence) {
+          remoteSubjectsLastError = null;
+        }
       } catch (error) {
-        console.error("Remote subject sync failed.", error);
+        remoteSubjectsFailedSequence = Math.max(remoteSubjectsFailedSequence, snapshot.sequence);
+        remoteSubjectsLastError = createRemoteSubjectsSyncError(error);
+        console.error("Remote subject sync failed.", remoteSubjectsLastError);
         if (elements?.uploadStatus) {
-          const payloadTooLarge =
-            error instanceof Error &&
-            (error.status === 413 || /too large|payload|entity too large|request entity/i.test(error.message || ""));
-          elements.uploadStatus.textContent = payloadTooLarge
-            ? "Your changes were saved on this device, but the shared account copy is too large to sync in one request right now."
-            : "Your changes were saved on this device, but PaperPanda could not sync them to the shared account just now.";
+          elements.uploadStatus.textContent = remoteSubjectsLastError.message;
         }
       }
+      updateRemoteSubjectsSaveWaiters();
     }
 
     remoteSubjectsSaveInFlight = false;
+    updateRemoteSubjectsSaveWaiters();
   })();
+
+  return sequence;
 }
 
 function persistSubjects({ skipRemoteSync = false } = {}) {
   if (!state.currentUserEmail) {
-    return;
+    return 0;
   }
 
   const accountKey = normaliseAccountKey(state.currentUserEmail);
@@ -8994,10 +9060,13 @@ function persistSubjects({ skipRemoteSync = false } = {}) {
   }
 
   if (!skipRemoteSync) {
-    queueRemoteSubjectsPersist(persistableSubjects);
+    const sequence = queueRemoteSubjectsPersist(persistableSubjects);
+    syncPreviewPersistence();
+    return sequence;
   }
 
   syncPreviewPersistence();
+  return 0;
 }
 
 function persistSettings({ skipRemoteSync = false } = {}) {
@@ -9976,7 +10045,8 @@ async function requestApi(endpoint, payload, expectBlob = false, options = {}) {
     "Content-Type": "application/json",
     ...(options.headers || {})
   };
-  const timeoutMs = Math.max(1_000, Number(options.timeoutMs || 0) || 0);
+  const rawTimeoutMs = Number(options.timeoutMs);
+  const timeoutMs = Number.isFinite(rawTimeoutMs) && rawTimeoutMs > 0 ? Math.max(1_000, rawTimeoutMs) : 0;
   const abortController = timeoutMs ? new AbortController() : null;
   const timeoutHandle = abortController ? setTimeout(() => abortController.abort(), timeoutMs) : null;
   let response;
@@ -17116,6 +17186,7 @@ async function processFiles(fileList) {
   const files = [...fileList];
   const subject = getUploadSubject();
   const flags = buildUploadFlags();
+  let uploadSavedLocally = false;
   if (!subject) {
     return;
   }
@@ -17223,7 +17294,12 @@ async function processFiles(fileList) {
       }
     }
 
-    persistSubjects();
+    const remoteSubjectsSequence = persistSubjects();
+    uploadSavedLocally = true;
+    if (state.authToken && remoteSubjectsSequence) {
+      elements.uploadStatus.textContent = "Saving uploaded documents to your account...";
+      await waitForRemoteSubjectsPersist(remoteSubjectsSequence);
+    }
     if (flags.homework) {
       state.selectedSubjectId = subject.id;
       state.currentView = "subjects";
@@ -17250,11 +17326,12 @@ async function processFiles(fileList) {
       .forEach((record) => {
         void ensureDocumentStudyPlan(record, subject);
       });
-    elements.uploadStatus.textContent = `${files.length} document${files.length === 1 ? "" : "s"} uploaded.`;
+    elements.uploadStatus.textContent = `${files.length} document${files.length === 1 ? "" : "s"} uploaded and saved.`;
     closeUploadModal();
   } catch (error) {
-    elements.uploadStatus.textContent =
-      error instanceof Error ? `Upload failed: ${error.message}` : "Upload failed.";
+    elements.uploadStatus.textContent = uploadSavedLocally
+      ? (error instanceof Error ? error.message : "Upload saved on this device, but the shared account copy could not be updated.")
+      : (error instanceof Error ? `Upload failed: ${error.message}` : "Upload failed.");
   }
 }
 
