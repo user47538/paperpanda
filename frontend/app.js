@@ -6372,6 +6372,10 @@ function getSpellingPendingActivityCount(subject) {
   return Math.max(0, total - getSpellingCompletedActivityCount(subject));
 }
 
+function isSpellingAttemptComplete(subject) {
+  return SPELLING_STAGE_ORDER.every((stageId) => getSpellingStageCompletionMap(subject)[stageId]);
+}
+
 function getSpellingMasteryRatio(subject) {
   const total = getSpellingTotalActivityCount(subject);
   return total ? getSpellingCompletedActivityCount(subject) / total : 0;
@@ -6766,7 +6770,7 @@ function ensureSpellingSessionState(subject) {
     return;
   }
 
-  const attemptComplete = SPELLING_STAGE_ORDER.every((stage) => getSpellingStageCompletionMap(subject)[stage]);
+  const attemptComplete = isSpellingAttemptComplete(subject);
 
   // Migrate older completed sessions into the final summary state so the
   // session can always be closed from Stage 5, even if the legacy flag was missed.
@@ -6811,10 +6815,13 @@ function getSpellingVisibleStageId(subject) {
 
 function activateSpellingSession(subject) {
   const spelling = getSubjectSpellingState(subject);
-  const attemptComplete = SPELLING_STAGE_ORDER.every((stageId) => getSpellingStageCompletionMap(subject)[stageId]);
+  const attemptComplete = isSpellingAttemptComplete(subject);
   if (attemptComplete) {
-    resetSpellingProgressForNewAttempt(spelling);
-    spelling.sessionPreparedKey = currentSpellingSessionKey;
+    spelling.homeTab = "session";
+    spelling.selectedStageId = "repeat-check";
+    spelling.celebrationStageId = "";
+    spelling.sessionCompletionReady = true;
+    return;
   }
 
   const visibleStageId = getSpellingVisibleStageId(subject);
@@ -7015,12 +7022,10 @@ function continueSpellingStageToTarget(subject, targetStageId = "") {
 
 function finishSpellingSession(subject) {
   const spelling = getSubjectSpellingState(subject);
-  resetSpellingProgressForNewAttempt(spelling);
   spelling.homeTab = "stable";
-  spelling.selectedStageId = "diagnostic";
+  spelling.selectedStageId = "repeat-check";
   spelling.celebrationStageId = "";
-  spelling.sessionCompletionReady = false;
-  spelling.sessionPreparedKey = currentSpellingSessionKey;
+  spelling.sessionCompletionReady = isSpellingAttemptComplete(subject);
   persistSubjects();
 }
 
@@ -8416,21 +8421,24 @@ function buildSpellingHorsePreviewCard(spelling) {
 function buildSpellingHomeOverview(subject, spelling) {
   const currentStageId = getSpellingStageId(subject);
   const currentStageLabel = SPELLING_STAGE_LABELS[currentStageId] || "Diagnostic";
-  const isFreshSession = !spelling.diagnostic.completed && !Object.keys(spelling.diagnostic.responses || {}).length;
+  const attemptComplete = isSpellingAttemptComplete(subject);
+  const isFreshSession = !attemptComplete && !spelling.diagnostic.completed && !Object.keys(spelling.diagnostic.responses || {}).length;
   const ownedHorseCount = getSpellingVisibleHorseCount(spelling);
+  const latestHorseMeta = getSpellingPaddockHorseMeta(spelling.lastUnlockedHorseId || spelling.paddockHorses[spelling.paddockHorses.length - 1]);
   return `
     <section class="ss-home-stack">
       <article class="ss-stage-panel">
         <div class="ss-stage-panel__head">
           <div>
             <p class="eyebrow">Spelling Stables</p>
-            <h4>${escapeHtml(isFreshSession ? "Ready to begin a new set" : `Continue with ${currentStageLabel}`)}</h4>
+            <h4>${escapeHtml(attemptComplete ? "Set complete" : isFreshSession ? "Ready to begin a new set" : `Continue with ${currentStageLabel}`)}</h4>
           </div>
           <span class="ss-stage-badge">${escapeHtml(`${ownedHorseCount} / ${SPELLING_PADDOCK_HORSES.length} horses`)}</span>
         </div>
-        <p class="ss-stage-copy">${escapeHtml(SPELLING_UNIT_SEED.intro)}</p>
+        <p class="ss-stage-copy">${escapeHtml(attemptComplete ? `All five stages are complete.${latestHorseMeta ? ` ${latestHorseMeta.name} is now in the stable.` : ""} Review the finished set or start a fresh one when you are ready.` : SPELLING_UNIT_SEED.intro)}</p>
         <div class="ss-stage-actions">
-          <button type="button" class="primary-button primary-button--dark" data-spelling-begin-session="true">${escapeHtml(isFreshSession ? "Start spelling session" : `Continue to ${currentStageLabel}`)}</button>
+          <button type="button" class="primary-button primary-button--dark" data-spelling-begin-session="true">${escapeHtml(attemptComplete ? "Review completed set" : isFreshSession ? "Start spelling session" : `Continue to ${currentStageLabel}`)}</button>
+          ${attemptComplete ? '<button type="button" class="ghost-button ghost-button--small" data-spelling-reset-unit="true">Start next set</button>' : ""}
         </div>
       </article>
       ${buildSpellingSessionProgressCard(subject, spelling, currentStageId)}
@@ -15074,7 +15082,7 @@ function renderSpelling() {
   const completedCount = getSpellingCompletedActivityCount(subject);
   const totalCount = getSpellingTotalActivityCount(subject);
   const masteryPercent = Math.round(getSpellingMasteryRatio(subject) * 100);
-  const attemptComplete = SPELLING_STAGE_ORDER.every((candidateStageId) => getSpellingStageCompletionMap(subject)[candidateStageId]);
+  const attemptComplete = isSpellingAttemptComplete(subject);
   const currentStageId = getSpellingStageId(subject);
   const stageId = getSpellingVisibleStageId(subject);
   const stageIndex = SPELLING_STAGE_ORDER.indexOf(stageId);
