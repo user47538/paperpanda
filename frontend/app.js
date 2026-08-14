@@ -16068,8 +16068,8 @@ function handleAskListen() {
     return;
   }
 
-  const latestAnswer = getLatestAskAnswer();
-  if (!latestAnswer) {
+  const answerToPlay = getLatestAskAnswer();
+  if (!answerToPlay) {
     if (activeSurface?.response) {
       activeSurface.response.textContent = "Ask a question first so there is an AI response to play back.";
     }
@@ -16080,7 +16080,7 @@ function handleAskListen() {
     return;
   }
 
-  speakTextWithOpenAi(latestAnswer, {
+  speakTextWithOpenAi(answerToPlay, {
     context: "ask",
     statusMessages: {
       preparing: "Preparing Panda's answer...",
@@ -16094,6 +16094,15 @@ function handleAskListen() {
       if (activeSurface?.kind === "landing") {
         state.subjectLandingAskStatus = message;
       }
+    },
+    onFinished: () => {
+      if (activeSurface?.response) {
+        activeSurface.response.textContent = answerToPlay;
+      }
+      if (activeSurface?.kind === "landing") {
+        state.subjectLandingAskStatus = answerToPlay;
+      }
+      renderAskContext();
     }
   }).catch((error) => {
     console.error("OpenAI speech failed.", error);

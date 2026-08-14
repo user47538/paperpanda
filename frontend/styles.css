@@ -4144,6 +4144,10 @@ input[type="date"] {
   position: relative;
 }
 
+.subject-landing--ask-open {
+  overflow: visible;
+}
+
 .subject-landing__bar {
   display: flex;
   align-items: center;
@@ -4829,6 +4833,7 @@ input[type="date"] {
   z-index: 3;
   width: 360px;
   max-width: calc(100% - 56px);
+  max-height: calc(100dvh - 148px);
   padding: 22px;
   border-radius: 34px;
   background: #1b1825;
@@ -4836,6 +4841,9 @@ input[type="date"] {
   box-shadow: 0 24px 60px rgba(26, 23, 38, 0.28);
   display: grid;
   gap: 16px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .subject-landing-ask-popup__close {
