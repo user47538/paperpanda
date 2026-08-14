@@ -1279,6 +1279,7 @@ const state = {
   subjectLandingAskOpen: false,
   subjectLandingAskDraft: "",
   subjectLandingAskStatus: "",
+  subjectLandingAskAnswer: "",
   selectedDocumentId: null,
   currentDocumentPageIndexes: {},
   activeReaderSegmentIndex: -1,
@@ -3343,9 +3344,7 @@ function openSubjectLandingDocument(subject, documentId) {
   state.subjectLandingView = "simple";
   state.subjectLandingPieceIndex = Math.max(0, getResumeDocumentSectionIndex(documentRecord));
   state.subjectLandingSubjectMenuOpen = false;
-  state.subjectLandingAskOpen = false;
-  state.subjectLandingAskDraft = "";
-  state.subjectLandingAskStatus = "";
+  resetSubjectLandingAskState();
   state.selectedDocumentId = documentRecord.id;
   state.askDocumentId = documentRecord.id;
   render();
@@ -3557,7 +3556,7 @@ function renderSubjectLanding() {
     const landingAskContext = landingAskDocument
       ? `Asking about: ${landingAskDocument.title}`
       : "No document selected for Ask yet.";
-    const landingAskResponse = state.subjectLandingAskStatus || getLatestAskAnswer() || "Ask Panda about the current document here.";
+    const landingAskResponse = state.subjectLandingAskStatus || getAskPlaybackText({ kind: "landing" }) || "Ask Panda about the current document here.";
 
     host.innerHTML = `
       <section class="subject-landing subject-landing--open${state.subjectLandingAskOpen ? " subject-landing--ask-open" : ""}">
@@ -3669,7 +3668,7 @@ function renderSubjectLanding() {
                   >${escapeHtml(state.subjectLandingAskDraft)}</textarea>
                   <div class="subject-landing-ask-popup__actions">
                     <button type="button" class="subject-landing-ask-popup__submit" data-subject-landing-ask-submit>Get guidance</button>
-                    <button type="button" class="subject-landing-ask-popup__listen" data-subject-landing-ask-listen ${!state.askResponseSpeaking && !getLatestAskAnswer() ? "disabled" : ""}>${state.askResponseSpeaking ? "Stop" : "Listen"}</button>
+                    <button type="button" class="subject-landing-ask-popup__listen" data-subject-landing-ask-listen ${!state.askResponseSpeaking && !getAskPlaybackText({ kind: "landing" }) ? "disabled" : ""}>${state.askResponseSpeaking ? "Stop" : "Listen"}</button>
                   </div>
                 </aside>
               `
@@ -3765,9 +3764,7 @@ function renderSubjectLanding() {
     state.subjectLandingView = "simple";
     state.subjectLandingPieceIndex = 0;
     state.subjectLandingSubjectMenuOpen = false;
-    state.subjectLandingAskOpen = false;
-    state.subjectLandingAskDraft = "";
-    state.subjectLandingAskStatus = "";
+    closeSubjectLandingAsk();
     render();
   });
   host.querySelectorAll("[data-subject-landing-view]").forEach((button) => {
@@ -3840,10 +3837,7 @@ function renderSubjectLanding() {
     });
   });
   host.querySelector("[data-subject-landing-ask-close]")?.addEventListener("click", () => {
-    state.subjectLandingAskOpen = false;
-    if (state.askMicActive) {
-      stopAskMicrophone({ preserveStatus: true });
-    }
+    closeSubjectLandingAsk();
     render();
   });
   host.querySelector("[data-subject-landing-ask-input]")?.addEventListener("input", (event) => {
@@ -10189,13 +10183,72 @@ function getLatestAskAnswer() {
   return history.length ? String(history[history.length - 1].answer || "").trim() : "";
 }
 
+function getSubjectLandingAskVisibleAnswer() {
+  return String(state.subjectLandingAskAnswer || "").trim();
+}
+
+function isAskPlaybackTextPlayable(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return false;
+  }
+
+  const normalised = text.toLowerCase();
+  if (
+    normalised === "ask panda about the current document here." ||
+    normalised === "ask a question about the selected subject or document." ||
+    normalised === "ask a question first so there is an ai response to play back." ||
+    normalised === "write a question first so the ai can focus on what you need help with." ||
+    normalised === "thinking..." ||
+    normalised === "listening for your question..." ||
+    normalised === "question captured. asking panda..." ||
+    normalised === "preparing panda's answer..." ||
+    normalised === "playing panda's answer..."
+  ) {
+    return false;
+  }
+
+  return !normalised.startsWith("ask ai failed:") && !normalised.startsWith("listen failed:");
+}
+
+function getAskPlaybackText(surface = getActiveAskSurface()) {
+  const surfaceText = surface?.kind === "landing"
+    ? state.subjectLandingAskStatus || getSubjectLandingAskVisibleAnswer() || surface?.response?.textContent || ""
+    : getLatestAskAnswer() || surface?.response?.textContent || "";
+  if (isAskPlaybackTextPlayable(surfaceText)) {
+    return String(surfaceText).trim();
+  }
+
+  const fallbackText = surface?.kind === "landing"
+    ? getSubjectLandingAskVisibleAnswer()
+    : getLatestAskAnswer();
+  return isAskPlaybackTextPlayable(fallbackText) ? String(fallbackText).trim() : "";
+}
+
+function resetSubjectLandingAskState() {
+  state.subjectLandingAskOpen = false;
+  state.subjectLandingAskDraft = "";
+  state.subjectLandingAskStatus = "";
+  state.subjectLandingAskAnswer = "";
+}
+
+function closeSubjectLandingAsk({ stopAudio = true } = {}) {
+  if (state.askMicActive) {
+    stopAskMicrophone({ preserveStatus: false });
+  }
+  if (stopAudio && state.askResponseSpeaking) {
+    stopListening();
+  }
+  resetSubjectLandingAskState();
+}
+
 function renderAskVoiceControls() {
-  const hasAnswer = Boolean(getLatestAskAnswer());
   getAskSurfaces().forEach((surface) => {
     if (surface.micButton) {
       surface.micButton.textContent = state.askMicActive ? "Stop microphone" : "Use microphone";
     }
     if (surface.listenButton) {
+      const hasAnswer = Boolean(getAskPlaybackText(surface));
       surface.listenButton.textContent = state.askResponseSpeaking ? "Stop" : "Listen";
       surface.listenButton.disabled = !state.askResponseSpeaking && !hasAnswer;
     }
@@ -10218,8 +10271,8 @@ function stopAskMicrophone({ preserveStatus = false } = {}) {
   state.askMicActive = false;
   if (!preserveStatus && activeSurface?.response?.textContent === "Listening for your question...") {
     const fallbackResponse = activeSurface.kind === "landing"
-      ? getLatestAskAnswer() || "Ask Panda about the current document here."
-      : getLatestAskAnswer() || "Ask a question about the selected subject or document.";
+      ? getAskPlaybackText(activeSurface) || "Ask Panda about the current document here."
+      : getAskPlaybackText(activeSurface) || "Ask a question about the selected subject or document.";
     activeSurface.response.textContent = fallbackResponse;
     if (activeSurface.kind === "landing") {
       state.subjectLandingAskStatus = fallbackResponse;
@@ -10655,9 +10708,7 @@ function resetSubjectWorkspaceView() {
   state.subjectLandingView = "simple";
   state.subjectLandingPieceIndex = 0;
   state.subjectLandingSubjectMenuOpen = false;
-  state.subjectLandingAskOpen = false;
-  state.subjectLandingAskDraft = "";
-  state.subjectLandingAskStatus = "";
+  closeSubjectLandingAsk();
 }
 
 function expandSubjectWorkspace(tab = null) {
@@ -10918,7 +10969,7 @@ function renderAskContext() {
       : "No document selected for Ask yet.";
   }
   if (landingSurface?.response) {
-    const landingResponse = state.subjectLandingAskStatus || getLatestAskAnswer() || "Ask Panda about the current document here.";
+    const landingResponse = state.subjectLandingAskStatus || getAskPlaybackText(landingSurface) || "Ask Panda about the current document here.";
     landingSurface.response.textContent = landingResponse;
   }
   renderAskVoiceControls();
@@ -16049,6 +16100,7 @@ async function handleAsk() {
   if (activeSurface?.kind === "landing") {
     state.subjectLandingAskDraft = "";
     state.subjectLandingAskStatus = answer;
+    state.subjectLandingAskAnswer = answer;
   }
   renderAskContext();
 }
@@ -16068,7 +16120,7 @@ function handleAskListen() {
     return;
   }
 
-  const answerToPlay = getLatestAskAnswer();
+  const answerToPlay = getAskPlaybackText(activeSurface);
   if (!answerToPlay) {
     if (activeSurface?.response) {
       activeSurface.response.textContent = "Ask a question first so there is an AI response to play back.";
