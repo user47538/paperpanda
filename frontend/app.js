@@ -16182,6 +16182,75 @@ function handleAskMicToggle() {
   startAskMicrophone();
 }
 
+function speakAskResponseLocally(text, activeSurface) {
+  const textToRead = normaliseSpeechText(text);
+  if (!textToRead) {
+    return Promise.reject(new Error("There is no readable text available yet."));
+  }
+  if (!("speechSynthesis" in window) || typeof window.SpeechSynthesisUtterance !== "function") {
+    return Promise.reject(new Error("Speech playback is not available in this browser."));
+  }
+
+  stopListening();
+  const listenSessionId = Date.now();
+  currentListenSessionId = listenSessionId;
+  currentAudioContext = "ask";
+  state.askResponseSpeaking = true;
+  renderAskVoiceControls();
+
+  return new Promise((resolve, reject) => {
+    const utterance = new window.SpeechSynthesisUtterance(textToRead);
+    utterance.lang = "en-AU";
+    utterance.rate = 1;
+    utterance.pitch = 1;
+
+    utterance.onstart = () => {
+      if (currentListenSessionId !== listenSessionId) {
+        return;
+      }
+      if (activeSurface?.response) {
+        activeSurface.response.textContent = "Playing Panda's answer...";
+      }
+      if (activeSurface?.kind === "landing") {
+        state.subjectLandingAskStatus = "Playing Panda's answer...";
+      }
+    };
+
+    utterance.onend = () => {
+      if (currentListenSessionId !== listenSessionId) {
+        resolve();
+        return;
+      }
+      stopListening();
+      if (activeSurface?.response) {
+        activeSurface.response.textContent = text;
+      }
+      if (activeSurface?.kind === "landing") {
+        state.subjectLandingAskStatus = text;
+      }
+      renderAskContext();
+      resolve();
+    };
+
+    utterance.onerror = (event) => {
+      if (currentListenSessionId !== listenSessionId) {
+        reject(new Error("Speech playback was interrupted."));
+        return;
+      }
+      stopListening();
+      reject(new Error(event?.error || "Speech playback failed."));
+    };
+
+    try {
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(utterance);
+    } catch (error) {
+      stopListening();
+      reject(error instanceof Error ? error : new Error("Speech playback failed."));
+    }
+  });
+}
+
 function handleAskListen() {
   const activeSurface = getActiveAskSurface();
   if (state.askResponseSpeaking) {
@@ -16201,31 +16270,7 @@ function handleAskListen() {
     return;
   }
 
-  speakTextWithOpenAi(answerToPlay, {
-    context: "ask",
-    statusMessages: {
-      preparing: "Preparing Panda's answer...",
-      playing: "Playing Panda's answer...",
-      error: "AI voice playback failed for this answer."
-    },
-    onStatusChange: (_status, message) => {
-      if (activeSurface?.response) {
-        activeSurface.response.textContent = message;
-      }
-      if (activeSurface?.kind === "landing") {
-        state.subjectLandingAskStatus = message;
-      }
-    },
-    onFinished: () => {
-      if (activeSurface?.response) {
-        activeSurface.response.textContent = answerToPlay;
-      }
-      if (activeSurface?.kind === "landing") {
-        state.subjectLandingAskStatus = answerToPlay;
-      }
-      renderAskContext();
-    }
-  }).catch((error) => {
+  speakAskResponseLocally(answerToPlay, activeSurface).catch((error) => {
     console.error("OpenAI speech failed.", error);
     stopListening();
     const message = error instanceof Error ? `Listen failed: ${error.message}` : "Listen failed.";
