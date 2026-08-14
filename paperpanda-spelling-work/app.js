@@ -454,6 +454,7 @@ const SPELLING_STAGE_LABELS = {
   champion: "Champion"
 };
 const SPELLING_HOME_TABS = ["session", "paddock", "progress"];
+const SPELLING_RESET_VERSION = 1;
 const SPELLING_UNIT_SEED = {
   id: "air-pattern-stables",
   title: "AIR Pattern Stables",
@@ -3647,6 +3648,7 @@ function normaliseSpellingWordHistory(history) {
 function createDefaultSpellingState(subjectId = "") {
   const enabled = subjectId === "english";
   return {
+    resetVersion: SPELLING_RESET_VERSION,
     enabled,
     activeUnitId: SPELLING_UNIT_SEED.id,
     homeTab: "session",
@@ -3720,11 +3722,22 @@ function ensureSpellingSelectedStage(spelling) {
 function normaliseSpellingState(spelling, subjectId = "") {
   const base = createDefaultSpellingState(subjectId);
   const next = spelling && typeof spelling === "object" && !Array.isArray(spelling) ? spelling : {};
+  const resetVersion = Math.max(0, Number(next.resetVersion || 0) || 0);
+  if (resetVersion !== SPELLING_RESET_VERSION) {
+    return ensureSpellingSelectedStage({
+      ...base,
+      preferences: {
+        ...base.preferences,
+        ...(next.preferences && typeof next.preferences === "object" ? next.preferences : {})
+      }
+    });
+  }
   const activities = next.activities && typeof next.activities === "object" ? next.activities : {};
 
   return ensureSpellingSelectedStage({
     ...base,
     ...next,
+    resetVersion: SPELLING_RESET_VERSION,
     enabled: subjectId === "english",
     activeUnitId: next.activeUnitId || base.activeUnitId,
     homeTab: SPELLING_HOME_TABS.includes(next.homeTab) ? next.homeTab : base.homeTab,

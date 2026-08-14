@@ -536,6 +536,7 @@ const SPELLING_FLASHCARD_EXPOSURE_COUNT = 2;
 const SPELLING_FLASHCARDS_VERSION = 5;
 const SPELLING_TENSE_TRANSFER_VERSION = 5;
 const SPELLING_CHALLENGE_VERSION = 2;
+const SPELLING_RESET_VERSION = 1;
 const SPELLING_STAGE_LABELS = {
   diagnostic: "Stage 1",
   "looks-right": "Stage 2",
@@ -5987,6 +5988,7 @@ function normaliseWritingState(writing, subjectId = "") {
 function createDefaultSpellingState(subjectId = "") {
   const enabled = subjectId === "spelling";
   return {
+    resetVersion: SPELLING_RESET_VERSION,
     enabled,
     activeUnitId: SPELLING_UNIT_SEED.id,
     coachMessage: enabled
@@ -6061,6 +6063,16 @@ function createDefaultSpellingState(subjectId = "") {
 function normaliseSpellingState(spelling, subjectId = "") {
   const base = createDefaultSpellingState(subjectId);
   const next = spelling && typeof spelling === "object" && !Array.isArray(spelling) ? spelling : {};
+  const resetVersion = Math.max(0, Number(next.resetVersion || 0) || 0);
+  if (resetVersion !== SPELLING_RESET_VERSION) {
+    return {
+      ...base,
+      preferences: {
+        ...base.preferences,
+        ...(next.preferences && typeof next.preferences === "object" ? next.preferences : {})
+      }
+    };
+  }
   const diagnostic = next.diagnostic && typeof next.diagnostic === "object" ? next.diagnostic : {};
   const looksRight = next.looksRight && typeof next.looksRight === "object" ? next.looksRight : {};
   const flashcards = next.flashcards && typeof next.flashcards === "object" ? next.flashcards : {};
@@ -6107,6 +6119,7 @@ function normaliseSpellingState(spelling, subjectId = "") {
   return {
     ...base,
     ...next,
+    resetVersion: SPELLING_RESET_VERSION,
     enabled: subjectId === "spelling",
     activeUnitId: next.activeUnitId || base.activeUnitId,
     coachMessage: String(next.coachMessage || base.coachMessage || ""),
