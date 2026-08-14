@@ -5959,13 +5959,17 @@ function getLatestAskAnswer() {
   return history.length ? String(history[history.length - 1].answer || "").trim() : "";
 }
 
+function getAskIdleMessage() {
+  return "Write a question, then choose Listen to response.";
+}
+
 function renderAskVoiceControls() {
   if (elements.askMicButton) {
     elements.askMicButton.textContent = state.askMicActive ? "Stop microphone" : "Use microphone";
   }
   if (elements.askListenButton) {
-    elements.askListenButton.textContent = state.askResponseSpeaking ? "Stop" : "Listen";
-    elements.askListenButton.disabled = !state.askResponseSpeaking && !getLatestAskAnswer();
+    elements.askListenButton.textContent = state.askResponseSpeaking ? "Stop" : "Listen to response";
+    elements.askListenButton.disabled = false;
   }
 }
 
@@ -5983,7 +5987,7 @@ function stopAskMicrophone({ preserveStatus = false } = {}) {
   }
   state.askMicActive = false;
   if (!preserveStatus && elements.askResponse.textContent === "Listening for your question...") {
-    elements.askResponse.textContent = getLatestAskAnswer() || "Ask a question about the selected subject or document.";
+    elements.askResponse.textContent = getLatestAskAnswer() || getAskIdleMessage();
   }
   renderAskVoiceControls();
 }
@@ -6013,9 +6017,8 @@ function startAskMicrophone() {
       .trim();
     elements.askInput.value = transcript;
     if (event.results?.[event.results.length - 1]?.isFinal && transcript) {
-      elements.askResponse.textContent = "Question captured. Asking Panda...";
+      elements.askResponse.textContent = "Check the transcript, then choose Listen to response.";
       stopAskMicrophone({ preserveStatus: true });
-      void handleAsk();
     }
   };
 
@@ -9815,7 +9818,9 @@ async function handleAsk() {
     return;
   }
 
-  elements.askButton.disabled = true;
+  if (elements.askButton) {
+    elements.askButton.disabled = true;
+  }
   elements.askResponse.textContent = "Thinking...";
 
   let answer = "";
@@ -9824,7 +9829,9 @@ async function handleAsk() {
   } catch (error) {
     elements.askResponse.textContent =
       error instanceof Error ? `Ask AI failed: ${error.message}` : "Ask AI failed.";
-    elements.askButton.disabled = false;
+    if (elements.askButton) {
+      elements.askButton.disabled = false;
+    }
     return;
   }
 
@@ -9838,7 +9845,9 @@ async function handleAsk() {
   persistSubjects();
   elements.askResponse.textContent = answer;
   elements.askInput.value = "";
-  elements.askButton.disabled = false;
+  if (elements.askButton) {
+    elements.askButton.disabled = false;
+  }
   renderAskContext();
 }
 
@@ -9853,29 +9862,65 @@ function handleAskMicToggle() {
 function handleAskListen() {
   if (state.askResponseSpeaking) {
     stopListening();
+    elements.askResponse.textContent = getLatestAskAnswer() || getAskIdleMessage();
     return;
   }
 
-  const latestAnswer = getLatestAskAnswer();
-  if (!latestAnswer) {
-    elements.askResponse.textContent = "Ask a question first so there is an AI response to play back.";
-    renderAskVoiceControls();
-    return;
-  }
+  const subject = getSelectedSubject();
+  const document = getAskDocument() || getSelectedDocument();
+  const question = elements.askInput.value.trim();
+  const playAnswer = (answer) => {
+    speakTextWithOpenAi(answer, {
+      context: "ask",
+      statusMessages: {
+        preparing: "Preparing Panda's answer...",
+        playing: "Playing Panda's answer...",
+        error: "AI voice playback failed for this answer."
+      },
+      onFinished: () => {
+        elements.askResponse.textContent = answer;
+        renderAskVoiceControls();
+      }
+    }).catch((error) => {
+      console.error("OpenAI speech failed.", error);
+      stopListening();
+      elements.askResponse.textContent =
+        error instanceof Error ? `Listen failed: ${error.message}` : "Listen failed.";
+    });
+  };
 
-  speakTextWithOpenAi(latestAnswer, {
-    context: "ask",
-    statusMessages: {
-      preparing: "Preparing Panda's answer...",
-      playing: "Playing Panda's answer...",
-      error: "AI voice playback failed for this answer."
+  if (!question) {
+    const latestAnswer = getLatestAskAnswer();
+    if (!latestAnswer) {
+      elements.askResponse.textContent = "Write a question first so Panda knows what to answer.";
+      renderAskVoiceControls();
+      return;
     }
-  }).catch((error) => {
-    console.error("OpenAI speech failed.", error);
-    stopListening();
-    elements.askResponse.textContent =
-      error instanceof Error ? `Listen failed: ${error.message}` : "Listen failed.";
-  });
+    playAnswer(latestAnswer);
+    return;
+  }
+
+  if (!subject) {
+    return;
+  }
+
+  elements.askResponse.textContent = "Thinking...";
+  requestAskAnswer(question, subject, document)
+    .then((answer) => {
+      subject.askHistory = Array.isArray(subject.askHistory) ? subject.askHistory : [];
+      subject.askHistory.push({
+        id: createId(),
+        dateKey: currentDateKey(),
+        question,
+        answer
+      });
+      persistSubjects();
+      playAnswer(answer);
+    })
+    .catch((error) => {
+      elements.askResponse.textContent =
+        error instanceof Error ? `Ask AI failed: ${error.message}` : "Ask AI failed.";
+    });
 }
 
 function formatDate() {
@@ -11530,7 +11575,6 @@ async function handleDashboardOpen() {
   }
 }
 
-elements.askButton.addEventListener("click", handleAsk);
 elements.askMicButton?.addEventListener("click", handleAskMicToggle);
 elements.askListenButton?.addEventListener("click", handleAskListen);
 elements.signInModeCreateButton.addEventListener("click", () => {

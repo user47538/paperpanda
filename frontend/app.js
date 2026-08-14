@@ -1280,11 +1280,17 @@ const state = {
   subjectLandingAskDraft: "",
   subjectLandingAskStatus: "",
   subjectLandingAskAnswer: "",
+  subjectLandingAskLastQuestion: "",
   selectedDocumentId: null,
   currentDocumentPageIndexes: {},
   activeReaderSegmentIndex: -1,
   activeReaderSectionId: "",
   askDocumentId: null,
+  askStatusSubjectId: "",
+  askStatus: "",
+  askLatestSubjectId: "",
+  askLatestQuestion: "",
+  askLatestAnswer: "",
   listeningDocumentId: null,
   selectedDocumentIds: [],
   googleDocsAccessToken: "",
@@ -1504,7 +1510,6 @@ const elements = {
   uploadStatus: document.getElementById("upload-status"),
   aiConnectionStatus: document.getElementById("ai-connection-status"),
   askInput: document.getElementById("ask-input"),
-  askButton: document.getElementById("ask-button"),
   askMicButton: document.getElementById("ask-mic-button"),
   askListenButton: document.getElementById("ask-listen-button"),
   askContext: document.getElementById("ask-context"),
@@ -2233,7 +2238,6 @@ function getDockAskSurface() {
   return {
     kind: "dock",
     input: elements.askInput,
-    submitButton: elements.askButton,
     micButton: elements.askMicButton,
     listenButton: elements.askListenButton,
     context: elements.askContext,
@@ -2254,7 +2258,6 @@ function getSubjectLandingAskSurface() {
   return {
     kind: "landing",
     input: popup.querySelector("[data-subject-landing-ask-input]"),
-    submitButton: popup.querySelector("[data-subject-landing-ask-submit]"),
     micButton: popup.querySelector("[data-subject-landing-ask-mic]"),
     listenButton: popup.querySelector("[data-subject-landing-ask-listen]"),
     context: popup.querySelector("[data-subject-landing-ask-context]"),
@@ -3617,7 +3620,7 @@ function renderSubjectLanding() {
     const landingAskContext = landingAskDocument
       ? `Asking about: ${landingAskDocument.title}`
       : "No document selected for Ask yet.";
-    const landingAskResponse = state.subjectLandingAskStatus || getAskPlaybackText({ kind: "landing" }) || "Ask Panda about the current document here.";
+    const landingAskResponse = state.subjectLandingAskStatus || getAskIdleStatus({ kind: "landing" });
 
     host.innerHTML = `
       <section class="subject-landing subject-landing--open${state.subjectLandingAskOpen ? " subject-landing--ask-open" : ""}">
@@ -3728,8 +3731,7 @@ function renderSubjectLanding() {
                     placeholder="Ask Panda about this document here."
                   >${escapeHtml(state.subjectLandingAskDraft)}</textarea>
                   <div class="subject-landing-ask-popup__actions">
-                    <button type="button" class="subject-landing-ask-popup__submit" data-subject-landing-ask-submit>Get guidance</button>
-                    <button type="button" class="subject-landing-ask-popup__listen" data-subject-landing-ask-listen>${state.askResponseSpeaking ? "Stop" : "Listen"}</button>
+                    <button type="button" class="subject-landing-ask-popup__listen" data-subject-landing-ask-listen>${state.askResponseSpeaking ? "Stop" : "Listen to response"}</button>
                   </div>
                 </aside>
               `
@@ -3912,9 +3914,6 @@ function renderSubjectLanding() {
   });
   host.querySelector("[data-subject-landing-ask-input]")?.addEventListener("input", (event) => {
     state.subjectLandingAskDraft = event.target.value;
-  });
-  host.querySelector("[data-subject-landing-ask-submit]")?.addEventListener("click", () => {
-    void handleAsk();
   });
   host.querySelector("[data-subject-landing-ask-mic]")?.addEventListener("click", handleAskMicToggle);
   host.querySelector("[data-subject-landing-ask-listen]")?.addEventListener("click", handleAskListen);
@@ -10248,13 +10247,86 @@ async function requestAskAnswer(question, subject, document) {
 }
 
 function getLatestAskAnswer() {
-  const subject = getSelectedSubject();
-  const history = subject ? getTodayAskHistory(subject) : [];
+  const selectedSubject = getSelectedSubject();
+  if (state.askLatestAnswer && selectedSubject?.id === state.askLatestSubjectId) {
+    return String(state.askLatestAnswer).trim();
+  }
+  const history = selectedSubject ? getTodayAskHistory(selectedSubject) : [];
   return history.length ? String(history[history.length - 1].answer || "").trim() : "";
 }
 
 function getSubjectLandingAskVisibleAnswer() {
   return String(state.subjectLandingAskAnswer || "").trim();
+}
+
+function getAskIdleStatus(surface = getActiveAskSurface()) {
+  return surface?.kind === "landing"
+    ? "Write a question, then choose Listen to response."
+    : "Write a question, then choose Listen to response.";
+}
+
+function getAskReadyStatus() {
+  return "Panda's response is ready. Choose Listen to response to replay it.";
+}
+
+function getAskConfirmTranscriptStatus() {
+  return "Check the transcript, then choose Listen to response.";
+}
+
+function getStoredAskAnswer(surface = getActiveAskSurface()) {
+  return surface?.kind === "landing"
+    ? getSubjectLandingAskVisibleAnswer()
+    : getLatestAskAnswer();
+}
+
+function getLastAskedQuestion(surface = getActiveAskSurface()) {
+  const selectedSubject = getSelectedSubject();
+  return surface?.kind === "landing"
+    ? String(state.subjectLandingAskLastQuestion || "").trim()
+    : selectedSubject?.id === state.askLatestSubjectId
+      ? String(state.askLatestQuestion || "").trim()
+      : "";
+}
+
+function setAskSurfaceStatus(surface, message) {
+  const nextMessage = String(message || "").trim() || getAskIdleStatus(surface);
+  if (surface?.response) {
+    surface.response.textContent = nextMessage;
+  }
+  if (surface?.kind === "landing") {
+    state.subjectLandingAskStatus = nextMessage;
+    return;
+  }
+  state.askStatusSubjectId = getSelectedSubject()?.id || "";
+  state.askStatus = nextMessage;
+}
+
+function storeAskAnswerForSurface(surface, question, answer) {
+  const trimmedQuestion = String(question || "").trim();
+  const trimmedAnswer = String(answer || "").trim();
+  if (surface?.kind === "landing") {
+    state.subjectLandingAskLastQuestion = trimmedQuestion;
+    state.subjectLandingAskAnswer = trimmedAnswer;
+    state.subjectLandingAskStatus = getAskReadyStatus();
+    return;
+  }
+  state.askLatestSubjectId = getSelectedSubject()?.id || "";
+  state.askLatestQuestion = trimmedQuestion;
+  state.askLatestAnswer = trimmedAnswer;
+  state.askStatusSubjectId = state.askLatestSubjectId;
+  state.askStatus = getAskReadyStatus();
+}
+
+function canReplayStoredAskAnswer(surface, question) {
+  const trimmedQuestion = String(question || "").trim();
+  const storedAnswer = getStoredAskAnswer(surface);
+  if (!storedAnswer) {
+    return false;
+  }
+  if (!trimmedQuestion) {
+    return true;
+  }
+  return trimmedQuestion === getLastAskedQuestion(surface);
 }
 
 function isAskPlaybackTextPlayable(value) {
@@ -10269,11 +10341,13 @@ function isAskPlaybackTextPlayable(value) {
     normalised === "ask a question about the selected subject or document." ||
     normalised === "ask a question first so there is an ai response to play back." ||
     normalised === "write a question first so the ai can focus on what you need help with." ||
+    normalised === "write a question first so panda knows what to answer." ||
     normalised === "thinking..." ||
     normalised === "listening for your question..." ||
-    normalised === "question captured. asking panda..." ||
+    normalised === "check the transcript, then choose listen to response." ||
     normalised === "preparing panda's answer..." ||
-    normalised === "playing panda's answer..."
+    normalised === "playing panda's answer..." ||
+    normalised === "panda's response is ready. choose listen to response to replay it."
   ) {
     return false;
   }
@@ -10283,15 +10357,13 @@ function isAskPlaybackTextPlayable(value) {
 
 function getAskPlaybackText(surface = getActiveAskSurface()) {
   const surfaceText = surface?.kind === "landing"
-    ? state.subjectLandingAskStatus || getSubjectLandingAskVisibleAnswer() || surface?.response?.textContent || ""
+    ? getSubjectLandingAskVisibleAnswer() || surface?.response?.textContent || ""
     : getLatestAskAnswer() || surface?.response?.textContent || "";
   if (isAskPlaybackTextPlayable(surfaceText)) {
     return String(surfaceText).trim();
   }
 
-  const fallbackText = surface?.kind === "landing"
-    ? getSubjectLandingAskVisibleAnswer()
-    : getLatestAskAnswer();
+  const fallbackText = getStoredAskAnswer(surface);
   return isAskPlaybackTextPlayable(fallbackText) ? String(fallbackText).trim() : "";
 }
 
@@ -10300,6 +10372,7 @@ function resetSubjectLandingAskState() {
   state.subjectLandingAskDraft = "";
   state.subjectLandingAskStatus = "";
   state.subjectLandingAskAnswer = "";
+  state.subjectLandingAskLastQuestion = "";
 }
 
 function closeSubjectLandingAsk({ stopAudio = true } = {}) {
@@ -10318,7 +10391,7 @@ function renderAskVoiceControls() {
       surface.micButton.textContent = state.askMicActive ? "Stop microphone" : "Use microphone";
     }
     if (surface.listenButton) {
-      surface.listenButton.textContent = state.askResponseSpeaking ? "Stop" : "Listen";
+      surface.listenButton.textContent = state.askResponseSpeaking ? "Stop" : "Listen to response";
       surface.listenButton.disabled = false;
     }
   });
@@ -10339,13 +10412,7 @@ function stopAskMicrophone({ preserveStatus = false } = {}) {
   }
   state.askMicActive = false;
   if (!preserveStatus && activeSurface?.response?.textContent === "Listening for your question...") {
-    const fallbackResponse = activeSurface.kind === "landing"
-      ? getAskPlaybackText(activeSurface) || "Ask Panda about the current document here."
-      : getAskPlaybackText(activeSurface) || "Ask a question about the selected subject or document.";
-    activeSurface.response.textContent = fallbackResponse;
-    if (activeSurface.kind === "landing") {
-      state.subjectLandingAskStatus = fallbackResponse;
-    }
+    setAskSurfaceStatus(activeSurface, getStoredAskAnswer(activeSurface) ? getAskReadyStatus() : getAskIdleStatus(activeSurface));
   }
   renderAskVoiceControls();
 }
@@ -10354,12 +10421,7 @@ function startAskMicrophone() {
   const activeSurface = getActiveAskSurface();
   const SpeechRecognitionConstructor = getSpeechRecognitionConstructor();
   if (!SpeechRecognitionConstructor) {
-    if (activeSurface?.response) {
-      activeSurface.response.textContent = "Microphone input is not available in this browser.";
-    }
-    if (activeSurface?.kind === "landing") {
-      state.subjectLandingAskStatus = "Microphone input is not available in this browser.";
-    }
+    setAskSurfaceStatus(activeSurface, "Microphone input is not available in this browser.");
     renderAskVoiceControls();
     return;
   }
@@ -10371,12 +10433,7 @@ function startAskMicrophone() {
   recognition.interimResults = true;
   recognition.continuous = false;
   state.askMicActive = true;
-  if (activeSurface?.response) {
-    activeSurface.response.textContent = "Listening for your question...";
-  }
-  if (activeSurface?.kind === "landing") {
-    state.subjectLandingAskStatus = "Listening for your question...";
-  }
+  setAskSurfaceStatus(activeSurface, "Listening for your question...");
   renderAskVoiceControls();
 
   recognition.onresult = (event) => {
@@ -10391,14 +10448,8 @@ function startAskMicrophone() {
       state.subjectLandingAskDraft = transcript;
     }
     if (event.results?.[event.results.length - 1]?.isFinal && transcript) {
-      if (activeSurface?.response) {
-        activeSurface.response.textContent = "Question captured. Asking Panda...";
-      }
-      if (activeSurface?.kind === "landing") {
-        state.subjectLandingAskStatus = "Question captured. Asking Panda...";
-      }
+      setAskSurfaceStatus(activeSurface, getAskConfirmTranscriptStatus());
       stopAskMicrophone({ preserveStatus: true });
-      void handleAsk();
     }
   };
 
@@ -10408,12 +10459,7 @@ function startAskMicrophone() {
     const message = event?.error === "not-allowed"
       ? "Microphone permission was denied."
       : "Voice input failed. Try again or type your question.";
-    if (activeSurface?.response) {
-      activeSurface.response.textContent = message;
-    }
-    if (activeSurface?.kind === "landing") {
-      state.subjectLandingAskStatus = message;
-    }
+    setAskSurfaceStatus(activeSurface, message);
     renderAskVoiceControls();
   };
 
@@ -10426,7 +10472,7 @@ function startAskMicrophone() {
   recognition.start();
 }
 
-async function speakTextWithOpenAi(text, { context = "document", documentId = null, statusMessages = {}, onChunkStart = null, onFinished = null, chunksOverride = null, onStatusChange = null } = {}) {
+async function speakTextWithOpenAi(text, { context = "document", documentId = null, statusMessages = {}, onChunkStart = null, onFinished = null, chunksOverride = null, onStatusChange = null, statusElement = null } = {}) {
   stopListening();
   const textToRead = normaliseSpeechText(text);
   if (!textToRead) {
@@ -10440,7 +10486,11 @@ async function speakTextWithOpenAi(text, { context = "document", documentId = nu
   state.askResponseSpeaking = context === "ask";
   renderDocuments();
   renderAskVoiceControls();
-  elements.askResponse.textContent = statusMessages.preparing || "Preparing audio...";
+  if (statusElement) {
+    statusElement.textContent = statusMessages.preparing || "Preparing audio...";
+  } else if (elements.askResponse) {
+    elements.askResponse.textContent = statusMessages.preparing || "Preparing audio...";
+  }
   if (typeof onStatusChange === "function") {
     onStatusChange("pending", statusMessages.preparing || "Preparing audio...");
   }
@@ -10465,7 +10515,8 @@ async function speakTextWithOpenAi(text, { context = "document", documentId = nu
     await playSpeechChunk(chunks[chunkIndex], {
       listenSessionId,
       statusMessages,
-      onStatusChange
+      onStatusChange,
+      statusElement
     });
   }
 
@@ -10541,7 +10592,7 @@ async function primeAiSpeechPlaybackElement() {
   aiSpeechPlaybackPrimed = true;
 }
 
-async function playSpeechBlobThroughAudioElement(speechBlob, { statusMessages = {}, onStatusChange = null } = {}) {
+async function playSpeechBlobThroughAudioElement(speechBlob, { statusMessages = {}, onStatusChange = null, statusElement = null } = {}) {
   const playbackElement = ensureAiSpeechPlaybackElement();
   if (currentAudioObjectUrl) {
     URL.revokeObjectURL(currentAudioObjectUrl);
@@ -10575,7 +10626,11 @@ async function playSpeechBlobThroughAudioElement(speechBlob, { statusMessages = 
   });
 
   await playbackElement.play();
-  elements.askResponse.textContent = statusMessages.playing || "Reading...";
+  if (statusElement) {
+    statusElement.textContent = statusMessages.playing || "Reading...";
+  } else if (elements.askResponse) {
+    elements.askResponse.textContent = statusMessages.playing || "Reading...";
+  }
   if (typeof onStatusChange === "function") {
     onStatusChange("playing", statusMessages.playing || "Reading...");
   }
@@ -10586,7 +10641,7 @@ async function playSpeechBlobThroughAudioElement(speechBlob, { statusMessages = 
   });
 }
 
-async function playSpeechChunk(chunkText, { listenSessionId, statusMessages = {}, onStatusChange = null } = {}) {
+async function playSpeechChunk(chunkText, { listenSessionId, statusMessages = {}, onStatusChange = null, statusElement = null } = {}) {
   const speechBlob = await requestApi("/api/speak", { text: chunkText }, true);
 
   if (currentListenSessionId !== listenSessionId) {
@@ -10594,7 +10649,7 @@ async function playSpeechChunk(chunkText, { listenSessionId, statusMessages = {}
   }
 
   try {
-    await playSpeechBlobThroughAudioElement(speechBlob, { statusMessages, onStatusChange });
+    await playSpeechBlobThroughAudioElement(speechBlob, { statusMessages, onStatusChange, statusElement });
     return;
   } catch (error) {
     console.warn("DOM audio playback failed, retrying with AudioContext.", error);
@@ -10632,7 +10687,11 @@ async function playSpeechChunk(chunkText, { listenSessionId, statusMessages = {}
     };
 
     try {
-      elements.askResponse.textContent = statusMessages.playing || "Reading...";
+      if (statusElement) {
+        statusElement.textContent = statusMessages.playing || "Reading...";
+      } else if (elements.askResponse) {
+        elements.askResponse.textContent = statusMessages.playing || "Reading...";
+      }
       if (typeof onStatusChange === "function") {
         onStatusChange("playing", statusMessages.playing || "Reading...");
       }
@@ -11014,22 +11073,14 @@ function renderDocumentBulkActions(subject) {
 function renderAskContext() {
   const subject = getSelectedSubject();
   const askDocument = getAskDocument();
-  const history = subject ? getTodayAskHistory(subject) : [];
-  const historyMarkup = history.length
-    ? history
-        .map(
-          (entry) =>
-            `Q: ${entry.question}\nA: ${entry.answer}`
-        )
-        .join("\n\n")
-    : "";
   if (elements.askContext) {
     elements.askContext.textContent = askDocument
       ? `Asking about: ${askDocument.title}`
       : "No document selected for Ask yet.";
   }
   if (elements.askResponse) {
-    elements.askResponse.textContent = historyMarkup || "Ask a question about the selected subject or document.";
+    const dockStatus = subject && state.askStatusSubjectId === subject.id ? state.askStatus : "";
+    elements.askResponse.textContent = dockStatus || (subject ? getAskIdleStatus(getDockAskSurface()) : "Pick a subject to start Ask Panda.");
   }
   const landingSurface = getSubjectLandingAskSurface();
   if (landingSurface?.context) {
@@ -11038,7 +11089,7 @@ function renderAskContext() {
       : "No document selected for Ask yet.";
   }
   if (landingSurface?.response) {
-    const landingResponse = state.subjectLandingAskStatus || getAskPlaybackText(landingSurface) || "Ask Panda about the current document here.";
+    const landingResponse = state.subjectLandingAskStatus || getAskIdleStatus(landingSurface);
     landingSurface.response.textContent = landingResponse;
   }
   renderAskVoiceControls();
@@ -16113,39 +16164,18 @@ async function handleAsk() {
 
   const question = activeSurface?.input?.value.trim() || "";
   if (!question) {
-    if (activeSurface?.response) {
-      activeSurface.response.textContent = "Write a question first so the AI can focus on what you need help with.";
-    }
-    if (activeSurface?.kind === "landing") {
-      state.subjectLandingAskStatus = "Write a question first so the AI can focus on what you need help with.";
-    }
+    setAskSurfaceStatus(activeSurface, "Write a question first so the AI can focus on what you need help with.");
     return;
   }
 
-  if (activeSurface?.submitButton) {
-    activeSurface.submitButton.disabled = true;
-  }
-  if (activeSurface?.response) {
-    activeSurface.response.textContent = "Thinking...";
-  }
-  if (activeSurface?.kind === "landing") {
-    state.subjectLandingAskStatus = "Thinking...";
-  }
+  setAskSurfaceStatus(activeSurface, "Thinking...");
 
   let answer = "";
   try {
     answer = await requestAskAnswer(question, subject, document);
   } catch (error) {
     const message = error instanceof Error ? `Ask AI failed: ${error.message}` : "Ask AI failed.";
-    if (activeSurface?.response) {
-      activeSurface.response.textContent = message;
-    }
-    if (activeSurface?.kind === "landing") {
-      state.subjectLandingAskStatus = message;
-    }
-    if (activeSurface?.submitButton) {
-      activeSurface.submitButton.disabled = false;
-    }
+    setAskSurfaceStatus(activeSurface, message);
     return;
   }
 
@@ -16157,19 +16187,19 @@ async function handleAsk() {
     answer
   });
   persistSubjects();
-  if (activeSurface?.response) {
-    activeSurface.response.textContent = answer;
-  }
+  setAskSurfaceStatus(activeSurface, answer);
   if (activeSurface?.input) {
     activeSurface.input.value = "";
   }
-  if (activeSurface?.submitButton) {
-    activeSurface.submitButton.disabled = false;
-  }
   if (activeSurface?.kind === "landing") {
     state.subjectLandingAskDraft = "";
-    state.subjectLandingAskStatus = answer;
     state.subjectLandingAskAnswer = answer;
+    state.subjectLandingAskLastQuestion = question;
+  } else {
+    state.askLatestSubjectId = subject.id;
+    state.askStatusSubjectId = subject.id;
+    state.askLatestQuestion = question;
+    state.askLatestAnswer = answer;
   }
   renderAskContext();
 }
@@ -16186,56 +16216,73 @@ function handleAskListen() {
   const activeSurface = getActiveAskSurface();
   if (state.askResponseSpeaking) {
     stopListening();
+    setAskSurfaceStatus(activeSurface, getStoredAskAnswer(activeSurface) ? getAskReadyStatus() : getAskIdleStatus(activeSurface));
     return;
   }
 
-  const answerToPlay = getAskPlaybackText(activeSurface);
-  if (!answerToPlay) {
-    if (activeSurface?.response) {
-      activeSurface.response.textContent = "Ask a question first so there is an AI response to play back.";
+  const subject = getSelectedSubject();
+  const document = getAskDocument() || getSelectedDocument();
+  const question = activeSurface?.input?.value.trim() || "";
+  const playAnswer = (answerToPlay) => {
+    speakTextWithOpenAi(answerToPlay, {
+      context: "ask",
+      statusElement: activeSurface?.response || null,
+      statusMessages: {
+        preparing: "Preparing Panda's answer...",
+        playing: "Playing Panda's answer...",
+        error: "AI voice playback failed for this answer."
+      },
+      onStatusChange: (_status, message) => {
+        setAskSurfaceStatus(activeSurface, message);
+      },
+      onFinished: () => {
+        setAskSurfaceStatus(activeSurface, getAskReadyStatus());
+        renderAskContext();
+      }
+    }).catch((error) => {
+      console.error("OpenAI speech failed.", error);
+      stopListening();
+      const message = error instanceof Error ? `Listen failed: ${error.message}` : "Listen failed.";
+      setAskSurfaceStatus(activeSurface, message);
+    });
+  };
+
+  if (canReplayStoredAskAnswer(activeSurface, question)) {
+    const answerToPlay = getAskPlaybackText(activeSurface);
+    if (answerToPlay) {
+      playAnswer(answerToPlay);
+      return;
     }
-    if (activeSurface?.kind === "landing") {
-      state.subjectLandingAskStatus = "Ask a question first so there is an AI response to play back.";
-    }
+  }
+
+  if (!subject) {
+    return;
+  }
+
+  if (!question) {
+    setAskSurfaceStatus(activeSurface, "Write a question first so Panda knows what to answer.");
     renderAskVoiceControls();
     return;
   }
 
-  speakTextWithOpenAi(answerToPlay, {
-    context: "ask",
-    statusMessages: {
-      preparing: "Preparing Panda's answer...",
-      playing: "Playing Panda's answer...",
-      error: "AI voice playback failed for this answer."
-    },
-    onStatusChange: (_status, message) => {
-      if (activeSurface?.response) {
-        activeSurface.response.textContent = message;
-      }
-      if (activeSurface?.kind === "landing") {
-        state.subjectLandingAskStatus = message;
-      }
-    },
-    onFinished: () => {
-      if (activeSurface?.response) {
-        activeSurface.response.textContent = answerToPlay;
-      }
-      if (activeSurface?.kind === "landing") {
-        state.subjectLandingAskStatus = answerToPlay;
-      }
-      renderAskContext();
-    }
-  }).catch((error) => {
-    console.error("OpenAI speech failed.", error);
-    stopListening();
-    const message = error instanceof Error ? `Listen failed: ${error.message}` : "Listen failed.";
-    if (activeSurface?.response) {
-      activeSurface.response.textContent = message;
-    }
-    if (activeSurface?.kind === "landing") {
-      state.subjectLandingAskStatus = message;
-    }
-  });
+  setAskSurfaceStatus(activeSurface, "Thinking...");
+  requestAskAnswer(question, subject, document)
+    .then((answer) => {
+      subject.askHistory = Array.isArray(subject.askHistory) ? subject.askHistory : [];
+      subject.askHistory.push({
+        id: createId(),
+        dateKey: currentDateKey(),
+        question,
+        answer
+      });
+      persistSubjects();
+      storeAskAnswerForSurface(activeSurface, question, answer);
+      playAnswer(answer);
+    })
+    .catch((error) => {
+      const message = error instanceof Error ? `Ask AI failed: ${error.message}` : "Ask AI failed.";
+      setAskSurfaceStatus(activeSurface, message);
+    });
 }
 
 function formatDate() {
@@ -18032,7 +18079,6 @@ async function handleDashboardOpen() {
   }
 }
 
-elements.askButton.addEventListener("click", handleAsk);
 elements.askMicButton?.addEventListener("click", handleAskMicToggle);
 elements.askListenButton?.addEventListener("click", handleAskListen);
 elements.signInModeCreateButton.addEventListener("click", () => {
