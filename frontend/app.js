@@ -189,7 +189,7 @@ const subjectSeed = [
   },
   {
     id: "spelling",
-    name: "Spelling",
+    name: "Practice",
     focus: "structured literacy, spelling patterns, morphology, and sentence transfer",
     summary: "Build spelling through sound chunks, word families, and short daily pattern practice.",
     practice: [
@@ -463,7 +463,7 @@ const legacyDocumentTemplateKeysBySubject = Object.fromEntries(
 const subjectAliasMap = {
   maths: ["Maths and Numeracy", "Maths", "Mathematics", "Numeracy"],
   english: ["English"],
-  spelling: ["Spelling", "Spelling Stables"],
+  spelling: ["Practice", "Spelling", "Spelling Stables"],
   science: ["Science"],
   history: ["History"],
   music: ["Music"],
@@ -476,7 +476,7 @@ const subjectAliasMap = {
 const FOCUS_AREAS = [
   { id: "reader", icon: "📖", label: "Read", blurb: "Read & listen" },
   { id: "homework", icon: "✎", label: "Homework", blurb: "Tasks to do" },
-  { id: "spelling", icon: "Aa", label: "Spelling", blurb: "Targeted spelling practice" },
+  { id: "spelling", icon: "Aa", label: "Practice", blurb: "Targeted spelling practice" },
   { id: "writing", icon: "✍", label: "Writing", blurb: "Build a story" },
   { id: "watch", icon: "▶", label: "Watch", blurb: "Class videos" },
   { id: "assessments", icon: "🎯", label: "Assessments", blurb: "Tests & due dates" }
@@ -1305,6 +1305,8 @@ const state = {
   watchExpanded: false,
   documentsExpanded: false,
   documentsRevisionExpanded: false,
+  subjectLandingAssessmentExpanded: true,
+  subjectLandingClassNotesExpanded: true,
   subjectLandingRevisionExpanded: false,
   currentView: "home",
   activeTask: null,
@@ -3008,6 +3010,66 @@ function getSubjectLandingRevisionBundles(subject) {
   return getDocumentGroupsFromDocuments(getRevisionReaderDocuments(subject || { documents: [] }));
 }
 
+function isSubjectLandingAssessmentBundle(bundle) {
+  const normalizedType = String(bundle?.type || "").trim().toLowerCase();
+  if (normalizedType.includes("assessment") || normalizedType.includes("rubric")) {
+    return true;
+  }
+
+  return Array.isArray(bundle?.documents) && bundle.documents.some((documentRecord) => {
+    const documentType = String(documentRecord?.type || "").trim().toLowerCase();
+    return Boolean(documentRecord?.flags?.assessment) || documentType.includes("assessment") || documentType.includes("rubric");
+  });
+}
+
+function getSubjectLandingFolderMarkup({
+  title,
+  itemCount,
+  expanded,
+  toggleId,
+  bodyMarkup = "",
+  emptyTitle,
+  emptyBody
+}) {
+  const countLabel = `${itemCount} item${itemCount === 1 ? "" : "s"}`;
+  return `
+    <section class="subject-landing-folder">
+      <button
+        type="button"
+        class="documents-folder-toggle subject-landing-folder__toggle"
+        data-subject-landing-folder-toggle="${escapeHtml(toggleId)}"
+        aria-expanded="${expanded ? "true" : "false"}"
+      >
+        <span class="subject-landing-folder__heading">
+          <span class="subject-landing-folder__icon" aria-hidden="true">${expanded ? "📂" : "📁"}</span>
+          <span class="subject-landing-folder__title-wrap">
+            <strong>${escapeHtml(title)}</strong>
+            <span class="subject-landing-folder__hint">Open folder</span>
+          </span>
+        </span>
+        <span class="subject-landing-folder__meta">
+          <span>${escapeHtml(countLabel)}</span>
+          <span class="subject-landing-folder__caret" aria-hidden="true">${expanded ? "▾" : "▸"}</span>
+        </span>
+      </button>
+      ${expanded
+        ? `
+          <div class="subject-landing-folder__list">
+            ${itemCount
+              ? bodyMarkup
+              : `
+                <article class="subject-landing__empty subject-landing__empty--folder">
+                  <strong>${escapeHtml(emptyTitle)}</strong>
+                  <span>${escapeHtml(emptyBody)}</span>
+                </article>
+              `}
+          </div>
+        `
+        : ""}
+    </section>
+  `;
+}
+
 function getSubjectLandingResourceRowMarkup(bundle, { revisionArchived = false } = {}) {
   const primaryDocument = getBundlePrimaryDocument(bundle);
   const tone = getSubjectLandingTone(bundle?.type);
@@ -3378,6 +3440,8 @@ function renderSubjectLanding() {
 
   const resourceBundles = getSubjectLandingResourceBundles(subject);
   const revisionResourceBundles = getSubjectLandingRevisionBundles(subject);
+  const assessmentResourceBundles = resourceBundles.filter((bundle) => isSubjectLandingAssessmentBundle(bundle));
+  const classNoteResourceBundles = resourceBundles.filter((bundle) => !isSubjectLandingAssessmentBundle(bundle));
   const landingResourceBundleMap = new Map([...resourceBundles, ...revisionResourceBundles].map((bundle) => [bundle.id, bundle]));
   const openDocument = getSubjectLandingOpenDocument(subject);
 
@@ -3422,7 +3486,7 @@ function renderSubjectLanding() {
           <button type="button" class="ghost-button subject-landing__resource-back" data-subject-landing-all-areas="true">← All areas</button>
           <div class="subject-landing__heading">
             <p class="eyebrow">${escapeHtml(`${subject.name.toUpperCase()} · YEAR ${state.studentGrade}`)}</p>
-            <h2>Choose Spelling or Writing</h2>
+            <h2>Choose Practice or Writing</h2>
             <p>Pick the focused literacy space you want to open.</p>
           </div>
           <div class="subject-landing__list">
@@ -3497,39 +3561,36 @@ function renderSubjectLanding() {
           <div class="subject-landing__heading">
             <p class="eyebrow">${escapeHtml(`${subject.name.toUpperCase()} · YEAR ${state.studentGrade}`)}</p>
             <h2>Pick something to open</h2>
-            <p>Keep this term&apos;s files here and move older ones into the revision folder.</p>
+            <p>Open a folder below to browse assessment resources, class notes, or revision files for this subject.</p>
           </div>
           <div class="subject-landing__list">
-            ${resourceBundles.length
-              ? resourceBundles.map((bundle) => getSubjectLandingResourceRowMarkup(bundle)).join("")
-              : `
-                <article class="subject-landing__empty">
-                  <strong>No current-term resources uploaded yet</strong>
-                  <span>Upload notes, homework, or assessment files to start the simplified summary view.</span>
-                </article>
-              `}
-            ${revisionResourceBundles.length
-              ? `
-                <section class="subject-landing-folder">
-                  <button
-                    type="button"
-                    class="documents-folder-toggle subject-landing-folder__toggle"
-                    data-subject-landing-revision-folder-toggle="true"
-                    aria-expanded="${state.subjectLandingRevisionExpanded ? "true" : "false"}"
-                  >
-                    <span>Revision folder</span>
-                    <span>${escapeHtml(`${revisionResourceBundles.length} item${revisionResourceBundles.length === 1 ? "" : "s"}`)}</span>
-                  </button>
-                  ${state.subjectLandingRevisionExpanded
-                    ? `
-                      <div class="subject-landing-folder__list">
-                        ${revisionResourceBundles.map((bundle) => getSubjectLandingResourceRowMarkup(bundle, { revisionArchived: true })).join("")}
-                      </div>
-                    `
-                    : ""}
-                </section>
-              `
-              : ""}
+            ${getSubjectLandingFolderMarkup({
+              title: "Assessment resources",
+              itemCount: assessmentResourceBundles.length,
+              expanded: state.subjectLandingAssessmentExpanded,
+              toggleId: "assessment",
+              bodyMarkup: assessmentResourceBundles.map((bundle) => getSubjectLandingResourceRowMarkup(bundle)).join(""),
+              emptyTitle: "No assessment resources yet",
+              emptyBody: "Upload an assessment notification, rubric, or marking guide and it will appear in this folder."
+            })}
+            ${getSubjectLandingFolderMarkup({
+              title: "Class notes",
+              itemCount: classNoteResourceBundles.length,
+              expanded: state.subjectLandingClassNotesExpanded,
+              toggleId: "class-notes",
+              bodyMarkup: classNoteResourceBundles.map((bundle) => getSubjectLandingResourceRowMarkup(bundle)).join(""),
+              emptyTitle: "No class notes yet",
+              emptyBody: "Upload class notes, worksheets, or lesson files and they will appear in this folder."
+            })}
+            ${getSubjectLandingFolderMarkup({
+              title: "Revision folder",
+              itemCount: revisionResourceBundles.length,
+              expanded: state.subjectLandingRevisionExpanded,
+              toggleId: "revision",
+              bodyMarkup: revisionResourceBundles.map((bundle) => getSubjectLandingResourceRowMarkup(bundle, { revisionArchived: true })).join(""),
+              emptyTitle: "Nothing in revision yet",
+              emptyBody: "Move older resources into revision so they stay separate from current-term files."
+            })}
           </div>
         </div>
       </section>
@@ -3668,7 +3729,7 @@ function renderSubjectLanding() {
                   >${escapeHtml(state.subjectLandingAskDraft)}</textarea>
                   <div class="subject-landing-ask-popup__actions">
                     <button type="button" class="subject-landing-ask-popup__submit" data-subject-landing-ask-submit>Get guidance</button>
-                    <button type="button" class="subject-landing-ask-popup__listen" data-subject-landing-ask-listen ${!state.askResponseSpeaking && !getAskPlaybackText({ kind: "landing" }) ? "disabled" : ""}>${state.askResponseSpeaking ? "Stop" : "Listen"}</button>
+                    <button type="button" class="subject-landing-ask-popup__listen" data-subject-landing-ask-listen>${state.askResponseSpeaking ? "Stop" : "Listen"}</button>
                   </div>
                 </aside>
               `
@@ -3755,9 +3816,18 @@ function renderSubjectLanding() {
       render();
     });
   });
-  host.querySelector("[data-subject-landing-revision-folder-toggle]")?.addEventListener("click", () => {
-    state.subjectLandingRevisionExpanded = !state.subjectLandingRevisionExpanded;
-    render();
+  host.querySelectorAll("[data-subject-landing-folder-toggle]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const folderId = String(button.dataset.subjectLandingFolderToggle || "");
+      if (folderId === "assessment") {
+        state.subjectLandingAssessmentExpanded = !state.subjectLandingAssessmentExpanded;
+      } else if (folderId === "class-notes") {
+        state.subjectLandingClassNotesExpanded = !state.subjectLandingClassNotesExpanded;
+      } else if (folderId === "revision") {
+        state.subjectLandingRevisionExpanded = !state.subjectLandingRevisionExpanded;
+      }
+      render();
+    });
   });
   host.querySelector("[data-subject-landing-back]")?.addEventListener("click", () => {
     state.subjectLandingOpenDocumentId = "";
@@ -3948,7 +4018,7 @@ function renderSubjectFocusLaunchpad() {
         }
       : {
           title: "Spelling lives in its own subject",
-          meta: "Open the Spelling subject from the subject list to train this lesson.",
+          meta: "Open the Practice subject from the subject list to train this lesson.",
           action: "Aa Open spelling"
         },
     writing: writingSubject
@@ -4364,7 +4434,7 @@ function renderDockContext() {
           </div>
         </article>
       `
-      : `<div class="empty-state empty-state--compact">Open the Spelling subject to train this lesson.</div>`;
+      : `<div class="empty-state empty-state--compact">Open the Practice subject to train this lesson.</div>`;
     return;
   }
 
@@ -10248,9 +10318,8 @@ function renderAskVoiceControls() {
       surface.micButton.textContent = state.askMicActive ? "Stop microphone" : "Use microphone";
     }
     if (surface.listenButton) {
-      const hasAnswer = Boolean(getAskPlaybackText(surface));
       surface.listenButton.textContent = state.askResponseSpeaking ? "Stop" : "Listen";
-      surface.listenButton.disabled = !state.askResponseSpeaking && !hasAnswer;
+      surface.listenButton.disabled = false;
     }
   });
 }
@@ -10789,7 +10858,7 @@ function getSubjectHeroCopy(subject, tab) {
         ? spellingPending
           ? `left in ${SPELLING_UNIT_SEED.title} — current focus: ${SPELLING_STAGE_LABELS[stageId].toLowerCase()}.`
           : `cleared in ${SPELLING_UNIT_SEED.title} — ready for spaced review.`
-        : "ready in the Spelling subject when you want focused pattern practice."
+        : "ready in the Practice subject when you want focused pattern practice."
     };
   }
 
@@ -14913,7 +14982,7 @@ function renderSpelling() {
       <section class="spelling-shell spelling-shell--empty">
         <article class="spelling-empty-card">
           <p class="eyebrow">Spelling Stables</p>
-          <h3>Open the Spelling subject to train this lesson</h3>
+          <h3>Open the Practice subject to train this lesson</h3>
           <p>Spelling Stables now lives as its own subject so the horse-themed spelling practice can be selected directly from the subject list.</p>
         </article>
       </section>

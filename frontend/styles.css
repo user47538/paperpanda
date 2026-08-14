@@ -4451,10 +4451,62 @@ input[type="date"] {
   display: grid;
   gap: 10px;
   margin-top: 6px;
+  padding: 14px 16px 16px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 2px 4px rgba(26, 23, 38, 0.04), 0 10px 24px rgba(26, 23, 38, 0.06);
 }
 
 .subject-landing-folder__toggle {
   width: 100%;
+  padding: 4px 0;
+}
+
+.subject-landing-folder__heading,
+.subject-landing-folder__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.subject-landing-folder__icon {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.subject-landing-folder__title-wrap {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+}
+
+.subject-landing-folder__title-wrap strong {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.subject-landing-folder__hint {
+  color: #6f6a7a;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.subject-landing-folder__meta {
+  color: #6f6a7a;
+}
+
+.subject-landing-folder__caret {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.subject-landing__empty--folder {
+  box-shadow: none;
+  background: rgba(246, 241, 235, 0.9);
 }
 
 .subject-landing-folder__list {
