@@ -6310,6 +6310,7 @@ function getSubjectSpellingState(subject) {
     return createDefaultSpellingState("");
   }
   subject.spelling = normaliseSpellingState(subject.spelling, subject.id);
+  reconcileSpellingPaddockHorses(subject.spelling);
   return subject.spelling;
 }
 
@@ -6514,6 +6515,21 @@ function ensureSpellingPaddockState(spelling) {
   });
   spelling.paddockState = nextPaddockState;
   return spelling.paddockState;
+}
+
+function reconcileSpellingPaddockHorses(spelling) {
+  const completedAttemptCount = Math.min(
+    SPELLING_PADDOCK_HORSES.length,
+    Array.isArray(spelling?.completedAttempts) ? spelling.completedAttempts.length : 0
+  );
+  const earnedHorseIds = SPELLING_PADDOCK_HORSES.slice(0, completedAttemptCount).map((horse) => horse.id);
+  const ownedHorseIds = normaliseSpellingPaddockHorseIds(spelling?.paddockHorses || []);
+  spelling.paddockHorses = ownedHorseIds.length < earnedHorseIds.length ? earnedHorseIds : ownedHorseIds;
+  ensureSpellingPaddockState(spelling);
+  if (!getSpellingPaddockHorseMeta(spelling.lastUnlockedHorseId || "") && spelling.paddockHorses.length) {
+    spelling.lastUnlockedHorseId = spelling.paddockHorses[spelling.paddockHorses.length - 1];
+  }
+  return spelling.paddockHorses;
 }
 
 function clampSpellingPaddockEntry(entry, stageWidth, stageHeight, horseWidth = 170, horseHeight = 132) {
@@ -7554,8 +7570,9 @@ function finaliseSpellingRepeatCheck(subject) {
   const initialScore = getSpellingDiagnosticCorrectCount(spelling);
   const repeatScore = getSpellingRepeatCorrectCount(spelling);
   const overallScorePercent = getSpellingOverallScorePercent(spelling);
+  const attemptAlreadyRecorded = (spelling.completedAttempts || []).some((entry) => entry.attemptId === spelling.currentAttemptId);
   spelling.lastOverallScorePercent = overallScorePercent;
-  const unlockedHorse = overallScorePercent > 50 ? unlockSpellingPaddockHorse(spelling) : "";
+  const unlockedHorse = attemptAlreadyRecorded ? "" : unlockSpellingPaddockHorse(spelling);
   const unlockedHorseMeta = getSpellingPaddockHorseMeta(unlockedHorse);
   recordCompletedSpellingAttempt(subject);
   const completionMessage = unlockedHorse
@@ -15695,8 +15712,8 @@ function renderSpelling() {
             </div>
             <span class="ss-stage-badge is-complete">Program complete</span>
           </div>
-          <p class="ss-stage-copy">${escapeHtml(`Overall score: ${overallScorePercent}%. You moved from ${getSpellingDiagnosticCorrectCount(spelling)}/${attemptWords.length} in stage 1 to ${getSpellingRepeatCorrectCount(spelling)}/${attemptWords.length} in stage 5.${overallScorePercent > 50 ? ` ${earnedHorseMeta?.label || "A new horse"} earned for the paddock.` : ""}`)}</p>
-          ${overallScorePercent > 50 && earnedHorseMeta ? `
+          <p class="ss-stage-copy">${escapeHtml(`Overall score: ${overallScorePercent}%. You moved from ${getSpellingDiagnosticCorrectCount(spelling)}/${attemptWords.length} in stage 1 to ${getSpellingRepeatCorrectCount(spelling)}/${attemptWords.length} in stage 5.${earnedHorseMeta ? ` ${earnedHorseMeta.label || "A new horse"} earned for the paddock.` : ""}`)}</p>
+          ${earnedHorseMeta ? `
             <article class="ss-earned-horse-card">
               <img class="spelling-horse-card__image" src="${escapeHtml(earnedHorseMeta.image)}" alt="${escapeHtml(earnedHorseMeta.name)}" />
               <div class="spelling-horse-card__copy">
