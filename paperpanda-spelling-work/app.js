@@ -1648,7 +1648,7 @@ function createBaseSubjects() {
     hiddenWatchUrls: [],
     askHistory: [],
     savedRevisionTests: [],
-    spelling: createDefaultSpellingState(subject.id),
+    spelling: createDefaultSpellingState(subject.id, subject.name),
     writing: createDefaultWritingState(subject.id)
   }));
 }
@@ -1662,9 +1662,23 @@ function createInitialSubjectsForAccount(account) {
     hiddenWatchUrls: [],
     askHistory: [],
     savedRevisionTests: [],
-    spelling: createDefaultSpellingState(subject.id),
+    spelling: createDefaultSpellingState(subject.id, subject.name),
     writing: createDefaultWritingState(subject.id)
   }));
+}
+
+function isSpellingSubjectRecord(subjectId = "", subjectName = "") {
+  const normalizedSubjectId = String(subjectId || "").trim().toLowerCase();
+  if (normalizedSubjectId === "spelling") {
+    return true;
+  }
+
+  const normalizedSubjectName = String(subjectName || "").trim().toLowerCase();
+  if (!normalizedSubjectName) {
+    return false;
+  }
+
+  return (subjectAliasMap.spelling || []).some((alias) => alias.trim().toLowerCase() === normalizedSubjectName);
 }
 
 function resolveSubjectSeedEntry(subject, index) {
@@ -5635,7 +5649,7 @@ function hydrateStoredSubject(subject, index) {
     savedRevisionTests: Array.isArray(subject.savedRevisionTests)
       ? subject.savedRevisionTests.map(normaliseSavedRevisionTest)
       : [],
-    spelling: normaliseSpellingState(subject.spelling, resolvedSubjectId),
+    spelling: normaliseSpellingState(subject.spelling, resolvedSubjectId, subject.name),
     writing: normaliseWritingState(subject.writing, resolvedSubjectId),
     practice: Array.isArray(subject.practice)
       ? subject.practice
@@ -5985,8 +5999,8 @@ function normaliseWritingState(writing, subjectId = "") {
   };
 }
 
-function createDefaultSpellingState(subjectId = "") {
-  const enabled = subjectId === "spelling";
+function createDefaultSpellingState(subjectId = "", subjectName = "") {
+  const enabled = isSpellingSubjectRecord(subjectId, subjectName);
   return {
     resetVersion: SPELLING_RESET_VERSION,
     enabled,
@@ -6060,8 +6074,8 @@ function createDefaultSpellingState(subjectId = "") {
   };
 }
 
-function normaliseSpellingState(spelling, subjectId = "") {
-  const base = createDefaultSpellingState(subjectId);
+function normaliseSpellingState(spelling, subjectId = "", subjectName = "") {
+  const base = createDefaultSpellingState(subjectId, subjectName);
   const next = spelling && typeof spelling === "object" && !Array.isArray(spelling) ? spelling : {};
   const resetVersion = Math.max(0, Number(next.resetVersion || 0) || 0);
   if (resetVersion !== SPELLING_RESET_VERSION) {
@@ -6120,7 +6134,7 @@ function normaliseSpellingState(spelling, subjectId = "") {
     ...base,
     ...next,
     resetVersion: SPELLING_RESET_VERSION,
-    enabled: subjectId === "spelling",
+    enabled: isSpellingSubjectRecord(subjectId, subjectName),
     activeUnitId: next.activeUnitId || base.activeUnitId,
     coachMessage: String(next.coachMessage || base.coachMessage || ""),
     preferences: {
@@ -6309,7 +6323,7 @@ function getSubjectSpellingState(subject) {
   if (!subject) {
     return createDefaultSpellingState("");
   }
-  subject.spelling = normaliseSpellingState(subject.spelling, subject.id);
+  subject.spelling = normaliseSpellingState(subject.spelling, subject.id, subject.name);
   reconcileSpellingPaddockHorses(subject.spelling);
   return subject.spelling;
 }
@@ -7776,7 +7790,7 @@ function resetSpellingActivity(subject, activityId) {
     };
     spelling.coachMessage = "Listen again to the same ten words and compare them with the first spelling check.";
   } else {
-    subject.spelling = createDefaultSpellingState(subject.id);
+    subject.spelling = createDefaultSpellingState(subject.id, subject.name);
   }
   spelling.homeTab = activityId === "diagnostic" ? "stable" : "session";
   spelling.selectedStageId = "";
