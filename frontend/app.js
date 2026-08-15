@@ -15895,6 +15895,7 @@ function renderSpelling() {
   host.querySelector("[data-spelling-reset-unit]")?.addEventListener("click", () => {
     const spelling = getSubjectSpellingState(subject);
     resetSpellingProgressForNewAttempt(spelling);
+    spelling.homeTab = "session";
     spelling.sessionPreparedKey = currentSpellingSessionKey;
     persistSubjects();
     render();
