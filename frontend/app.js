@@ -6962,6 +6962,40 @@ function bindSpellingNavigationInteractions(subject, host) {
   if (!root) {
     return;
   }
+  if (root.dataset.spellingNavigationReady === subject.id) {
+    return;
+  }
+
+  root.querySelectorAll("[data-spelling-home-tab]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setSpellingHomeTab(subject, button.dataset.spellingHomeTab);
+      persistSubjects({ skipRemoteSync: true });
+      render();
+    });
+  });
+
+  root.querySelectorAll("[data-spelling-begin-session]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      activateSpellingSession(subject);
+      persistSubjects({ skipRemoteSync: true });
+      render();
+    });
+  });
+
+  root.querySelectorAll("[data-spelling-open-stage]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setSpellingSelectedStage(subject, button.dataset.spellingOpenStage);
+      persistSubjects({ skipRemoteSync: true });
+      render();
+    });
+  });
+
   root.dataset.spellingNavigationReady = subject.id;
 }
 
@@ -18273,22 +18307,6 @@ elements.subjectTabs?.querySelectorAll("[data-viewer-tab]").forEach((button) => 
     render();
   });
 });
-elements.spellingSection?.addEventListener("click", (event) => {
-  const subject = getActiveSpellingSubject();
-  if (!subject) {
-    return;
-  }
-  const action = getSpellingNavigationAction(event);
-  if (!action) {
-    return;
-  }
-  event.preventDefault();
-  event.stopPropagation();
-  if (!applySpellingNavigationAction(subject, action)) {
-    return;
-  }
-  render();
-}, true);
 elements.focusBackButton?.addEventListener("click", () => {
   state.focusAskOpen = false;
   state.focusArea = null;
