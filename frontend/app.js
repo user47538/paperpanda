@@ -559,6 +559,10 @@ const SPELLING_UNIT_SEED = {
   followUpWordCount: 10,
   reviewDays: ["Day 1", "Day 3", "Day 7", "Day 14", "Day 30"]
 };
+const SPELLING_SESSION_NEW_WORD_COUNT = 4;
+const SPELLING_SESSION_REVIEW_WORD_COUNT = 6;
+const SPELLING_CUMULATIVE_REVIEW_FREQUENCY = 5;
+const SPELLING_SESSION_REVIEW_INTERVALS = [1, 2, 4, 7, 10];
 const SPELLING_HOME_TABS = ["session", "stable", "paddock", "progress"];
 const SPELLING_PADDOCK_HORSES = [
   { id: "arabian", label: "Arabian", name: "Dusty", age: 7, image: "/horses/Arabian.png" },
@@ -6017,7 +6021,7 @@ function createDefaultSpellingState(subjectId = "", subjectName = "") {
     enabled,
     activeUnitId: SPELLING_UNIT_SEED.id,
     coachMessage: enabled
-      ? "Start with the spelling challenge so the stable work is built from the words that still need attention."
+      ? "This spelling session is ready with 4 new words and 6 review or mixed words."
       : "",
     preferences: {
       font: "lexend",
@@ -6027,6 +6031,7 @@ function createDefaultSpellingState(subjectId = "", subjectName = "") {
     focusSummary: [],
     attemptPoolOffset: 0,
     followUpWordIds: buildSpellingAttemptWordIds(),
+    currentSessionKind: "standard",
     diagnostic: {
       currentIndex: 0,
       currentInput: "",
@@ -6273,11 +6278,17 @@ function normaliseSpellingState(spelling, subjectId = "", subjectName = "") {
     sessionCompletionReady: Boolean(next.sessionCompletionReady),
     currentAttemptId: String(next.currentAttemptId || base.currentAttemptId || createId()),
     sessionPreparedKey: String(next.sessionPreparedKey || ""),
+    currentSessionKind: ["standard", "cumulative-review"].includes(String(next.currentSessionKind || ""))
+      ? String(next.currentSessionKind || "")
+      : "standard",
     completedAttempts: Array.isArray(next.completedAttempts)
       ? next.completedAttempts
           .map((entry) => ({
             attemptId: String(entry?.attemptId || ""),
             instanceNumber: Math.max(1, Number(entry?.instanceNumber || 0) || 0),
+            sessionKind: ["standard", "cumulative-review"].includes(String(entry?.sessionKind || ""))
+              ? String(entry?.sessionKind || "")
+              : "standard",
             weekKey: String(entry?.weekKey || ""),
             completedAt: String(entry?.completedAt || ""),
             stageOneCorrect: Math.max(0, Number(entry?.stageOneCorrect || 0) || 0),
@@ -6732,47 +6743,269 @@ function shuffleSpellingWordIds(wordIds = []) {
   return shuffled;
 }
 
+function getSpellingSessionAttemptNumber(completedAttempts = []) {
+  return Math.max(1, (Array.isArray(completedAttempts) ? completedAttempts.length : 0) + 1);
+}
+
+function getSpellingSessionKind(attemptNumber = 1) {
+  return attemptNumber > 0 && attemptNumber % SPELLING_CUMULATIVE_REVIEW_FREQUENCY === 0
+    ? "cumulative-review"
+    : "standard";
+}
+
+function getSpellingWordFocuses(wordId = "") {
+  const interventionEntry = SPELLING_INTERVENTION_LIBRARY[String(wordId || "")];
+  const diagnosticEntry = SPELLING_DIAGNOSTIC_WORDS.find((entry) => entry.interventionId === wordId);
+  const focusIds = Array.isArray(interventionEntry?.focuses) && interventionEntry.focuses.length
+    ? interventionEntry.focuses
+    : Array.isArray(diagnosticEntry?.focuses)
+      ? diagnosticEntry.focuses
+      : [];
+  return focusIds.map((focusId) => String(focusId || "")).filter(Boolean);
+}
+
+function getSpellingWordPrimaryFocus(wordId = "") {
+  return getSpellingWordFocuses(wordId)[0] || "mixed";
+}
+
+function buildSpellingReviewLedger(completedAttempts = []) {
+  const ledger = Object.fromEntries(
+    SPELLING_DEFAULT_FOLLOW_UP_WORD_IDS.map((wordId) => [
+      wordId,
+      {
+        wordId,
+        introducedAttemptNumber: 0,
+        lastSeenAttemptNumber: 0,
+        nextDueAttemptNumber: 1,
+        timesScheduled: 0,
+        timesIncorrect: 0,
+        consecutiveSuccessfulSessions: 0,
+        masteryStep: 0,
+        lastStageOneAccuracy: 0,
+        lastStageFiveAccuracy: 0,
+        recentAttemptNumbers: []
+      }
+    ])
+  );
+
+  (Array.isArray(completedAttempts) ? completedAttempts : [])
+    .slice()
+    .sort((left, right) => (left.instanceNumber || 0) - (right.instanceNumber || 0))
+    .forEach((attempt, attemptIndex) => {
+      const attemptNumber = Math.max(1, Number(attempt?.instanceNumber || attemptIndex + 1) || attemptIndex + 1);
+      const wordResultsById = new Map(
+        (Array.isArray(attempt?.wordResults) ? attempt.wordResults : [])
+          .map((result) => [String(result?.wordId || ""), result])
+          .filter(([wordId]) => Boolean(wordId))
+      );
+
+      (Array.isArray(attempt?.wordIds) ? attempt.wordIds : []).forEach((wordId) => {
+        const normalizedWordId = String(wordId || "");
+        const entry = ledger[normalizedWordId];
+        if (!entry) {
+          return;
+        }
+        const result = wordResultsById.get(normalizedWordId);
+        const stageFiveAccuracy = Math.max(0, Math.min(100, Number(result?.stageFiveAccuracy || 0) || 0));
+        const stageOneAccuracy = Math.max(0, Math.min(100, Number(result?.stageOneAccuracy || 0) || 0));
+        if (!entry.introducedAttemptNumber) {
+          entry.introducedAttemptNumber = attemptNumber;
+        }
+        entry.timesScheduled += 1;
+        entry.lastSeenAttemptNumber = attemptNumber;
+        entry.lastStageOneAccuracy = stageOneAccuracy;
+        entry.lastStageFiveAccuracy = stageFiveAccuracy;
+        entry.recentAttemptNumbers = [...entry.recentAttemptNumbers, attemptNumber].slice(-4);
+        if (stageFiveAccuracy >= 100) {
+          entry.consecutiveSuccessfulSessions += 1;
+          entry.masteryStep = Math.min(
+            SPELLING_SESSION_REVIEW_INTERVALS.length - 1,
+            Math.max(0, entry.consecutiveSuccessfulSessions - 1)
+          );
+          entry.nextDueAttemptNumber = attemptNumber + SPELLING_SESSION_REVIEW_INTERVALS[entry.masteryStep];
+        } else {
+          entry.consecutiveSuccessfulSessions = 0;
+          entry.masteryStep = 0;
+          entry.timesIncorrect += 1;
+          entry.nextDueAttemptNumber = attemptNumber + SPELLING_SESSION_REVIEW_INTERVALS[0];
+        }
+      });
+    });
+
+  return ledger;
+}
+
+function buildSpellingPreferredFocuses(wordIds = []) {
+  const focusCounts = new Map();
+  (Array.isArray(wordIds) ? wordIds : []).forEach((wordId) => {
+    getSpellingWordFocuses(wordId).forEach((focusId) => {
+      focusCounts.set(focusId, (focusCounts.get(focusId) || 0) + 1);
+    });
+  });
+  return [...focusCounts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .map(([focusId]) => focusId);
+}
+
+function orderSpellingWordIdsByGrouping(wordIds = [], preferredFocuses = [], currentWordIds = []) {
+  const currentSet = new Set(
+    (Array.isArray(currentWordIds) ? currentWordIds : [])
+      .map((wordId) => String(wordId || ""))
+      .filter(Boolean)
+  );
+  const buckets = new Map();
+  (Array.isArray(wordIds) ? wordIds : []).forEach((wordId) => {
+    const normalizedWordId = String(wordId || "");
+    if (!normalizedWordId || !SPELLING_INTERVENTION_LIBRARY[normalizedWordId]) {
+      return;
+    }
+    const focusId = getSpellingWordPrimaryFocus(normalizedWordId);
+    if (!buckets.has(focusId)) {
+      buckets.set(focusId, []);
+    }
+    buckets.get(focusId).push(normalizedWordId);
+  });
+  const focusOrder = [
+    ...preferredFocuses,
+    ...[...buckets.keys()].filter((focusId) => !preferredFocuses.includes(focusId)).sort((left, right) => {
+      const leftCount = (buckets.get(left) || []).length;
+      const rightCount = (buckets.get(right) || []).length;
+      return rightCount - leftCount || left.localeCompare(right);
+    })
+  ];
+  const ordered = [];
+  focusOrder.forEach((focusId) => {
+    const bucket = (buckets.get(focusId) || []).slice().sort((left, right) => {
+      const leftPenalty = currentSet.has(left) ? 1 : 0;
+      const rightPenalty = currentSet.has(right) ? 1 : 0;
+      if (leftPenalty !== rightPenalty) {
+        return leftPenalty - rightPenalty;
+      }
+      return left.localeCompare(right);
+    });
+    while (bucket.length) {
+      ordered.push(...bucket.splice(0, 2));
+    }
+  });
+  return ordered;
+}
+
+function pickSpellingWordIdsByPriority(candidateWordIds = [], targetCount = 0) {
+  return [...new Set((Array.isArray(candidateWordIds) ? candidateWordIds : []).filter(Boolean))].slice(0, Math.max(0, targetCount));
+}
+
+function compareSpellingDueReviewPriority(leftWordId, rightWordId, ledger, upcomingAttemptNumber, currentWordIds = []) {
+  const currentSet = new Set((Array.isArray(currentWordIds) ? currentWordIds : []).map((wordId) => String(wordId || "")));
+  const leftEntry = ledger[leftWordId];
+  const rightEntry = ledger[rightWordId];
+  const leftOverdue = Math.max(0, upcomingAttemptNumber - Math.max(1, Number(leftEntry?.nextDueAttemptNumber || upcomingAttemptNumber)));
+  const rightOverdue = Math.max(0, upcomingAttemptNumber - Math.max(1, Number(rightEntry?.nextDueAttemptNumber || upcomingAttemptNumber)));
+  if (leftOverdue !== rightOverdue) {
+    return rightOverdue - leftOverdue;
+  }
+  const leftAccuracy = Math.max(0, Math.min(100, Number(leftEntry?.lastStageFiveAccuracy || 0) || 0));
+  const rightAccuracy = Math.max(0, Math.min(100, Number(rightEntry?.lastStageFiveAccuracy || 0) || 0));
+  if (leftAccuracy !== rightAccuracy) {
+    return leftAccuracy - rightAccuracy;
+  }
+  const leftIncorrect = Math.max(0, Number(leftEntry?.timesIncorrect || 0) || 0);
+  const rightIncorrect = Math.max(0, Number(rightEntry?.timesIncorrect || 0) || 0);
+  if (leftIncorrect !== rightIncorrect) {
+    return rightIncorrect - leftIncorrect;
+  }
+  const leftCurrentPenalty = currentSet.has(leftWordId) ? 1 : 0;
+  const rightCurrentPenalty = currentSet.has(rightWordId) ? 1 : 0;
+  if (leftCurrentPenalty !== rightCurrentPenalty) {
+    return leftCurrentPenalty - rightCurrentPenalty;
+  }
+  const leftLastSeen = Math.max(0, Number(leftEntry?.lastSeenAttemptNumber || 0) || 0);
+  const rightLastSeen = Math.max(0, Number(rightEntry?.lastSeenAttemptNumber || 0) || 0);
+  if (leftLastSeen !== rightLastSeen) {
+    return leftLastSeen - rightLastSeen;
+  }
+  return leftWordId.localeCompare(rightWordId);
+}
+
+function compareSpellingMixedReviewPriority(leftWordId, rightWordId, ledger, upcomingAttemptNumber, currentWordIds = []) {
+  const currentSet = new Set((Array.isArray(currentWordIds) ? currentWordIds : []).map((wordId) => String(wordId || "")));
+  const leftEntry = ledger[leftWordId];
+  const rightEntry = ledger[rightWordId];
+  const leftRecent = (leftEntry?.recentAttemptNumbers || []).some((attemptNumber) => attemptNumber >= upcomingAttemptNumber - 4) ? 1 : 0;
+  const rightRecent = (rightEntry?.recentAttemptNumbers || []).some((attemptNumber) => attemptNumber >= upcomingAttemptNumber - 4) ? 1 : 0;
+  if (leftRecent !== rightRecent) {
+    return rightRecent - leftRecent;
+  }
+  const leftAccuracy = Math.max(0, Math.min(100, Number(leftEntry?.lastStageFiveAccuracy || 0) || 0));
+  const rightAccuracy = Math.max(0, Math.min(100, Number(rightEntry?.lastStageFiveAccuracy || 0) || 0));
+  if (leftAccuracy !== rightAccuracy) {
+    return leftAccuracy - rightAccuracy;
+  }
+  const leftIncorrect = Math.max(0, Number(leftEntry?.timesIncorrect || 0) || 0);
+  const rightIncorrect = Math.max(0, Number(rightEntry?.timesIncorrect || 0) || 0);
+  if (leftIncorrect !== rightIncorrect) {
+    return rightIncorrect - leftIncorrect;
+  }
+  const leftCurrentPenalty = currentSet.has(leftWordId) ? 1 : 0;
+  const rightCurrentPenalty = currentSet.has(rightWordId) ? 1 : 0;
+  if (leftCurrentPenalty !== rightCurrentPenalty) {
+    return leftCurrentPenalty - rightCurrentPenalty;
+  }
+  const leftDueGap = Math.abs(upcomingAttemptNumber - Math.max(1, Number(leftEntry?.nextDueAttemptNumber || upcomingAttemptNumber)));
+  const rightDueGap = Math.abs(upcomingAttemptNumber - Math.max(1, Number(rightEntry?.nextDueAttemptNumber || upcomingAttemptNumber)));
+  if (leftDueGap !== rightDueGap) {
+    return leftDueGap - rightDueGap;
+  }
+  return leftWordId.localeCompare(rightWordId);
+}
+
 function buildSpellingAttemptWordIds(completedAttempts = [], currentWordIds = []) {
   const wordIds = [...SPELLING_DEFAULT_FOLLOW_UP_WORD_IDS];
   if (!wordIds.length) {
     return [];
   }
-  const usageCounts = new Map(wordIds.map((wordId) => [wordId, 0]));
-  (Array.isArray(completedAttempts) ? completedAttempts : []).forEach((attempt) => {
-    (attempt?.wordIds || []).forEach((wordId) => {
-      const normalizedWordId = String(wordId || "");
-      if (!usageCounts.has(normalizedWordId)) {
-        return;
-      }
-      usageCounts.set(normalizedWordId, (usageCounts.get(normalizedWordId) || 0) + 1);
-    });
-  });
-  const currentSet = new Set(
-    (Array.isArray(currentWordIds) ? currentWordIds : [])
-      .map((value) => String(value || ""))
-      .filter((value) => SPELLING_INTERVENTION_LIBRARY[value])
+
+  const upcomingAttemptNumber = getSpellingSessionAttemptNumber(completedAttempts);
+  const sessionKind = getSpellingSessionKind(upcomingAttemptNumber);
+  const ledger = buildSpellingReviewLedger(completedAttempts);
+  const introducedWordIds = wordIds.filter((wordId) => Number(ledger[wordId]?.introducedAttemptNumber || 0) > 0);
+  const newWordIds = wordIds.filter((wordId) => !introducedWordIds.includes(wordId));
+  const dueReviewWordIds = introducedWordIds
+    .filter((wordId) => Number(ledger[wordId]?.nextDueAttemptNumber || upcomingAttemptNumber) <= upcomingAttemptNumber)
+    .sort((left, right) => compareSpellingDueReviewPriority(left, right, ledger, upcomingAttemptNumber, currentWordIds));
+  const mixedReviewWordIds = introducedWordIds
+    .filter((wordId) => !dueReviewWordIds.includes(wordId))
+    .sort((left, right) => compareSpellingMixedReviewPriority(left, right, ledger, upcomingAttemptNumber, currentWordIds));
+
+  const reviewTarget = sessionKind === "cumulative-review"
+    ? SPELLING_UNIT_SEED.followUpWordCount
+    : SPELLING_SESSION_REVIEW_WORD_COUNT;
+  const newTarget = sessionKind === "cumulative-review" ? 0 : SPELLING_SESSION_NEW_WORD_COUNT;
+
+  const reviewSelection = pickSpellingWordIdsByPriority(
+    [...dueReviewWordIds, ...mixedReviewWordIds],
+    reviewTarget
   );
-  const buckets = new Map();
-  wordIds.forEach((wordId) => {
-    const usageCount = usageCounts.get(wordId) || 0;
-    if (!buckets.has(usageCount)) {
-      buckets.set(usageCount, []);
-    }
-    buckets.get(usageCount).push(wordId);
-  });
-  const nextPool = [...buckets.keys()]
-    .sort((left, right) => left - right)
-    .flatMap((usageCount) => {
-      const bucket = buckets.get(usageCount) || [];
-      const unusedCurrentWords = shuffleSpellingWordIds(bucket.filter((wordId) => !currentSet.has(wordId)));
-      const currentWords = shuffleSpellingWordIds(bucket.filter((wordId) => currentSet.has(wordId)));
-      return [...unusedCurrentWords, ...currentWords];
-    });
-  return nextPool.slice(0, Math.min(SPELLING_UNIT_SEED.followUpWordCount, wordIds.length));
+  const preferredFocuses = buildSpellingPreferredFocuses(reviewSelection.length ? reviewSelection : dueReviewWordIds.slice(0, 6));
+  const orderedNewWordIds = orderSpellingWordIdsByGrouping(newWordIds, preferredFocuses, currentWordIds);
+  const newSelection = orderedNewWordIds.slice(0, newTarget);
+
+  const selectedWordIds = [...reviewSelection, ...newSelection];
+  const remainingWordIds = [
+    ...mixedReviewWordIds.filter((wordId) => !selectedWordIds.includes(wordId)),
+    ...dueReviewWordIds.filter((wordId) => !selectedWordIds.includes(wordId)),
+    ...orderedNewWordIds.filter((wordId) => !selectedWordIds.includes(wordId))
+  ];
+  const filledWordIds = [...selectedWordIds, ...remainingWordIds].slice(0, SPELLING_UNIT_SEED.followUpWordCount);
+  return orderSpellingWordIdsByGrouping(
+    filledWordIds,
+    buildSpellingPreferredFocuses(filledWordIds.length ? filledWordIds : preferredFocuses),
+    currentWordIds
+  ).slice(0, SPELLING_UNIT_SEED.followUpWordCount);
 }
 
 function assignRandomSpellingAttemptWordIds(spelling, currentWordIds = []) {
   spelling.attemptPoolOffset = 0;
+  spelling.currentSessionKind = getSpellingSessionKind(getSpellingSessionAttemptNumber(spelling.completedAttempts || []));
   spelling.followUpWordIds = buildSpellingAttemptWordIds(spelling.completedAttempts || [], currentWordIds);
 }
 
@@ -6862,7 +7095,9 @@ function resetSpellingProgressForNewAttempt(spelling) {
   spelling.challenge.completed = false;
   spelling.challenge.inputValue = "";
   spelling.lastUnlockedHorseId = "";
-  spelling.coachMessage = "Start with the spelling challenge so the stable work is built from the ten words for this attempt.";
+  spelling.coachMessage = spelling.currentSessionKind === "cumulative-review"
+    ? "Cumulative review session ready. This round revisits earlier spellings in a mixed check before new words continue."
+    : "This spelling session is ready with 4 new words and 6 review or mixed words.";
 }
 
 function getWeeklyCompletedSpellingAttempts(spelling, weekKey = currentWeekKey()) {
@@ -6892,7 +7127,7 @@ function ensureSpellingSessionState(subject) {
   const weekKey = currentWeekKey();
   const weeklyAttempts = getWeeklyCompletedSpellingAttempts(spelling, weekKey);
 
-  if (weeklyAttempts.length >= 4 && spelling.challenge.lastCompletedWeekKey !== weekKey) {
+  if (weeklyAttempts.length >= SPELLING_CUMULATIVE_REVIEW_FREQUENCY && spelling.challenge.lastCompletedWeekKey !== weekKey) {
     spelling.challenge = {
       version: SPELLING_CHALLENGE_VERSION,
       active: true,
@@ -6904,7 +7139,7 @@ function ensureSpellingSessionState(subject) {
       inputValue: "",
       lastCompletedWeekKey: spelling.challenge.lastCompletedWeekKey || ""
     };
-  } else if (attemptComplete && weeklyAttempts.length < 4) {
+  } else if (attemptComplete && weeklyAttempts.length < SPELLING_CUMULATIVE_REVIEW_FREQUENCY) {
     spelling.coachMessage = spelling.coachMessage || "This spelling set is complete. Start the next set from the stable when you are ready.";
   }
 }
@@ -7954,6 +8189,7 @@ function recordCompletedSpellingAttempt(subject) {
     {
       attemptId: spelling.currentAttemptId,
       instanceNumber: (spelling.completedAttempts || []).length + 1,
+      sessionKind: spelling.currentSessionKind || getSpellingSessionKind(getSpellingSessionAttemptNumber(spelling.completedAttempts || [])),
       weekKey: currentWeekKey(),
       completedAt: new Date().toISOString(),
       stageOneCorrect,
@@ -8021,7 +8257,10 @@ function resetSpellingActivity(subject, activityId) {
     spelling.challenge.checked = false;
     spelling.challenge.completed = false;
     spelling.challenge.inputValue = "";
-    spelling.coachMessage = "Start with the spelling challenge so the stable work is built from the same ten words across this attempt.";
+    spelling.currentSessionKind = getSpellingSessionKind(getSpellingSessionAttemptNumber(spelling.completedAttempts || []));
+    spelling.coachMessage = spelling.currentSessionKind === "cumulative-review"
+      ? "Cumulative review session reset. This round revisits earlier words in a mixed review."
+      : "Session reset. This round mixes 4 new words with 6 review or mixed words.";
   } else if (activityId === "looks-right") {
     spelling.looksRight = {
       answers: {},
@@ -15467,7 +15706,7 @@ function renderSpelling() {
             <p class="eyebrow">Weekly challenge complete</p>
             <div class="spelling-ribbon-badge">40 words checked</div>
             <h4>Challenge finished</h4>
-            <p>The mixed weekly challenge is complete. A new challenge will appear after four more completed spelling attempts in the current week.</p>
+            <p>The mixed weekly challenge is complete. A new challenge will appear after five more completed spelling attempts in the current week.</p>
           </article>
         </section>
       `
