@@ -6815,27 +6815,25 @@ function getSpellingVisibleStageId(subject) {
 
 function activateSpellingSession(subject) {
   const spelling = getSubjectSpellingState(subject);
-  const attemptComplete = isSpellingAttemptComplete(subject);
-  if (attemptComplete) {
-    spelling.homeTab = "session";
+  spelling.homeTab = "session";
+
+  if (spelling.sessionCompletionReady && spelling.repeatCheck.completed) {
     spelling.selectedStageId = "repeat-check";
-    spelling.celebrationStageId = "";
-    spelling.sessionCompletionReady = true;
+    return;
+  }
+
+  if (SPELLING_STAGE_ORDER.includes(String(spelling.celebrationStageId || ""))) {
+    spelling.selectedStageId = String(spelling.celebrationStageId || "diagnostic");
     return;
   }
 
   const visibleStageId = getSpellingVisibleStageId(subject);
   const fallbackStageId = getSpellingStageId(subject);
-  const nextSelectedStageId = canOpenSpellingStage(subject, visibleStageId)
+  spelling.selectedStageId = canOpenSpellingStage(subject, visibleStageId)
     ? visibleStageId
     : canOpenSpellingStage(subject, fallbackStageId)
       ? fallbackStageId
       : "diagnostic";
-  const nextSpelling = getSubjectSpellingState(subject);
-  nextSpelling.homeTab = "session";
-  nextSpelling.selectedStageId = nextSelectedStageId;
-  nextSpelling.celebrationStageId = "";
-  nextSpelling.sessionCompletionReady = false;
 }
 
 function setSpellingHomeTab(subject, tabId) {
@@ -6860,8 +6858,6 @@ function setSpellingHomeTab(subject, tabId) {
     return;
   }
   spelling.homeTab = normalizedTabId;
-  spelling.celebrationStageId = "";
-  spelling.sessionCompletionReady = false;
 }
 
 function setSpellingSelectedStage(subject, stageId) {
@@ -15121,7 +15117,8 @@ function renderSpelling() {
   const stageId = getSpellingVisibleStageId(subject);
   const stageIndex = SPELLING_STAGE_ORDER.indexOf(stageId);
   const unlockedStageIndex = Math.min(completedCount, SPELLING_STAGE_ORDER.length - 1);
-  const showingCelebration = spelling.celebrationStageId === stageId;
+  const isSessionView = homeTab === "session";
+  const showingCelebration = isSessionView && spelling.celebrationStageId === stageId;
   const diagnosticWord = getSpellingDiagnosticCurrentWord(spelling);
   const focusSummary = getSpellingTopFocuses(spelling, 3);
   const followUpWords = getSpellingFollowUpWords(spelling);
@@ -15134,7 +15131,7 @@ function renderSpelling() {
     homeTab = "progress";
   }
   const visibleHomeTab = homeTab === "stable" ? "paddock" : homeTab;
-  const showSessionCompletionSummary = homeTab === "session"
+  const showSessionCompletionSummary = isSessionView
     && !showingCelebration
     && spelling.repeatCheck.completed
     && (spelling.sessionCompletionReady || attemptComplete);
@@ -15255,12 +15252,10 @@ function renderSpelling() {
     return;
   }
 
-  if (homeTab !== "session" && !showingCelebration && !showSessionCompletionSummary) {
+  if (!isSessionView) {
     const homeBody = homeTab === "progress"
       ? buildSpellingProgressHome(subject, spelling)
-      : homeTab === "session"
-        ? buildSpellingHomeOverview(subject, spelling)
-        : buildSpellingStableHome(subject, spelling);
+      : buildSpellingStableHome(subject, spelling);
 
     host.innerHTML = `
       <section class="ss-root spelling-shell" data-spelling-font="${escapeHtml(spelling.preferences.font)}" data-spelling-spacing="${escapeHtml(spelling.preferences.spacing)}" data-spelling-tint="${escapeHtml(spelling.preferences.tint)}">
