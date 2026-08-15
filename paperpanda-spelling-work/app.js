@@ -6257,7 +6257,7 @@ function getSubjectHeroCopy(subject, tab) {
       rest: subject.id === "english"
         ? spellingPending
           ? `left in ${SPELLING_UNIT_SEED.title} — build the pattern before memorising the word.`
-          : `cleared in ${SPELLING_UNIT_SEED.title} — ready for spaced review.`
+          : ""
         : "ready in English when you want focused spelling practice."
     };
   }
