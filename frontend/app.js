@@ -15131,6 +15131,10 @@ function renderSpelling() {
   const stageId = getSpellingVisibleStageId(subject);
   const stageIndex = SPELLING_STAGE_ORDER.indexOf(stageId);
   const unlockedStageIndex = Math.min(completedCount, SPELLING_STAGE_ORDER.length - 1);
+  let homeTab = String(spelling.homeTab || "stable");
+  if (homeTab === "review") {
+    homeTab = "progress";
+  }
   const isSessionView = homeTab === "session";
   const showingCelebration = isSessionView && spelling.celebrationStageId === stageId;
   const diagnosticWord = getSpellingDiagnosticCurrentWord(spelling);
@@ -15140,10 +15144,6 @@ function renderSpelling() {
   const stageScoreSummary = getSpellingStageScoreSummary(spelling);
   const overallScorePercent = getSpellingOverallScorePercent(spelling);
   const ownedHorseMeta = getSpellingOwnedHorseMeta(spelling);
-  let homeTab = String(spelling.homeTab || "stable");
-  if (homeTab === "review") {
-    homeTab = "progress";
-  }
   const visibleHomeTab = homeTab === "stable" ? "paddock" : homeTab;
   const showSessionCompletionSummary = isSessionView
     && !showingCelebration
