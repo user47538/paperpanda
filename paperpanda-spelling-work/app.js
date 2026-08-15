@@ -3819,7 +3819,13 @@ function setSpellingHomeTab(subject, tabId) {
     return;
   }
   const spelling = getSubjectSpellingState(subject);
-  spelling.homeTab = SPELLING_HOME_TABS.includes(tabId) ? tabId : "session";
+  const normalizedTabId = SPELLING_HOME_TABS.includes(tabId) ? tabId : "session";
+  spelling.homeTab = normalizedTabId;
+  if (normalizedTabId === "session") {
+    spelling.selectedStageId = SPELLING_ACTIVITY_ORDER.includes(spelling.selectedStageId)
+      ? spelling.selectedStageId
+      : getRecommendedSpellingStageId(spelling);
+  }
   persistSubjects();
 }
 
