@@ -561,27 +561,31 @@ const SPELLING_UNIT_SEED = {
 };
 const SPELLING_HOME_TABS = ["session", "stable", "paddock", "progress"];
 const SPELLING_PADDOCK_HORSES = [
-  { id: "arabian", label: "Arabian", name: "Dusty", image: "/horses/Arabian.png" },
-  { id: "quarter-horse", label: "Quarter Horse", name: "Willow", image: "/horses/Quarter Horse.png" },
-  { id: "thoroughbred", label: "Thoroughbred", name: "Comet", image: "/horses/Thoroughbred.png" },
-  { id: "australian-stock-horse", label: "Australian Stock Horse", name: "Maple", image: "/horses/Australian Stock Horse.png" },
-  { id: "clydesdale", label: "Clydesdale", name: "Bracken", image: "/horses/Clydesdale.png" },
-  { id: "fresian", label: "Fresian", name: "Skye", image: "/horses/Fresian.png" },
-  { id: "andalusian", label: "Andalusian", name: "Juniper", image: "/horses/Andalusian.png" },
-  { id: "morgan-horse", label: "Morgan Horse", name: "Scout", image: "/horses/Morgan House.png" },
-  { id: "appaloosa", label: "Appaloosa", name: "Poppy", image: "/horses/Appaloosa.png" },
-  { id: "paint-horse", label: "Paint Horse", name: "Ember", image: "/horses/Paint Horse.png" },
-  { id: "welsh-pony", label: "Welsh Pony", name: "Tilly", image: "/horses/Welsh Pony.png" },
-  { id: "connemara-pony", label: "Connemara Pony", name: "Mabel", image: "/horses/Connemara Pony.png" },
-  { id: "shetland-pony", label: "Shetland Pony", name: "Honey", image: "/horses/Shetland Pony.png" },
-  { id: "gypsy-vanner", label: "Gypsy Vanner", name: "Rowan", image: "/horses/Gypsy Vanner.png" },
-  { id: "percheron", label: "Percheron", name: "Fern", image: "/horses/Percheron.png" },
-  { id: "haflinger", label: "Haflinger", name: "Clover", image: "/horses/Haflinger.png" },
-  { id: "tennessee-walking-horse", label: "Tennessee Walking Horse", name: "Marley", image: "/horses/Tennessee Walking Horse .png" },
-  { id: "akhal-teke", label: "Akhal-Teke", name: "Flint", image: "/horses/Akhal-Teke.png" },
-  { id: "mustang", label: "Mustang", name: "Storm", image: "/horses/Mustang.png" },
-  { id: "irish-sport-horse", label: "Irish Sport Horse", name: "Jasper", image: "/horses/Irish Sport Horse.png" }
+  { id: "arabian", label: "Arabian", name: "Dusty", age: 7, image: "/horses/Arabian.png" },
+  { id: "quarter-horse", label: "Quarter Horse", name: "Willow", age: 8, image: "/horses/Quarter Horse.png" },
+  { id: "thoroughbred", label: "Thoroughbred", name: "Comet", age: 6, image: "/horses/Thoroughbred.png" },
+  { id: "australian-stock-horse", label: "Australian Stock Horse", name: "Maple", age: 9, image: "/horses/Australian Stock Horse.png" },
+  { id: "clydesdale", label: "Clydesdale", name: "Bracken", age: 10, image: "/horses/Clydesdale.png" },
+  { id: "fresian", label: "Fresian", name: "Skye", age: 8, image: "/horses/Fresian.png" },
+  { id: "andalusian", label: "Andalusian", name: "Juniper", age: 7, image: "/horses/Andalusian.png" },
+  { id: "morgan-horse", label: "Morgan Horse", name: "Scout", age: 11, image: "/horses/Morgan House.png" },
+  { id: "appaloosa", label: "Appaloosa", name: "Poppy", age: 5, image: "/horses/Appaloosa.png" },
+  { id: "paint-horse", label: "Paint Horse", name: "Ember", age: 6, image: "/horses/Paint Horse.png" },
+  { id: "welsh-pony", label: "Welsh Pony", name: "Tilly", age: 9, image: "/horses/Welsh Pony.png" },
+  { id: "connemara-pony", label: "Connemara Pony", name: "Mabel", age: 8, image: "/horses/Connemara Pony.png" },
+  { id: "shetland-pony", label: "Shetland Pony", name: "Honey", age: 12, image: "/horses/Shetland Pony.png" },
+  { id: "gypsy-vanner", label: "Gypsy Vanner", name: "Rowan", age: 7, image: "/horses/Gypsy Vanner.png" },
+  { id: "percheron", label: "Percheron", name: "Fern", age: 9, image: "/horses/Percheron.png" },
+  { id: "haflinger", label: "Haflinger", name: "Clover", age: 6, image: "/horses/Haflinger.png" },
+  { id: "tennessee-walking-horse", label: "Tennessee Walking Horse", name: "Marley", age: 8, image: "/horses/Tennessee Walking Horse .png" },
+  { id: "akhal-teke", label: "Akhal-Teke", name: "Flint", age: 7, image: "/horses/Akhal-Teke.png" },
+  { id: "mustang", label: "Mustang", name: "Storm", age: 5, image: "/horses/Mustang.png" },
+  { id: "irish-sport-horse", label: "Irish Sport Horse", name: "Jasper", age: 9, image: "/horses/Irish Sport Horse.png" }
 ];
+const SPELLING_PADDOCK_HORSE_SIZE_STEPS = [0.8, 1, 1.2, 1.4];
+const SPELLING_PADDOCK_HORSE_DEFAULT_SCALE = SPELLING_PADDOCK_HORSE_SIZE_STEPS[1];
+const SPELLING_PADDOCK_HORSE_BASE_WIDTH = 150;
+const SPELLING_PADDOCK_HORSE_BASE_HEIGHT = 132;
 const SPELLING_PADDOCK_HORSE_ID_ALIASES = Object.fromEntries(
   SPELLING_PADDOCK_HORSES.flatMap((horse) => {
     const aliases = new Set([
@@ -6123,7 +6127,8 @@ function normaliseSpellingState(spelling, subjectId = "", subjectName = "") {
               stallId: String(entry?.stallId || `s${index + 1}`),
               roaming: Boolean(entry?.roaming),
               left: Math.max(0, Number(entry?.left || 24) || 24),
-              top: Math.max(0, Number(entry?.top || 24) || 24)
+              top: Math.max(0, Number(entry?.top || 24) || 24),
+              scale: normaliseSpellingPaddockHorseScale(entry?.scale)
             }
           ];
         })
@@ -6504,12 +6509,46 @@ function getSpellingHorseRankLabel(horseCount = 0) {
   return SPELLING_HORSE_RANKS[rankIndex];
 }
 
+function normaliseSpellingPaddockHorseScale(scale = SPELLING_PADDOCK_HORSE_DEFAULT_SCALE) {
+  const minScale = SPELLING_PADDOCK_HORSE_SIZE_STEPS[0];
+  const maxScale = SPELLING_PADDOCK_HORSE_SIZE_STEPS[SPELLING_PADDOCK_HORSE_SIZE_STEPS.length - 1];
+  const numericScale = Number(scale);
+  if (!Number.isFinite(numericScale)) {
+    return SPELLING_PADDOCK_HORSE_DEFAULT_SCALE;
+  }
+  return Math.max(minScale, Math.min(maxScale, Math.round(numericScale * 100) / 100));
+}
+
+function getSpellingPaddockHorseSizeStepIndex(scale = SPELLING_PADDOCK_HORSE_DEFAULT_SCALE) {
+  const normalisedScale = normaliseSpellingPaddockHorseScale(scale);
+  let nearestIndex = 0;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+  SPELLING_PADDOCK_HORSE_SIZE_STEPS.forEach((step, index) => {
+    const distance = Math.abs(step - normalisedScale);
+    if (distance < nearestDistance) {
+      nearestIndex = index;
+      nearestDistance = distance;
+    }
+  });
+  return nearestIndex;
+}
+
+function getSpellingPaddockHorseDimensions(entry) {
+  const scale = normaliseSpellingPaddockHorseScale(entry?.scale);
+  return {
+    scale,
+    width: Math.round(SPELLING_PADDOCK_HORSE_BASE_WIDTH * scale),
+    height: Math.round(SPELLING_PADDOCK_HORSE_BASE_HEIGHT * scale)
+  };
+}
+
 function buildDefaultSpellingPaddockEntry(index = 0) {
   return {
     stallId: `s${index + 1}`,
     roaming: false,
     left: 28 + (index % 4) * 34,
-    top: 140 + Math.floor(index / 4) * 18
+    top: 140 + Math.floor(index / 4) * 18,
+    scale: SPELLING_PADDOCK_HORSE_DEFAULT_SCALE
   };
 }
 
@@ -6550,13 +6589,17 @@ function reconcileSpellingPaddockHorses(spelling) {
   return spelling.paddockHorses;
 }
 
-function clampSpellingPaddockEntry(entry, stageWidth, stageHeight, horseWidth = 170, horseHeight = 132) {
-  const safeStageWidth = Math.max(horseWidth + 24, Number(stageWidth || 0) || 0);
-  const safeStageHeight = Math.max(horseHeight + 96, Number(stageHeight || 0) || 0);
+function clampSpellingPaddockEntry(entry, stageWidth, stageHeight, horseWidth = 0, horseHeight = 0) {
+  const dimensions = getSpellingPaddockHorseDimensions(entry);
+  const safeHorseWidth = Math.max(64, horseWidth || dimensions.width);
+  const safeHorseHeight = Math.max(80, horseHeight || dimensions.height);
+  const safeStageWidth = Math.max(safeHorseWidth + 24, Number(stageWidth || 0) || 0);
+  const safeStageHeight = Math.max(safeHorseHeight + 96, Number(stageHeight || 0) || 0);
   return {
     ...entry,
-    left: Math.max(8, Math.min(Math.round(Number(entry?.left || 0) || 0), safeStageWidth - horseWidth - 8)),
-    top: Math.max(76, Math.min(Math.round(Number(entry?.top || 0) || 0), safeStageHeight - horseHeight - 8))
+    scale: dimensions.scale,
+    left: Math.max(8, Math.min(Math.round(Number(entry?.left || 0) || 0), safeStageWidth - safeHorseWidth - 8)),
+    top: Math.max(76, Math.min(Math.round(Number(entry?.top || 0) || 0), safeStageHeight - safeHorseHeight - 8))
   };
 }
 
@@ -7082,9 +7125,10 @@ function sendSpellingHorseToPaddock(subject, horseId, stageElement) {
   }
   const stageWidth = Math.max(320, Math.round(stageElement?.clientWidth || 520));
   const stageHeight = Math.max(220, Math.round(stageElement?.clientHeight || 320));
+  const { width, height } = getSpellingPaddockHorseDimensions(horseState);
   horseState.roaming = true;
-  horseState.left = Math.max(16, Math.min(stageWidth - 170, Math.round(stageWidth * (0.18 + Math.random() * 0.5))));
-  horseState.top = Math.max(92, Math.min(stageHeight - 150, Math.round(stageHeight * (0.44 + Math.random() * 0.24))));
+  horseState.left = Math.max(16, Math.min(stageWidth - width - 16, Math.round(stageWidth * (0.18 + Math.random() * 0.5))));
+  horseState.top = Math.max(92, Math.min(stageHeight - height - 16, Math.round(stageHeight * (0.44 + Math.random() * 0.24))));
   persistSubjects();
   render();
 }
@@ -7145,6 +7189,17 @@ function clampSpellingPaddockRoamingPositions(subject, stageElement) {
   return didUpdate;
 }
 
+function applySpellingRoamingHorseStyle(horseElement, horseState) {
+  if (!horseElement || !horseState) {
+    return;
+  }
+  const { width } = getSpellingPaddockHorseDimensions(horseState);
+  horseElement.style.left = `${horseState.left}px`;
+  horseElement.style.top = `${horseState.top}px`;
+  horseElement.style.width = `${width}px`;
+  horseElement.style.zIndex = String(4 + Math.max(0, Math.round(Number(horseState.top || 0) || 0)));
+}
+
 function setupSpellingPaddockInteractions(subject, host) {
   if (!host) {
     return;
@@ -7158,21 +7213,136 @@ function setupSpellingPaddockInteractions(subject, host) {
     return;
   }
 
-  const syncRoamingHorsePositions = () => {
-    if (!clampSpellingPaddockRoamingPositions(subject, stage)) {
+  let horseNote = null;
+  let horseNoteId = "";
+
+  const closeHorseNote = () => {
+    if (horseNote?.isConnected) {
+      horseNote.remove();
+    }
+    horseNote = null;
+    horseNoteId = "";
+  };
+
+  const positionHorseNote = (horseId) => {
+    if (!horseNote || !horseId) {
       return;
     }
-    persistSubjects({ skipRemoteSync: true });
+    const safeHorseId = typeof CSS !== "undefined" && typeof CSS.escape === "function" ? CSS.escape(horseId) : horseId;
+    const horseElement = stage.querySelector(`[data-spelling-horse="${safeHorseId}"][data-spelling-horse-mode="roaming"]`);
+    if (!horseElement) {
+      closeHorseNote();
+      return;
+    }
+    const stageRect = stage.getBoundingClientRect();
+    const horseRect = horseElement.getBoundingClientRect();
+    const noteWidth = horseNote.offsetWidth || 220;
+    const noteHeight = horseNote.offsetHeight || 180;
+    let nextLeft = horseRect.left - stageRect.left + horseRect.width * 0.35;
+    let nextTop = horseRect.top - stageRect.top + Math.min(32, horseRect.height * 0.22);
+    nextLeft = Math.max(14, Math.min(nextLeft, stageRect.width - noteWidth - 14));
+    if (nextTop + noteHeight > stageRect.height - 14) {
+      nextTop = horseRect.top - stageRect.top - noteHeight - 10;
+    }
+    nextTop = Math.max(18, Math.min(nextTop, stageRect.height - noteHeight - 14));
+    horseNote.style.left = `${Math.round(nextLeft)}px`;
+    horseNote.style.top = `${Math.round(nextTop)}px`;
+  };
+
+  const renderHorseNote = (horseId) => {
     const spelling = getSubjectSpellingState(subject);
+    const horseMeta = getSpellingOwnedHorseMeta(spelling).find((horse) => horse.id === horseId);
+    if (!horseMeta || !horseMeta.state.roaming) {
+      closeHorseNote();
+      return;
+    }
+    const sizeIndex = getSpellingPaddockHorseSizeStepIndex(horseMeta.state.scale);
+    if (!horseNote) {
+      horseNote = document.createElement("aside");
+      horseNote.className = "ss-horse-note";
+      stage.appendChild(horseNote);
+    }
+    horseNoteId = horseId;
+    horseNote.innerHTML = `
+      <button type="button" class="ss-horse-note__close" aria-label="Close horse sign" data-spelling-horse-note-close="true">x</button>
+      <div class="ss-horse-note__head">
+        <div class="ss-horse-note__thumb">
+          <img src="${escapeHtml(horseMeta.image)}" alt="${escapeHtml(horseMeta.name)}" />
+        </div>
+        <div class="ss-horse-note__identity">
+          <span>Type</span>
+          <strong>${escapeHtml(horseMeta.label)}</strong>
+        </div>
+      </div>
+      <dl class="ss-horse-note__facts">
+        <div><dt>Name</dt><dd>${escapeHtml(horseMeta.name)}</dd></div>
+        <div><dt>Age</dt><dd>${escapeHtml(`${horseMeta.age} years`)}</dd></div>
+      </dl>
+      <div class="ss-horse-note__actions">
+        <span>Size</span>
+        <div class="ss-horse-note__buttons">
+          <button type="button" class="ss-horse-note__size-button" data-spelling-horse-resize="${escapeHtml(horseId)}" data-spelling-horse-resize-direction="-1" ${sizeIndex <= 0 ? "disabled" : ""}>-</button>
+          <button type="button" class="ss-horse-note__size-button" data-spelling-horse-resize="${escapeHtml(horseId)}" data-spelling-horse-resize-direction="1" ${sizeIndex >= SPELLING_PADDOCK_HORSE_SIZE_STEPS.length - 1 ? "disabled" : ""}>+</button>
+        </div>
+      </div>
+    `;
+    horseNote.querySelector("[data-spelling-horse-note-close]")?.addEventListener("click", () => {
+      closeHorseNote();
+    });
+    horseNote.querySelectorAll("[data-spelling-horse-resize]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const targetHorseId = button.dataset.spellingHorseResize || "";
+        const direction = Number(button.dataset.spellingHorseResizeDirection || 0);
+        if (!targetHorseId || !direction) {
+          return;
+        }
+        const nextSpelling = getSubjectSpellingState(subject);
+        ensureSpellingPaddockState(nextSpelling);
+        const horseState = nextSpelling.paddockState[targetHorseId];
+        if (!horseState) {
+          return;
+        }
+        const currentSizeIndex = getSpellingPaddockHorseSizeStepIndex(horseState.scale);
+        const nextSizeIndex = Math.max(0, Math.min(SPELLING_PADDOCK_HORSE_SIZE_STEPS.length - 1, currentSizeIndex + direction));
+        if (nextSizeIndex === currentSizeIndex) {
+          return;
+        }
+        horseState.scale = SPELLING_PADDOCK_HORSE_SIZE_STEPS[nextSizeIndex];
+        nextSpelling.paddockState[targetHorseId] = clampSpellingPaddockEntry(
+          horseState,
+          stage.clientWidth,
+          stage.clientHeight
+        );
+        const safeTargetHorseId = typeof CSS !== "undefined" && typeof CSS.escape === "function" ? CSS.escape(targetHorseId) : targetHorseId;
+        const horseElement = stage.querySelector(`[data-spelling-horse="${safeTargetHorseId}"][data-spelling-horse-mode="roaming"]`);
+        if (horseElement) {
+          applySpellingRoamingHorseStyle(horseElement, nextSpelling.paddockState[targetHorseId]);
+        }
+        persistSubjects({ skipRemoteSync: true });
+        renderHorseNote(targetHorseId);
+        positionHorseNote(targetHorseId);
+      });
+    });
+    positionHorseNote(horseId);
+  };
+
+  const syncRoamingHorsePositions = () => {
+    const spelling = getSubjectSpellingState(subject);
+    const didClamp = clampSpellingPaddockRoamingPositions(subject, stage);
+    if (didClamp) {
+      persistSubjects({ skipRemoteSync: true });
+    }
     host.querySelectorAll('[data-spelling-horse-mode="roaming"]').forEach((horseElement) => {
       const horseId = horseElement.dataset.spellingHorse || "";
       const horseState = spelling.paddockState?.[horseId];
       if (!horseState) {
         return;
       }
-      horseElement.style.left = `${horseState.left}px`;
-      horseElement.style.top = `${horseState.top}px`;
+      applySpellingRoamingHorseStyle(horseElement, horseState);
     });
+    if (horseNoteId) {
+      positionHorseNote(horseNoteId);
+    }
   };
 
   syncRoamingHorsePositions();
@@ -7180,10 +7350,14 @@ function setupSpellingPaddockInteractions(subject, host) {
   let drag = null;
 
   const handlePointerDown = (event) => {
+    if (event.button !== 0) {
+      return;
+    }
     const horse = event.target.closest("[data-spelling-horse]");
     if (!horse) {
       return;
     }
+    closeHorseNote();
     event.preventDefault();
     const horseId = horse.dataset.spellingHorse || "";
     const mode = horse.dataset.spellingHorseMode || "stall";
@@ -7237,6 +7411,7 @@ function setupSpellingPaddockInteractions(subject, host) {
     nextTop = Math.max(76, Math.min(nextTop, stageRect.height - drag.horse.offsetHeight - 8));
     drag.horse.style.left = `${nextLeft}px`;
     drag.horse.style.top = `${nextTop}px`;
+    drag.horse.style.zIndex = String(4 + Math.max(0, Math.round(nextTop)));
   };
 
   const handlePointerUp = () => {
@@ -7263,19 +7438,54 @@ function setupSpellingPaddockInteractions(subject, host) {
       horseState.left = Math.max(0, Math.round(parseFloat(drag.horse.style.left) || horseState.left || 0));
       horseState.top = Math.max(0, Math.round(parseFloat(drag.horse.style.top) || horseState.top || 0));
       persistSubjects({ skipRemoteSync: true });
+      if (horseNoteId === drag.horseId) {
+        positionHorseNote(drag.horseId);
+      }
     }
     drag = null;
   };
 
+  const handleContextMenu = (event) => {
+    const horse = event.target.closest('[data-spelling-horse-mode="roaming"]');
+    if (!horse || !stage.contains(horse)) {
+      return;
+    }
+    event.preventDefault();
+    const horseId = horse.dataset.spellingHorse || "";
+    if (!horseId) {
+      return;
+    }
+    renderHorseNote(horseId);
+  };
+
+  const handleHostClick = (event) => {
+    if (!horseNote) {
+      return;
+    }
+    if (horseNote.contains(event.target)) {
+      return;
+    }
+    if (event.target.closest('[data-spelling-horse-mode="roaming"]')) {
+      return;
+    }
+    closeHorseNote();
+  };
+
   host.addEventListener("pointerdown", handlePointerDown);
+  host.addEventListener("click", handleHostClick);
+  host.addEventListener("contextmenu", handleContextMenu);
   window.addEventListener("pointermove", handlePointerMove);
   window.addEventListener("pointerup", handlePointerUp);
   window.addEventListener("resize", syncRoamingHorsePositions);
   host.querySelector("[data-spelling-return-all-stalls]")?.addEventListener("click", () => {
+    closeHorseNote();
     returnAllSpellingHorsesToStalls(subject);
   });
   host._spellingPaddockCleanup = () => {
+    closeHorseNote();
     host.removeEventListener("pointerdown", handlePointerDown);
+    host.removeEventListener("click", handleHostClick);
+    host.removeEventListener("contextmenu", handleContextMenu);
     window.removeEventListener("pointermove", handlePointerMove);
     window.removeEventListener("pointerup", handlePointerUp);
     window.removeEventListener("resize", syncRoamingHorsePositions);
@@ -8229,7 +8439,7 @@ function buildSpellingPaddockMarkup(spelling) {
         alt="${escapeHtml(horse.name)}"
         data-spelling-horse="${escapeHtml(horse.id)}"
         data-spelling-horse-mode="roaming"
-        style="left:${escapeHtml(String(horse.state.left))}px;top:${escapeHtml(String(horse.state.top))}px;"
+        style="left:${escapeHtml(String(horse.state.left))}px;top:${escapeHtml(String(horse.state.top))}px;width:${escapeHtml(String(getSpellingPaddockHorseDimensions(horse.state).width))}px;z-index:${escapeHtml(String(4 + Math.max(0, Math.round(Number(horse.state.top || 0) || 0))))};"
       />
     `)
     .join("");
@@ -8238,8 +8448,9 @@ function buildSpellingPaddockMarkup(spelling) {
     <section class="ss-stable-card ss-stable-card--full">
       <div class="ss-paddock-frame pf-frame" data-spelling-paddock-frame="true">
         <div class="ss-paddock-stage" data-spelling-paddock-stage="true">
-          <div class="ss-paddock-callout">Tap a horse from the stalls to bring it into the paddock, then drag it anywhere</div>
+          <div class="ss-paddock-callout">Tap a horse from the stalls to bring it into the paddock, drag it anywhere, then right-click it for details and size</div>
           ${roamingMarkup}
+          <div class="ss-paddock-fence" aria-hidden="true"></div>
         </div>
         <div class="ss-stalls-panel">
         <div class="ss-stalls-head">
