@@ -15790,6 +15790,7 @@ function renderSpelling() {
             ${SPELLING_UNIT_SEED.reviewDays.map((dayLabel) => `<span class="is-done">${escapeHtml(dayLabel)}</span>`).join("")}
           </div>
           <div class="spelling-stage-actions spelling-stage-actions--centered">
+            <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-unit="true">Start next</button>
             <button type="button" class="primary-button primary-button--dark" data-spelling-finish-session="true">Visit the stables</button>
           </div>
         </article>
