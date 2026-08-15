@@ -586,6 +586,13 @@ const SPELLING_PADDOCK_HORSE_SIZE_STEPS = [0.8, 1, 1.2, 1.4];
 const SPELLING_PADDOCK_HORSE_DEFAULT_SCALE = SPELLING_PADDOCK_HORSE_SIZE_STEPS[1];
 const SPELLING_PADDOCK_HORSE_BASE_WIDTH = 150;
 const SPELLING_PADDOCK_HORSE_BASE_HEIGHT = 132;
+const SPELLING_PADDOCK_FRONT_FENCE_POINTS = [
+  { x: 0.34, y: 0.53 },
+  { x: 0.46, y: 0.57 },
+  { x: 0.57, y: 0.56 },
+  { x: 0.72, y: 0.55 },
+  { x: 1, y: 0.56 }
+];
 const SPELLING_PADDOCK_HORSE_ID_ALIASES = Object.fromEntries(
   SPELLING_PADDOCK_HORSES.flatMap((horse) => {
     const aliases = new Set([
@@ -6542,6 +6549,47 @@ function getSpellingPaddockHorseDimensions(entry) {
   };
 }
 
+function interpolateSpellingPaddockFenceRatio(xRatio = 0) {
+  const points = SPELLING_PADDOCK_FRONT_FENCE_POINTS;
+  if (xRatio <= points[0].x) {
+    return points[0].y;
+  }
+  for (let index = 1; index < points.length; index += 1) {
+    const previousPoint = points[index - 1];
+    const nextPoint = points[index];
+    if (xRatio <= nextPoint.x) {
+      const segmentWidth = Math.max(0.0001, nextPoint.x - previousPoint.x);
+      const segmentProgress = (xRatio - previousPoint.x) / segmentWidth;
+      return previousPoint.y + (nextPoint.y - previousPoint.y) * segmentProgress;
+    }
+  }
+  return points[points.length - 1].y;
+}
+
+function getSpellingPaddockHorseFenceDepth(entry, stageWidth, stageHeight) {
+  const safeStageWidth = Math.max(1, Number(stageWidth || 0) || 0);
+  const safeStageHeight = Math.max(1, Number(stageHeight || 0) || 0);
+  const { width, height } = getSpellingPaddockHorseDimensions(entry);
+  const hoofX = Number(entry?.left || 0) + width * 0.5;
+  const hoofY = Number(entry?.top || 0) + height * 0.88;
+  const xRatio = Math.max(0, Math.min(1, hoofX / safeStageWidth));
+  if (xRatio < SPELLING_PADDOCK_FRONT_FENCE_POINTS[0].x) {
+    return "front";
+  }
+  const fenceY = interpolateSpellingPaddockFenceRatio(xRatio) * safeStageHeight;
+  const depthPadding = Math.max(12, safeStageHeight * 0.02);
+  return hoofY <= fenceY + depthPadding ? "behind-fence" : "front";
+}
+
+function getSpellingPaddockHorseZIndex(entry, stageWidth, stageHeight) {
+  const depth = getSpellingPaddockHorseFenceDepth(entry, stageWidth, stageHeight);
+  const topValue = Math.max(0, Math.round(Number(entry?.top || 0) || 0));
+  if (depth === "behind-fence") {
+    return 4 + Math.min(4, Math.round(topValue / 80));
+  }
+  return 10 + Math.min(8, Math.round(topValue / 48));
+}
+
 function buildDefaultSpellingPaddockEntry(index = 0) {
   return {
     stallId: `s${index + 1}`,
@@ -7189,15 +7237,19 @@ function clampSpellingPaddockRoamingPositions(subject, stageElement) {
   return didUpdate;
 }
 
-function applySpellingRoamingHorseStyle(horseElement, horseState) {
+function applySpellingRoamingHorseStyle(horseElement, horseState, stageElement = null) {
   if (!horseElement || !horseState) {
     return;
   }
   const { width } = getSpellingPaddockHorseDimensions(horseState);
+  const stageWidth = Math.round(stageElement?.clientWidth || stageElement?.offsetWidth || horseElement.parentElement?.clientWidth || 0);
+  const stageHeight = Math.round(stageElement?.clientHeight || stageElement?.offsetHeight || horseElement.parentElement?.clientHeight || 0);
+  const depth = getSpellingPaddockHorseFenceDepth(horseState, stageWidth, stageHeight);
   horseElement.style.left = `${horseState.left}px`;
   horseElement.style.top = `${horseState.top}px`;
   horseElement.style.width = `${width}px`;
-  horseElement.style.zIndex = String(4 + Math.max(0, Math.round(Number(horseState.top || 0) || 0)));
+  horseElement.style.zIndex = String(getSpellingPaddockHorseZIndex(horseState, stageWidth, stageHeight));
+  horseElement.dataset.paddockDepth = depth;
 }
 
 function setupSpellingPaddockInteractions(subject, host) {
@@ -7238,13 +7290,38 @@ function setupSpellingPaddockInteractions(subject, host) {
     const horseRect = horseElement.getBoundingClientRect();
     const noteWidth = horseNote.offsetWidth || 220;
     const noteHeight = horseNote.offsetHeight || 180;
-    let nextLeft = horseRect.left - stageRect.left + horseRect.width * 0.35;
-    let nextTop = horseRect.top - stageRect.top + Math.min(32, horseRect.height * 0.22);
-    nextLeft = Math.max(14, Math.min(nextLeft, stageRect.width - noteWidth - 14));
+    const horseCenterX = (horseRect.left - stageRect.left) + horseRect.width / 2;
+    const horseCenterY = (horseRect.top - stageRect.top) + horseRect.height / 2;
+    let horizontalSide = horseCenterX > stageRect.width * 0.58 ? "left" : "right";
+    let verticalSide = horseCenterY > stageRect.height * 0.55 ? "above" : "below";
+    let nextLeft = horizontalSide === "left"
+      ? horseRect.left - stageRect.left - noteWidth - 14
+      : horseRect.right - stageRect.left + 14;
+    let nextTop = verticalSide === "above"
+      ? horseRect.top - stageRect.top - noteHeight - 10
+      : horseRect.top - stageRect.top + Math.min(32, horseRect.height * 0.22);
+
+    if (nextLeft < 14) {
+      horizontalSide = "right";
+      nextLeft = horseRect.right - stageRect.left + 14;
+    }
+    if (nextLeft + noteWidth > stageRect.width - 14) {
+      horizontalSide = "left";
+      nextLeft = horseRect.left - stageRect.left - noteWidth - 14;
+    }
+    if (nextTop < 18) {
+      verticalSide = "below";
+      nextTop = horseRect.top - stageRect.top + Math.min(32, horseRect.height * 0.22);
+    }
     if (nextTop + noteHeight > stageRect.height - 14) {
+      verticalSide = "above";
       nextTop = horseRect.top - stageRect.top - noteHeight - 10;
     }
+
+    nextLeft = Math.max(14, Math.min(nextLeft, stageRect.width - noteWidth - 14));
     nextTop = Math.max(18, Math.min(nextTop, stageRect.height - noteHeight - 14));
+    horseNote.dataset.horizontalSide = horizontalSide;
+    horseNote.dataset.verticalSide = verticalSide;
     horseNote.style.left = `${Math.round(nextLeft)}px`;
     horseNote.style.top = `${Math.round(nextTop)}px`;
   };
@@ -7316,7 +7393,7 @@ function setupSpellingPaddockInteractions(subject, host) {
         const safeTargetHorseId = typeof CSS !== "undefined" && typeof CSS.escape === "function" ? CSS.escape(targetHorseId) : targetHorseId;
         const horseElement = stage.querySelector(`[data-spelling-horse="${safeTargetHorseId}"][data-spelling-horse-mode="roaming"]`);
         if (horseElement) {
-          applySpellingRoamingHorseStyle(horseElement, nextSpelling.paddockState[targetHorseId]);
+          applySpellingRoamingHorseStyle(horseElement, nextSpelling.paddockState[targetHorseId], stage);
         }
         persistSubjects({ skipRemoteSync: true });
         renderHorseNote(targetHorseId);
@@ -7338,7 +7415,7 @@ function setupSpellingPaddockInteractions(subject, host) {
       if (!horseState) {
         return;
       }
-      applySpellingRoamingHorseStyle(horseElement, horseState);
+      applySpellingRoamingHorseStyle(horseElement, horseState, stage);
     });
     if (horseNoteId) {
       positionHorseNote(horseNoteId);
@@ -7411,7 +7488,24 @@ function setupSpellingPaddockInteractions(subject, host) {
     nextTop = Math.max(76, Math.min(nextTop, stageRect.height - drag.horse.offsetHeight - 8));
     drag.horse.style.left = `${nextLeft}px`;
     drag.horse.style.top = `${nextTop}px`;
-    drag.horse.style.zIndex = String(4 + Math.max(0, Math.round(nextTop)));
+    if (drag.roam) {
+      const spelling = getSubjectSpellingState(subject);
+      const horseState = spelling.paddockState?.[drag.horseId];
+      if (horseState) {
+        drag.horse.style.zIndex = String(
+          getSpellingPaddockHorseZIndex(
+            { ...horseState, left: nextLeft, top: nextTop },
+            stageRect.width,
+            stageRect.height
+          )
+        );
+        drag.horse.dataset.paddockDepth = getSpellingPaddockHorseFenceDepth(
+          { ...horseState, left: nextLeft, top: nextTop },
+          stageRect.width,
+          stageRect.height
+        );
+      }
+    }
   };
 
   const handlePointerUp = () => {
@@ -8074,7 +8168,7 @@ function speakSpellingWordAudio(wordEntry, { mode = "diagnostic" } = {}) {
   const cueWord = String(wordEntry.word || "").trim();
   const articulationCue = String(wordEntry.articulation || "").trim();
   const cueText = articulationCue
-    ? `${cueWord}. ${cueWord}. Listen for the beats: ${articulationCue}.`
+    ? `${cueWord}. ${cueWord}. Now spell it in chunks: ${articulationCue}.`
     : `${cueWord}. ${cueWord}.`;
 
   setSpellingAudioStatus(audioContext, "pending", "Preparing AI voice...", { skipRender: true });
@@ -8082,7 +8176,7 @@ function speakSpellingWordAudio(wordEntry, { mode = "diagnostic" } = {}) {
     context: audioContext,
     statusMessages: {
       preparing: "Preparing spelling audio...",
-      playing: "Reading spelling word...",
+      playing: "Reading spelling word and chunks...",
       error: "Spelling audio failed."
     },
     chunksOverride: [cueText],
@@ -8439,7 +8533,8 @@ function buildSpellingPaddockMarkup(spelling) {
         alt="${escapeHtml(horse.name)}"
         data-spelling-horse="${escapeHtml(horse.id)}"
         data-spelling-horse-mode="roaming"
-        style="left:${escapeHtml(String(horse.state.left))}px;top:${escapeHtml(String(horse.state.top))}px;width:${escapeHtml(String(getSpellingPaddockHorseDimensions(horse.state).width))}px;z-index:${escapeHtml(String(4 + Math.max(0, Math.round(Number(horse.state.top || 0) || 0))))};"
+        data-paddock-depth="${escapeHtml(getSpellingPaddockHorseFenceDepth(horse.state, 520, 404))}"
+        style="left:${escapeHtml(String(horse.state.left))}px;top:${escapeHtml(String(horse.state.top))}px;width:${escapeHtml(String(getSpellingPaddockHorseDimensions(horse.state).width))}px;z-index:${escapeHtml(String(getSpellingPaddockHorseZIndex(horse.state, 520, 404)))};"
       />
     `)
     .join("");
