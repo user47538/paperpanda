@@ -4,11 +4,11 @@ const authTokenStorageKey = "paperpanda-session-token";
 const subjectsStorageKey = "paperpanda-subjects-by-account";
 const settingsStorageKey = "studylift-settings";
 const uiVersionStorageKey = "paperpanda-ui-version";
-const currentUiVersion = "2026-05-28-design-handoff-structure";
+const currentUiVersion = "2026-07-30-writing-launchpad-and-stage5-fix";
 const previewDatabaseName = "paperpanda-assets";
 const previewStoreName = "document-previews";
 const settingsAssetStoreName = "settings-assets";
-const FOCUS_MODE_STORAGE_KEY = "paperpanda.focusMode";
+const subjectsSnapshotStoreName = "subjects-snapshots";
 const GOOGLE_DOCS_SCOPE = "https://www.googleapis.com/auth/documents";
 const GOOGLE_IDENTITY_SCRIPT_ID = "google-identity-client";
 const GOOGLE_IDENTITY_SCRIPT_URL = "https://accounts.google.com/gsi/client";
@@ -32,7 +32,7 @@ function resolveDefaultApiBaseUrl() {
     return `${protocol}//${hostname}:3001`;
   }
 
-  return "";
+  return "https://paperpanda.onrender.com";
 }
 
 const API_BASE_URL = resolveDefaultApiBaseUrl();
@@ -41,12 +41,22 @@ let pdfjsLibPromise = null;
 let jsZipPromise = null;
 let currentAudioPlayback = null;
 let currentAudioObjectUrl = "";
+let currentAudioBufferSource = null;
+let aiSpeechPlaybackContext = null;
+let aiSpeechPlaybackPrimed = false;
 let previewDatabasePromise = null;
+let indexedDbSubjectsSaveQueuedSnapshot = null;
+let indexedDbSubjectsSaveInFlight = false;
 let currentListenSessionId = 0;
 let currentAudioContext = "";
 let currentSpeechRecognition = null;
 let remoteSubjectsSaveQueuedSnapshot = null;
 let remoteSubjectsSaveInFlight = false;
+let remoteSubjectsSaveSequence = 0;
+let remoteSubjectsCommittedSequence = 0;
+let remoteSubjectsFailedSequence = 0;
+let remoteSubjectsLastError = null;
+let remoteSubjectsSaveWaiters = [];
 let remoteSettingsSaveQueuedSnapshot = null;
 let remoteSettingsSaveInFlight = false;
 let googleIdentityClientPromise = null;
@@ -127,9 +137,9 @@ const subjectSeed = [
     summary: "Use linked documents to keep rubrics, drafts, and teacher feedback beside each task.",
     practice: [
       {
-        title: "Spelling",
+        title: "Vocabulary",
         tag: "Word study",
-        description: "Review spelling patterns and use each word in a sentence."
+        description: "Unpack unfamiliar words, meanings, and examples before using them in writing."
       },
       {
         title: "Writing",
@@ -176,6 +186,31 @@ const subjectSeed = [
       seededAssessment("6", "Yearly Examination - Mythology critical paragraph and short answers", "Term 4 Week 1", "Term 4 Weeks 5/6", "20%"),
       seededAssessment("6", "Book Work", "Ongoing", "Term 3 and Term 4", "10%")
     ]
+  },
+  {
+    id: "spelling",
+    name: "Practice",
+    focus: "structured literacy, spelling patterns, morphology, and sentence transfer",
+    summary: "Build spelling through sound chunks, word families, and short daily pattern practice.",
+    practice: [
+      {
+        title: "Chunk building",
+        tag: "Foal",
+        description: "Build target words with sound chunks before typing them from memory."
+      },
+      {
+        title: "Word families",
+        tag: "School Horse",
+        description: "Keep the root spelling stable as suffixes and endings are added."
+      },
+      {
+        title: "Sentence transfer",
+        tag: "Champion",
+        description: "Use the target spelling pattern in a real sentence so it sticks."
+      }
+    ],
+    documents: [],
+    assessments: []
   },
   {
     id: "science",
@@ -428,6 +463,7 @@ const legacyDocumentTemplateKeysBySubject = Object.fromEntries(
 const subjectAliasMap = {
   maths: ["Maths and Numeracy", "Maths", "Mathematics", "Numeracy"],
   english: ["English"],
+  spelling: ["Practice", "Spelling", "Spelling Stables"],
   science: ["Science"],
   history: ["History"],
   music: ["Music"],
@@ -440,81 +476,754 @@ const subjectAliasMap = {
 const FOCUS_AREAS = [
   { id: "reader", icon: "📖", label: "Read", blurb: "Read & listen" },
   { id: "homework", icon: "✎", label: "Homework", blurb: "Tasks to do" },
-  { id: "spelling", icon: "🐴", label: "Spelling", blurb: "Pattern practice" },
+  { id: "spelling", icon: "Aa", label: "Practice", blurb: "Targeted spelling practice" },
+  { id: "writing", icon: "✍", label: "Writing", blurb: "Build a story" },
   { id: "watch", icon: "▶", label: "Watch", blurb: "Class videos" },
   { id: "assessments", icon: "🎯", label: "Assessments", blurb: "Tests & due dates" }
 ];
 
-const SPELLING_STAGE_ORDER = ["foal", "pony", "school-horse", "show-horse", "champion"];
-const SPELLING_STAGE_LABELS = {
-  foal: "Foal",
-  pony: "Pony",
-  "school-horse": "School Horse",
-  "show-horse": "Show Horse",
-  champion: "Champion"
+const WRITING_STUDIO_SECTION_COUNT = 6;
+const WRITING_STUDIO_TAB_LABEL = "Writing Studio";
+const WRITING_STUDIO_STYLE_VARIANTS = [
+  {
+    id: "watercolour",
+    label: "Watercolour storybook",
+    description: "Soft painted washes, warm light, and gentle dreamy scenery.",
+    promptLead: "Use a delicate watercolor picture-book style with soft painted washes, glowing warm light, airy edges, and poetic scenery."
+  },
+  {
+    id: "paper-cut",
+    label: "Paper-cut collage",
+    description: "Layered torn paper, bold flat shapes, and handmade collage texture.",
+    promptLead: "Use a handcrafted cut-paper collage style with layered torn paper, flat graphic shapes, visible paper grain, and playful handmade texture."
+  },
+  {
+    id: "ink-print",
+    label: "Vintage ink print",
+    description: "Limited colours, bold ink lines, and a classic old-book print feel.",
+    promptLead: "Use a vintage ink-and-print illustration style with bold etched linework, limited colour blocks, textured paper, and a classic old-book feel."
+  },
+  {
+    id: "stop-motion",
+    label: "Miniature stop-motion",
+    description: "Felt-and-clay diorama look with tactile props and cinematic lighting.",
+    promptLead: "Make it look like a miniature stop-motion story set with felt-and-clay characters, tactile handmade props, shallow depth of field, and cinematic lighting."
+  }
+];
+const WRITING_STUDIO_TYPOS = {
+  aksed: "asked",
+  befor: "before",
+  becuase: "because",
+  freind: "friend",
+  recieve: "receive",
+  seperate: "separate",
+  untill: "until",
+  wierd: "weird",
+  thier: "their"
 };
-const SPELLING_HOME_TABS = ["session", "paddock", "progress"];
+const WRITING_STUDIO_SECTION_HINTS = [
+  "Show what your character notices first.",
+  "Add a small problem or surprise.",
+  "Reveal something hidden or unexpected.",
+  "Show the choice your character has to make.",
+  "Build toward the biggest moment.",
+  "End with a strong final image."
+];
+
+const SPELLING_STAGE_ORDER = ["diagnostic", "looks-right", "word-families", "tense-transfer", "repeat-check"];
+const SPELLING_MIDDLE_STAGE_IDS = ["looks-right", "word-families", "tense-transfer"];
+const SPELLING_FLASHCARD_EXPOSURE_COUNT = 2;
+const SPELLING_FLASHCARDS_VERSION = 5;
+const SPELLING_TENSE_TRANSFER_VERSION = 5;
+const SPELLING_CHALLENGE_VERSION = 2;
 const SPELLING_RESET_VERSION = 1;
-const SPELLING_UNIT_SEED = {
-  id: "air-pattern-stables",
-  title: "AIR Pattern Stables",
-  horseName: "Dusty",
-  focusPattern: "AIR sound choices",
-  targetWord: "square",
-  intro:
-    "Train the /air/ pattern by building square with chunks, sorting matching words, and growing a word family instead of memorising one word at a time.",
-  chunkAnswer: ["squ", "are"],
-  tagChoices: ["u", "a", "i"],
-  sortBuckets: {
-    air: ["chair", "hair"],
-    are: ["square", "compare"],
-    ear: ["bear", "wear"]
-  },
-  familyOrder: ["square", "squared", "squarely", "squareness"],
-  sentenceWords: ["square", "compare", "aware"]
+const SPELLING_STAGE_LABELS = {
+  diagnostic: "Stage 1",
+  "looks-right": "Stage 2",
+  "word-families": "Stage 3",
+  "tense-transfer": "Stage 4",
+  "repeat-check": "Stage 5"
 };
-const SPELLING_ACTIVITY_ORDER = ["jump", "tag", "sort", "family", "sentence"];
-const SPELLING_STAGE_DETAILS = {
-  jump: {
-    number: 1,
-    label: "Stage 1",
-    title: "Baseline spelling check",
-    note: "Spell the lesson words before training so stage 5 can measure improvement."
+const SPELLING_FOCUS_LABELS = {
+  "over-articulation": "Over-articulation and hidden sounds",
+  "word-family": "Word families and pattern transfer",
+  mnemonic: "Mnemonic-worthy spellings",
+  "look-right": "Visual checking: does it look right?"
+};
+const SPELLING_UNIT_SEED = {
+  id: "spelling-progression",
+  title: "Spelling Stables",
+  intro:
+    "Run a five-stage spelling session built from the words that still need attention, then earn ribbons and grow the stable.",
+  diagnosticTargetCount: 10,
+  followUpWordCount: 10,
+  reviewDays: ["Day 1", "Day 3", "Day 7", "Day 14", "Day 30"]
+};
+const SPELLING_HOME_TABS = ["session", "stable", "paddock", "progress"];
+const SPELLING_PADDOCK_HORSES = [
+  { id: "arabian", label: "Arabian", name: "Dusty", image: "/horses/Arabian.png" },
+  { id: "quarter-horse", label: "Quarter Horse", name: "Willow", image: "/horses/Quarter Horse.png" },
+  { id: "thoroughbred", label: "Thoroughbred", name: "Comet", image: "/horses/Thoroughbred.png" },
+  { id: "australian-stock-horse", label: "Australian Stock Horse", name: "Maple", image: "/horses/Australian Stock Horse.png" },
+  { id: "clydesdale", label: "Clydesdale", name: "Bracken", image: "/horses/Clydesdale.png" },
+  { id: "fresian", label: "Fresian", name: "Skye", image: "/horses/Fresian.png" },
+  { id: "andalusian", label: "Andalusian", name: "Juniper", image: "/horses/Andalusian.png" },
+  { id: "morgan-horse", label: "Morgan Horse", name: "Scout", image: "/horses/Morgan House.png" },
+  { id: "appaloosa", label: "Appaloosa", name: "Poppy", image: "/horses/Appaloosa.png" },
+  { id: "paint-horse", label: "Paint Horse", name: "Ember", image: "/horses/Paint Horse.png" },
+  { id: "welsh-pony", label: "Welsh Pony", name: "Tilly", image: "/horses/Welsh Pony.png" },
+  { id: "connemara-pony", label: "Connemara Pony", name: "Mabel", image: "/horses/Connemara Pony.png" },
+  { id: "shetland-pony", label: "Shetland Pony", name: "Honey", image: "/horses/Shetland Pony.png" },
+  { id: "gypsy-vanner", label: "Gypsy Vanner", name: "Rowan", image: "/horses/Gypsy Vanner.png" },
+  { id: "percheron", label: "Percheron", name: "Fern", image: "/horses/Percheron.png" },
+  { id: "haflinger", label: "Haflinger", name: "Clover", image: "/horses/Haflinger.png" },
+  { id: "tennessee-walking-horse", label: "Tennessee Walking Horse", name: "Marley", image: "/horses/Tennessee Walking Horse .png" },
+  { id: "akhal-teke", label: "Akhal-Teke", name: "Flint", image: "/horses/Akhal-Teke.png" },
+  { id: "mustang", label: "Mustang", name: "Storm", image: "/horses/Mustang.png" },
+  { id: "irish-sport-horse", label: "Irish Sport Horse", name: "Jasper", image: "/horses/Irish Sport Horse.png" }
+];
+const SPELLING_PADDOCK_HORSE_ID_ALIASES = Object.fromEntries(
+  SPELLING_PADDOCK_HORSES.flatMap((horse) => {
+    const aliases = new Set([
+      String(horse.id || "").trim().toLowerCase(),
+      String(horse.label || "").trim().toLowerCase(),
+      String(horse.label || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
+    ]);
+    return [...aliases].filter(Boolean).map((alias) => [alias, horse.id]);
+  })
+);
+const SPELLING_PADDOCK_HORSE_BY_ID = Object.fromEntries(
+  SPELLING_PADDOCK_HORSES.map((horse) => [horse.id, horse])
+);
+const SPELLING_HORSE_RANKS = ["Foal", "Pony", "School Horse", "Show Horse", "Champion"];
+const SPELLING_TENSE_IDS = ["past", "present", "future"];
+const SPELLING_CHALLENGE_MODE_ORDER = ["looks-right", "dictation", "root-word", "missing-letter"];
+const SPELLING_TENSE_PROMPTS = {
+  believe: {
+    past: "They believed the strongest explanation straight away.",
+    present: "They believe the strongest explanation straight away.",
+    future: "They will believe the strongest explanation straight away."
   },
-  tag: {
-    number: 2,
-    label: "Stage 2",
-    title: "Fix the name tag",
-    note: "Repair the missing helper letter after q."
+  describe: {
+    past: "They described the image with precise detail.",
+    present: "They describe the image with precise detail.",
+    future: "They will describe the image with precise detail."
   },
-  sort: {
-    number: 3,
-    label: "Stage 3",
-    title: "Sort the pattern",
-    note: "Group matching /air/ spellings together."
+  decide: {
+    past: "They decided which example proved the point best.",
+    present: "They decide which example proves the point best.",
+    future: "They will decide which example proves the point best."
   },
-  family: {
-    number: 4,
-    label: "Stage 4",
-    title: "Grow the word family",
-    note: "Keep the root spelling stable while the endings change."
+  imagine: {
+    past: "They imagined a stronger ending for the story.",
+    present: "They imagine a stronger ending for the story.",
+    future: "They will imagine a stronger ending for the story."
   },
-  sentence: {
-    number: 5,
-    label: "Stage 5",
-    title: "Final spelling check",
-    note: "Repeat stage 1 with the same word list and compare the result."
+  measure: {
+    past: "They measured the fabric before cutting it.",
+    present: "They measure the fabric before cutting it.",
+    future: "They will measure the fabric before cutting it."
+  },
+  notice: {
+    past: "They noticed the spelling pattern quickly.",
+    present: "They notice the spelling pattern quickly.",
+    future: "They will notice the spelling pattern quickly."
+  },
+  remember: {
+    past: "They remembered the rule during the test.",
+    present: "They remember the rule during the test.",
+    future: "They will remember the rule during the test."
+  },
+  appear: {
+    past: "They appeared on stage with calm confidence.",
+    present: "They appear on stage with calm confidence.",
+    future: "They will appear on stage with calm confidence."
+  },
+  separate: {
+    past: "They separated the facts from the opinions.",
+    present: "They separate the facts from the opinions.",
+    future: "They will separate the facts from the opinions."
+  },
+  achieve: {
+    past: "They achieved their goal through steady practice.",
+    present: "They achieve their goal through steady practice.",
+    future: "They will achieve their goal through steady practice."
+  },
+  compare: {
+    past: "They compared the two paragraphs carefully.",
+    present: "They compare the two paragraphs carefully.",
+    future: "They will compare the two paragraphs carefully."
+  },
+  complete: {
+    past: "They completed the task before lunch.",
+    present: "They complete the task before lunch.",
+    future: "They will complete the task before lunch."
+  },
+  consider: {
+    past: "They considered every option before answering.",
+    present: "They consider every option before answering.",
+    future: "They will consider every option before answering."
+  },
+  continue: {
+    past: "They continued the draft after the break.",
+    present: "They continue the draft after the break.",
+    future: "They will continue the draft after the break."
+  },
+  discover: {
+    past: "They discovered a better piece of evidence.",
+    present: "They discover a better piece of evidence.",
+    future: "They will discover a better piece of evidence."
+  },
+  improve: {
+    past: "They improved the paragraph with one clear change.",
+    present: "They improve the paragraph with one clear change.",
+    future: "They will improve the paragraph with one clear change."
+  },
+  include: {
+    past: "They included a quote in the response.",
+    present: "They include a quote in the response.",
+    future: "They will include a quote in the response."
+  },
+  observe: {
+    past: "They observed the pattern in the results.",
+    present: "They observe the pattern in the results.",
+    future: "They will observe the pattern in the results."
+  },
+  prepare: {
+    past: "They prepared the notes for the lesson.",
+    present: "They prepare the notes for the lesson.",
+    future: "They will prepare the notes for the lesson."
+  },
+  deliver: {
+    past: "They delivered the speech with confidence.",
+    present: "They deliver the speech with confidence.",
+    future: "They will deliver the speech with confidence."
   }
 };
-const SPELLING_ASSESSMENT_WORDS = Array.from(
-  new Set([
-    ...SPELLING_UNIT_SEED.sentenceWords,
-    ...Object.values(SPELLING_UNIT_SEED.sortBuckets).flat(),
-    ...SPELLING_UNIT_SEED.familyOrder
-  ])
+const SPELLING_INTERVENTION_LIBRARY = {
+  believe: {
+    id: "believe",
+    word: "believe",
+    articulation: "be-lieve",
+    lookRightChoiceCorrect: "be-lieve",
+    lookRightChoiceWrong: "be-leive",
+    focuses: ["look-right", "word-family"],
+    familyWords: ["belief", "believable", "disbelieve"],
+    familySentences: [
+      "Her belief in the team never faded.",
+      "The plan sounded believable after the evidence was explained.",
+      "It is easy to disbelieve a claim without proof."
+    ],
+    familyNote: "Keep the base believe visible as the word changes.",
+    lookRightWrong: "beleive",
+    lookRightNote: "The vowel order drifts in the common error.",
+    flashcardBreak: "be | lieve",
+    tense: {
+      present: "believe",
+      past: "believed",
+      future: "will believe",
+      options: ["believe", "believed", "will believe", "beleive", "will believed", "belief"]
+    }
+  },
+  describe: {
+    id: "describe",
+    word: "describe",
+    articulation: "de-scribe",
+    lookRightChoiceCorrect: "de-scribe",
+    lookRightChoiceWrong: "de-sribe",
+    focuses: ["word-family", "look-right"],
+    familyWords: ["description", "descriptive", "describes"],
+    familySentences: [
+      "The description of the storm was vivid and precise.",
+      "One descriptive phrase changed the whole paragraph.",
+      "He describes the image in one sharp sentence."
+    ],
+    familyNote: "The scribe base stays visible in every family member.",
+    lookRightWrong: "desribe",
+    lookRightNote: "The missing c weakens the visual pattern straight away.",
+    flashcardBreak: "de | scribe",
+    tense: {
+      present: "describe",
+      past: "described",
+      future: "will describe",
+      options: ["describe", "described", "will describe", "desribe", "will described", "description"]
+    }
+  },
+  decide: {
+    id: "decide",
+    word: "decide",
+    articulation: "de-cide",
+    lookRightChoiceCorrect: "de-cide",
+    lookRightChoiceWrong: "de-side",
+    focuses: ["word-family", "look-right"],
+    familyWords: ["decision", "decisive", "deciding"],
+    familySentences: [
+      "Her decision was based on the strongest evidence.",
+      "A decisive response can still be calm and measured.",
+      "He is deciding which example proves the point best."
+    ],
+    familyNote: "The word family keeps the deci base even when the ending changes.",
+    lookRightWrong: "deside",
+    lookRightNote: "The soft c sound is still spelled with c, not s.",
+    flashcardBreak: "de | cide",
+    tense: {
+      present: "decide",
+      past: "decided",
+      future: "will decide",
+      options: ["decide", "decided", "will decide", "deside", "will decided", "decision"]
+    }
+  },
+  imagine: {
+    id: "imagine",
+    word: "imagine",
+    articulation: "im-a-gine",
+    lookRightChoiceCorrect: "im-a-gine",
+    lookRightChoiceWrong: "im-a-jin",
+    focuses: ["over-articulation", "word-family"],
+    familyWords: ["imagination", "imaginative", "imaginary"],
+    familySentences: [
+      "Her imagination made the opening paragraph stronger.",
+      "The most imaginative detail came in the final line.",
+      "The creature was imaginary but felt believable."
+    ],
+    familyNote: "Stretching im-ag-ine helps the vowel pattern stay visible.",
+    lookRightWrong: "imajin",
+    lookRightNote: "The final e and middle g are both easy to drop when it is only sounded out loosely.",
+    flashcardBreak: "im | ag | ine",
+    tense: {
+      present: "imagine",
+      past: "imagined",
+      future: "will imagine",
+      options: ["imagine", "imagined", "will imagine", "imajin", "will imagined", "imagination"]
+    }
+  },
+  measure: {
+    id: "measure",
+    word: "measure",
+    articulation: "mea-sure",
+    lookRightChoiceCorrect: "mea-sure",
+    lookRightChoiceWrong: "me-sure",
+    focuses: ["look-right", "word-family"],
+    familyWords: ["measurement", "measurable", "measures"],
+    familySentences: [
+      "The measurement needed to be checked twice.",
+      "A measurable change appeared in the final results.",
+      "She measures the fabric before cutting it."
+    ],
+    familyNote: "The mea start helps link measure with measurement and measurable.",
+    lookRightWrong: "mesure",
+    lookRightNote: "The common error loses the vowel pattern after m.",
+    flashcardBreak: "mea | sure",
+    tense: {
+      present: "measure",
+      past: "measured",
+      future: "will measure",
+      options: ["measure", "measured", "will measure", "mesure", "will measured", "measurement"]
+    }
+  },
+  notice: {
+    id: "notice",
+    word: "notice",
+    articulation: "no-tice",
+    lookRightChoiceCorrect: "no-tice",
+    lookRightChoiceWrong: "no-tise",
+    focuses: ["look-right", "word-family"],
+    familyWords: ["noticed", "noticing", "noticeable"],
+    familySentences: [
+      "He noticed the pattern before anyone else.",
+      "She kept noticing the same spelling mistake.",
+      "The improvement was noticeable in the next draft."
+    ],
+    familyNote: "The notice base remains stable before each new ending.",
+    lookRightWrong: "notise",
+    lookRightNote: "The /s/ sound is still spelled c here because of the visual family pattern.",
+    flashcardBreak: "no | tice",
+    tense: {
+      present: "notice",
+      past: "noticed",
+      future: "will notice",
+      options: ["notice", "noticed", "will notice", "notise", "will noticed", "noticeable"]
+    }
+  },
+  remember: {
+    id: "remember",
+    word: "remember",
+    articulation: "re-mem-ber",
+    lookRightChoiceCorrect: "re-mem-ber",
+    lookRightChoiceWrong: "re-mber",
+    focuses: ["mnemonic", "word-family"],
+    familyWords: ["remembers", "remembered", "remembering"],
+    familySentences: [
+      "She remembers the rule when she writes the paragraph.",
+      "He remembered the example during the test.",
+      "Remembering the base word made the spelling easier."
+    ],
+    familyNote: "The middle mem chunk stays fixed through every change.",
+    lookRightWrong: "rember",
+    lookRightNote: "The missing mem chunk breaks the pattern the eye expects.",
+    flashcardBreak: "re | mem | ber",
+    tense: {
+      present: "remember",
+      past: "remembered",
+      future: "will remember",
+      options: ["remember", "remembered", "will remember", "rember", "will remembered", "remembering"]
+    }
+  },
+  appear: {
+    id: "appear",
+    word: "appear",
+    articulation: "ap-pear",
+    lookRightChoiceCorrect: "ap-pear",
+    lookRightChoiceWrong: "a-pear",
+    focuses: ["look-right", "word-family"],
+    familyWords: ["appearance", "appearing", "disappear"],
+    familySentences: [
+      "The sudden appearance of the symbol mattered in the poem.",
+      "The theme kept appearing across the chapter.",
+      "The final clue seemed to disappear from the page."
+    ],
+    familyNote: "The double p stays visible across the family.",
+    lookRightWrong: "apear",
+    lookRightNote: "One missing p makes the word stop looking settled.",
+    flashcardBreak: "ap | pear",
+    tense: {
+      present: "appear",
+      past: "appeared",
+      future: "will appear",
+      options: ["appear", "appeared", "will appear", "apear", "will appeared", "appearance"]
+    }
+  },
+  separate: {
+    id: "separate",
+    word: "separate",
+    articulation: "sep-a-rate",
+    lookRightChoiceCorrect: "sep-a-rate",
+    lookRightChoiceWrong: "sep-e-rate",
+    focuses: ["over-articulation", "mnemonic"],
+    familyWords: ["separation", "separately", "separator"],
+    familySentences: [
+      "The separation between fact and opinion must stay clear.",
+      "Each sentence should be checked separately.",
+      "A visual separator made the notes easier to scan."
+    ],
+    familyNote: "Slow sep-a-rate makes the middle a audible again.",
+    lookRightWrong: "seperate",
+    lookRightNote: "The common error swaps the middle vowel because the word is not articulated clearly enough.",
+    flashcardBreak: "sep | a | rate",
+    tense: {
+      present: "separate",
+      past: "separated",
+      future: "will separate",
+      options: ["separate", "separated", "will separate", "seperate", "will separated", "separation"]
+    }
+  },
+  achieve: {
+    id: "achieve",
+    word: "achieve",
+    articulation: "a-chieve",
+    lookRightChoiceCorrect: "a-chieve",
+    lookRightChoiceWrong: "a-cheive",
+    focuses: ["look-right", "word-family"],
+    familyWords: ["achievement", "achievable", "achieves"],
+    familySentences: [
+      "Finishing the project was a real achievement.",
+      "The target felt achievable after more practice.",
+      "She achieves stronger results when she plans first."
+    ],
+    familyNote: "Keep the chieve pattern stable as the endings change.",
+    lookRightWrong: "acheive",
+    lookRightNote: "The common error flips the vowel order.",
+    flashcardBreak: "a | chieve",
+    tense: {
+      present: "achieve",
+      past: "achieved",
+      future: "will achieve",
+      options: ["achieve", "achieved", "will achieve", "acheive", "will achieved", "achievement"]
+    }
+  },
+  compare: {
+    id: "compare",
+    word: "compare",
+    articulation: "com-pare",
+    lookRightChoiceCorrect: "com-pare",
+    lookRightChoiceWrong: "com-pair",
+    focuses: ["word-family", "look-right"],
+    familyWords: ["comparison", "comparable", "compares"],
+    familySentences: [
+      "The comparison between the two texts was clear.",
+      "The examples were comparable because they used the same structure.",
+      "She compares each paragraph before choosing the best one."
+    ],
+    familyNote: "The compare base stays visible as the ending changes.",
+    lookRightWrong: "compair",
+    lookRightNote: "The /pare/ ending is spelled are here, not air.",
+    flashcardBreak: "com | pare",
+    tense: {
+      present: "compare",
+      past: "compared",
+      future: "will compare",
+      options: ["compare", "compared", "will compare", "compair", "will compared", "comparison"]
+    }
+  },
+  complete: {
+    id: "complete",
+    word: "complete",
+    articulation: "com-plete",
+    lookRightChoiceCorrect: "com-plete",
+    lookRightChoiceWrong: "com-pleet",
+    focuses: ["look-right", "word-family"],
+    familyWords: ["completion", "completely", "completed"],
+    familySentences: [
+      "The completion of the draft took the whole lesson.",
+      "The instructions were completely clear after the example.",
+      "She completed the final paragraph before the bell."
+    ],
+    familyNote: "Keep the complete base visible before the ending changes.",
+    lookRightWrong: "compleet",
+    lookRightNote: "The long e sound is not written with double e in this pattern.",
+    flashcardBreak: "com | plete",
+    tense: {
+      present: "complete",
+      past: "completed",
+      future: "will complete",
+      options: ["complete", "completed", "will complete", "compleet", "will completed", "completion"]
+    }
+  },
+  consider: {
+    id: "consider",
+    word: "consider",
+    articulation: "con-sid-er",
+    lookRightChoiceCorrect: "con-sid-er",
+    lookRightChoiceWrong: "con-sid-a",
+    focuses: ["word-family", "look-right"],
+    familyWords: ["consideration", "considered", "considering"],
+    familySentences: [
+      "Careful consideration improved the final answer.",
+      "She considered each quote before selecting the strongest one.",
+      "He is considering a better way to explain the idea."
+    ],
+    familyNote: "The consider base remains visible across the family.",
+    lookRightWrong: "consida",
+    lookRightNote: "The ending still uses er, even when the last sound is soft.",
+    flashcardBreak: "con | sid | er",
+    tense: {
+      present: "consider",
+      past: "considered",
+      future: "will consider",
+      options: ["consider", "considered", "will consider", "consida", "will considered", "consideration"]
+    }
+  },
+  continue: {
+    id: "continue",
+    word: "continue",
+    articulation: "con-tin-ue",
+    lookRightChoiceCorrect: "con-tin-ue",
+    lookRightChoiceWrong: "con-tin-ew",
+    focuses: ["over-articulation", "word-family"],
+    familyWords: ["continued", "continuing", "continuation"],
+    familySentences: [
+      "She continued writing after the short break.",
+      "He is continuing the explanation with a better example.",
+      "The continuation of the story felt more confident."
+    ],
+    familyNote: "Over-articulating con-tin-ue keeps the final ue visible.",
+    lookRightWrong: "continew",
+    lookRightNote: "The final sound is written ue, not ew, in this word family.",
+    flashcardBreak: "con | tin | ue",
+    tense: {
+      present: "continue",
+      past: "continued",
+      future: "will continue",
+      options: ["continue", "continued", "will continue", "continew", "will continued", "continuation"]
+    }
+  },
+  discover: {
+    id: "discover",
+    word: "discover",
+    articulation: "dis-cov-er",
+    lookRightChoiceCorrect: "dis-cov-er",
+    lookRightChoiceWrong: "dis-cuv-a",
+    focuses: ["word-family", "look-right"],
+    familyWords: ["discovery", "discovered", "discovering"],
+    familySentences: [
+      "The discovery changed the whole discussion.",
+      "She discovered a better quote in the final paragraph.",
+      "He is discovering how the pattern repeats."
+    ],
+    familyNote: "The discover base stays stable as the word changes.",
+    lookRightWrong: "discuva",
+    lookRightNote: "The ending still uses er, and the middle vowel stays o in the base.",
+    flashcardBreak: "dis | cov | er",
+    tense: {
+      present: "discover",
+      past: "discovered",
+      future: "will discover",
+      options: ["discover", "discovered", "will discover", "discuva", "will discovered", "discovery"]
+    }
+  },
+  improve: {
+    id: "improve",
+    word: "improve",
+    articulation: "im-prove",
+    lookRightChoiceCorrect: "im-prove",
+    lookRightChoiceWrong: "im-proov",
+    focuses: ["look-right", "word-family"],
+    familyWords: ["improvement", "improved", "improving"],
+    familySentences: [
+      "The improvement was obvious in the second draft.",
+      "She improved the sentence by adding evidence.",
+      "He is improving his spelling through daily practice."
+    ],
+    familyNote: "The improve base carries forward into each family word.",
+    lookRightWrong: "improov",
+    lookRightNote: "The long oo sound is not written with double o here.",
+    flashcardBreak: "im | prove",
+    tense: {
+      present: "improve",
+      past: "improved",
+      future: "will improve",
+      options: ["improve", "improved", "will improve", "improov", "will improved", "improvement"]
+    }
+  },
+  include: {
+    id: "include",
+    word: "include",
+    articulation: "in-clude",
+    lookRightChoiceCorrect: "in-clude",
+    lookRightChoiceWrong: "in-clewd",
+    focuses: ["look-right", "word-family"],
+    familyWords: ["inclusion", "included", "including"],
+    familySentences: [
+      "The inclusion of one detail made the answer stronger.",
+      "She included a quotation to support the point.",
+      "He is including more precise vocabulary this time."
+    ],
+    familyNote: "The include base remains visible before each new ending.",
+    lookRightWrong: "inclewd",
+    lookRightNote: "The final sound is written ude, not ewd, in this family.",
+    flashcardBreak: "in | clude",
+    tense: {
+      present: "include",
+      past: "included",
+      future: "will include",
+      options: ["include", "included", "will include", "inclewd", "will included", "inclusion"]
+    }
+  },
+  observe: {
+    id: "observe",
+    word: "observe",
+    articulation: "ob-serve",
+    lookRightChoiceCorrect: "ob-serve",
+    lookRightChoiceWrong: "ub-serve",
+    focuses: ["word-family", "look-right"],
+    familyWords: ["observation", "observed", "observing"],
+    familySentences: [
+      "Her observation about the poem was precise.",
+      "He observed the pattern before the class discussion.",
+      "She is observing how the writer repeats that idea."
+    ],
+    familyNote: "The observe base stays visible through the family.",
+    lookRightWrong: "ubserve",
+    lookRightNote: "The word begins with ob, not ub, even though the first vowel is unstressed.",
+    flashcardBreak: "ob | serve",
+    tense: {
+      present: "observe",
+      past: "observed",
+      future: "will observe",
+      options: ["observe", "observed", "will observe", "ubserve", "will observed", "observation"]
+    }
+  },
+  prepare: {
+    id: "prepare",
+    word: "prepare",
+    articulation: "pre-pare",
+    lookRightChoiceCorrect: "pre-pare",
+    lookRightChoiceWrong: "pre-pair",
+    focuses: ["word-family", "look-right"],
+    familyWords: ["preparation", "prepared", "preparing"],
+    familySentences: [
+      "Good preparation made the speech more confident.",
+      "She prepared her answer before sharing it.",
+      "He is preparing a stronger opening sentence."
+    ],
+    familyNote: "The prepare base stays settled as the word changes.",
+    lookRightWrong: "prepair",
+    lookRightNote: "The /pare/ sound is written are in this family.",
+    flashcardBreak: "pre | pare",
+    tense: {
+      present: "prepare",
+      past: "prepared",
+      future: "will prepare",
+      options: ["prepare", "prepared", "will prepare", "prepair", "will prepared", "preparation"]
+    }
+  },
+  deliver: {
+    id: "deliver",
+    word: "deliver",
+    articulation: "de-liv-er",
+    lookRightChoiceCorrect: "de-liv-er",
+    lookRightChoiceWrong: "de-liv-a",
+    focuses: ["word-family", "look-right"],
+    familyWords: ["delivery", "delivered", "delivering"],
+    familySentences: [
+      "The delivery of the speech was calm and clear.",
+      "She delivered the point with strong evidence.",
+      "He is delivering a more confident response now."
+    ],
+    familyNote: "The deliver base remains visible across the family.",
+    lookRightWrong: "deliva",
+    lookRightNote: "The ending still uses er, not a, even when the sound is weak.",
+    flashcardBreak: "de | liv | er",
+    tense: {
+      present: "deliver",
+      past: "delivered",
+      future: "will deliver",
+      options: ["deliver", "delivered", "will deliver", "deliva", "will delivered", "delivery"]
+    }
+  }
+};
+const SPELLING_DEFAULT_FOLLOW_UP_WORD_IDS = Object.keys(SPELLING_INTERVENTION_LIBRARY);
+const SPELLING_DIAGNOSTIC_WORDS = [
+  { id: "friend", word: "friend", yearLevel: "5", sentence: "A good friend tells the truth.", focuses: ["look-right"], articulation: "fri-end" },
+  { id: "because", word: "because", yearLevel: "5", sentence: "We stayed inside because it was raining.", focuses: ["mnemonic"], articulation: "be-cause" },
+  { id: "beautiful", word: "beautiful", yearLevel: "5", sentence: "The garden looked beautiful in the morning light.", focuses: ["mnemonic", "look-right"], articulation: "beau-ti-ful" },
+  { id: "answer", word: "answer", yearLevel: "5", sentence: "Write the answer in a full sentence.", focuses: ["over-articulation"], articulation: "ans-wer" },
+  { id: "which", word: "which", yearLevel: "5", sentence: "Which question will you answer first?", focuses: ["word-family"], articulation: "which" },
+  { id: "measure", word: "measure", yearLevel: "5", sentence: "Measure the line with a ruler.", focuses: ["look-right", "word-family"], articulation: "mea-sure", interventionId: "measure" },
+  { id: "believe", word: "believe", yearLevel: "5", sentence: "I believe you can solve it.", focuses: ["look-right", "word-family"], articulation: "be-lieve", interventionId: "believe" },
+  { id: "imagine", word: "imagine", yearLevel: "5", sentence: "Imagine the scene before you start writing.", focuses: ["over-articulation", "word-family"], articulation: "im-ag-ine", interventionId: "imagine" },
+  { id: "notice", word: "notice", yearLevel: "5", sentence: "Notice how the title hints at the theme.", focuses: ["look-right", "word-family"], articulation: "no-tice", interventionId: "notice" },
+  { id: "remember", word: "remember", yearLevel: "5", sentence: "Remember to justify your answer.", focuses: ["mnemonic", "word-family"], articulation: "re-mem-ber", interventionId: "remember" },
+  { id: "regular", word: "regular", yearLevel: "5", sentence: "Regular practice improves spelling.", focuses: ["over-articulation"], articulation: "reg-u-lar" },
+  { id: "library", word: "library", yearLevel: "5", sentence: "The library is open before school.", focuses: ["over-articulation"], articulation: "li-brar-y" },
+  { id: "wednesday", word: "Wednesday", yearLevel: "7", sentence: "The assignment is due on Wednesday.", focuses: ["over-articulation"], articulation: "Wed-nes-day" },
+  { id: "island", word: "island", yearLevel: "7", sentence: "The map showed a small island offshore.", focuses: ["over-articulation", "look-right"], articulation: "iS-land" },
+  { id: "necessary", word: "necessary", yearLevel: "7", sentence: "Bring the necessary equipment to science.", focuses: ["mnemonic", "look-right"], articulation: "ne-ces-sar-y" },
+  { id: "embarrass", word: "embarrass", yearLevel: "7", sentence: "Mistakes should not embarrass you.", focuses: ["mnemonic", "look-right"], articulation: "em-bar-rass" },
+  { id: "accommodate", word: "accommodate", yearLevel: "7", sentence: "The room can accommodate the whole class.", focuses: ["mnemonic", "look-right"], articulation: "ac-com-mo-date" },
+  { id: "rhythm", word: "rhythm", yearLevel: "7", sentence: "The drummer kept a steady rhythm.", focuses: ["look-right", "mnemonic"], articulation: "rhyth-m" },
+  { id: "conscience", word: "conscience", yearLevel: "7", sentence: "His conscience told him to be honest.", focuses: ["look-right"], articulation: "con-science" },
+  { id: "environment", word: "environment", yearLevel: "7", sentence: "The environment changes over time.", focuses: ["over-articulation"], articulation: "en-vi-ron-ment" },
+  { id: "government", word: "government", yearLevel: "7", sentence: "The government announced a new policy.", focuses: ["over-articulation"], articulation: "gov-ern-ment" },
+  { id: "separate", word: "separate", yearLevel: "7", sentence: "Separate the evidence from the opinion.", focuses: ["over-articulation", "mnemonic"], articulation: "sep-a-rate", interventionId: "separate" },
+  { id: "achieve", word: "achieve", yearLevel: "7", sentence: "You can achieve better results with revision.", focuses: ["look-right", "word-family"], articulation: "a-chieve", interventionId: "achieve" },
+  { id: "appear", word: "appear", yearLevel: "7", sentence: "The theme will appear again in the final chapter.", focuses: ["look-right", "word-family"], articulation: "ap-pear", interventionId: "appear" },
+  { id: "describe", word: "describe", yearLevel: "7", sentence: "Describe the effect of the image in one sentence.", focuses: ["word-family", "look-right"], articulation: "de-scribe", interventionId: "describe" },
+  { id: "decide", word: "decide", yearLevel: "7", sentence: "Decide which example is strongest.", focuses: ["word-family", "look-right"], articulation: "de-cide", interventionId: "decide" },
+  { id: "compare", word: "compare", yearLevel: "5", sentence: "Compare the two characters in one sentence.", focuses: ["word-family", "look-right"], articulation: "com-pare", interventionId: "compare" },
+  { id: "complete", word: "complete", yearLevel: "5", sentence: "Complete the final line before you stop.", focuses: ["look-right", "word-family"], articulation: "com-plete", interventionId: "complete" },
+  { id: "continue", word: "continue", yearLevel: "5", sentence: "Continue writing after the planner is checked.", focuses: ["over-articulation", "word-family"], articulation: "con-tin-ue", interventionId: "continue" },
+  { id: "discover", word: "discover", yearLevel: "5", sentence: "Discover a better detail in the next paragraph.", focuses: ["word-family", "look-right"], articulation: "dis-cov-er", interventionId: "discover" },
+  { id: "include", word: "include", yearLevel: "5", sentence: "Include one quote in your answer.", focuses: ["look-right", "word-family"], articulation: "in-clude", interventionId: "include" },
+  { id: "consider", word: "consider", yearLevel: "7", sentence: "Consider how the evidence supports the claim.", focuses: ["word-family", "look-right"], articulation: "con-sid-er", interventionId: "consider" },
+  { id: "deliver", word: "deliver", yearLevel: "7", sentence: "Deliver the speech with a steady pace.", focuses: ["word-family", "look-right"], articulation: "de-liv-er", interventionId: "deliver" },
+  { id: "improve", word: "improve", yearLevel: "7", sentence: "Improve the topic sentence with precise language.", focuses: ["look-right", "word-family"], articulation: "im-prove", interventionId: "improve" },
+  { id: "observe", word: "observe", yearLevel: "7", sentence: "Observe how the motif returns in the final scene.", focuses: ["word-family", "look-right"], articulation: "ob-serve", interventionId: "observe" },
+  { id: "prepare", word: "prepare", yearLevel: "7", sentence: "Prepare your response before the discussion begins.", focuses: ["word-family", "look-right"], articulation: "pre-pare", interventionId: "prepare" }
+];
+const SPELLING_DIAGNOSTIC_WORDS_BY_ID = Object.fromEntries(
+  SPELLING_DIAGNOSTIC_WORDS.map((entry) => [entry.id, entry])
 );
-
-let activeSpellingDragPayload = null;
 
 const TASK_WORKSPACE_PROVIDERS = [
   {
@@ -555,22 +1264,45 @@ const state = {
   currentUserId: "",
   currentUserPoints: 0,
   authMode: "signin",
+  authPending: false,
+  authViewOpen: true,
   selectedSubjectId: subjectSeed[0].id,
   activeSubjectTab: "reader",
-  focusMode: window.localStorage.getItem(FOCUS_MODE_STORAGE_KEY) === "on",
   focusArea: null,
   focusAskOpen: false,
+  subjectWorkspaceExpanded: false,
+  subjectWorkspaceExpandedSubjectId: "",
+  subjectWorkspaceReturnLandingSubjectId: "",
+  subjectLandingOpenDocumentId: "",
+  subjectLandingView: "simple",
+  subjectLandingPieceIndex: 0,
+  subjectLandingSubjectMenuOpen: false,
+  subjectLandingAskOpen: false,
+  subjectLandingAskDraft: "",
+  subjectLandingAskStatus: "",
+  subjectLandingAskAnswer: "",
+  subjectLandingAskLastQuestion: "",
   selectedDocumentId: null,
   currentDocumentPageIndexes: {},
   activeReaderSegmentIndex: -1,
   activeReaderSectionId: "",
   askDocumentId: null,
+  askStatusSubjectId: "",
+  askStatus: "",
+  askLatestSubjectId: "",
+  askLatestQuestion: "",
+  askLatestAnswer: "",
   listeningDocumentId: null,
   selectedDocumentIds: [],
   googleDocsAccessToken: "",
   googleDocsTokenExpiresAt: 0,
   askMicActive: false,
   askResponseSpeaking: false,
+  spellingAudioStatus: {
+    context: "",
+    tone: "",
+    message: ""
+  },
   expandedDocumentGroups: {},
   attachmentModalOpen: false,
   activeAttachmentTarget: null,
@@ -579,6 +1311,10 @@ const state = {
   activeEditAssessment: null,
   watchExpanded: false,
   documentsExpanded: false,
+  documentsRevisionExpanded: false,
+  subjectLandingAssessmentExpanded: true,
+  subjectLandingClassNotesExpanded: true,
+  subjectLandingRevisionExpanded: false,
   currentView: "home",
   activeTask: null,
   taskAskResponse: "",
@@ -623,6 +1359,7 @@ const state = {
   },
   subjects: createBaseSubjects()
 };
+const currentSpellingSessionKey = createId();
 
 const elements = {
   landingPanel: document.getElementById("landing-panel"),
@@ -648,7 +1385,6 @@ const elements = {
   navHomeButton: document.getElementById("nav-home-button"),
   navSubjectsButton: document.getElementById("nav-subjects-button"),
   navSettingsButton: document.getElementById("nav-settings-button"),
-  focusModeToggle: document.getElementById("focus-mode-toggle"),
   homeView: document.getElementById("home-view"),
   focusHomeNextCard: document.getElementById("focus-home-next-card"),
   focusHomeSubjectHeading: document.getElementById("focus-home-subject-heading"),
@@ -678,6 +1414,9 @@ const elements = {
   openUpcomingFromHeroButton: document.getElementById("open-upcoming-from-hero-button"),
   settingsView: document.getElementById("settings-view"),
   subjectsView: document.getElementById("subjects-view"),
+  subjectLandingView: document.getElementById("subject-landing-view"),
+  subjectsWorkspaceMain: document.getElementById("subjects-workspace-main"),
+  subjectsWorkspaceDock: document.getElementById("subjects-workspace-dock"),
   subjectsHeroDate: document.getElementById("subjects-hero-date"),
   subjectsHeroTitle: document.getElementById("subjects-hero-title"),
   subjectsHeroSubtitle: document.getElementById("subjects-hero-subtitle"),
@@ -733,15 +1472,18 @@ const elements = {
   tabCountReader: document.getElementById("tab-count-reader"),
   tabCountHomework: document.getElementById("tab-count-homework"),
   tabCountSpelling: document.getElementById("tab-count-spelling"),
+  tabCountWriting: document.getElementById("tab-count-writing"),
   tabCountWatch: document.getElementById("tab-count-watch"),
   tabCountAssessments: document.getElementById("tab-count-assessments"),
   readingViewerMeta: document.getElementById("reading-viewer-meta"),
   viewerPanelReader: document.getElementById("viewer-panel-reader"),
   viewerPanelHomework: document.getElementById("viewer-panel-homework"),
   viewerPanelSpelling: document.getElementById("viewer-panel-spelling"),
+  viewerPanelWriting: document.getElementById("viewer-panel-writing"),
   viewerPanelWatch: document.getElementById("viewer-panel-watch"),
   watchAddLinkButton: document.getElementById("watch-add-link-button"),
   viewerPanelAssessments: document.getElementById("viewer-panel-assessments"),
+  writingSection: document.getElementById("writing-section"),
   documentsBody: document.getElementById("documents-body"),
   documentsToggleButton: document.getElementById("documents-toggle-button"),
   documentsSelectAllButton: document.getElementById("documents-select-all-button"),
@@ -769,7 +1511,6 @@ const elements = {
   uploadStatus: document.getElementById("upload-status"),
   aiConnectionStatus: document.getElementById("ai-connection-status"),
   askInput: document.getElementById("ask-input"),
-  askButton: document.getElementById("ask-button"),
   askMicButton: document.getElementById("ask-mic-button"),
   askListenButton: document.getElementById("ask-listen-button"),
   askContext: document.getElementById("ask-context"),
@@ -907,7 +1648,8 @@ function createBaseSubjects() {
     hiddenWatchUrls: [],
     askHistory: [],
     savedRevisionTests: [],
-    spelling: createDefaultSpellingState(subject.id)
+    spelling: createDefaultSpellingState(subject.id),
+    writing: createDefaultWritingState(subject.id)
   }));
 }
 
@@ -920,8 +1662,31 @@ function createInitialSubjectsForAccount(account) {
     hiddenWatchUrls: [],
     askHistory: [],
     savedRevisionTests: [],
-    spelling: createDefaultSpellingState(subject.id)
+    spelling: createDefaultSpellingState(subject.id),
+    writing: createDefaultWritingState(subject.id)
   }));
+}
+
+function resolveSubjectSeedEntry(subject, index) {
+  const explicitId = String(subject?.id || "").trim();
+  if (explicitId) {
+    const seededById = subjectTemplateSeed.find((seededSubject) => seededSubject.id === explicitId);
+    if (seededById) {
+      return seededById;
+    }
+  }
+
+  const subjectName = String(subject?.name || "").trim().toLowerCase();
+  if (subjectName) {
+    const seededByName = subjectTemplateSeed.find(
+      (seededSubject) => seededSubject.name.trim().toLowerCase() === subjectName
+    );
+    if (seededByName) {
+      return seededByName;
+    }
+  }
+
+  return subjectTemplateSeed[index] || null;
 }
 
 function buildScheduleMergedAssessments(parsedAssessments = [], existingAssessments = []) {
@@ -1069,6 +1834,27 @@ function getSelectedSubject() {
   return state.subjects.find((subject) => subject.id === state.selectedSubjectId);
 }
 
+function selectSubjectForSubjectsView(subjectId, { returnToHome = false } = {}) {
+  const subject = state.subjects.find((item) => item.id === subjectId);
+  if (!subject) {
+    return;
+  }
+
+  state.selectedSubjectId = subject.id;
+  state.activeSubjectTab = getPreferredSubjectTab(subject);
+  resetSubjectWorkspaceView();
+  state.focusArea = null;
+  state.focusAskOpen = false;
+  state.selectedDocumentIds = [];
+  state.expandedDocumentGroups = {};
+  state.watchExpanded = false;
+  state.documentsExpanded = false;
+  state.taskAskResponse = "";
+  state.taskAskStatus = "";
+  state.currentView = returnToHome ? "home" : "subjects";
+  render();
+}
+
 function getSubjectHiddenWatchUrls(subject) {
   return new Set(
     Array.isArray(subject?.hiddenWatchUrls)
@@ -1124,7 +1910,7 @@ function getManualSubjectWatchItems(subject) {
 }
 
 function getWatchSourceDocuments(subject) {
-  return getVisibleSubjectDocuments(subject).filter((documentRecord) => !documentRecord?.flags?.assessment);
+  return getReaderDocuments(subject).filter((documentRecord) => !documentRecord?.flags?.assessment);
 }
 
 function getAutoSubjectWatchItems(subject, { suppressManualUrls = true } = {}) {
@@ -1182,8 +1968,26 @@ function isHomeworkDocument(documentRecord) {
   return Boolean(documentRecord?.flags?.homework || String(documentRecord?.type || "").toLowerCase() === "homework");
 }
 
+function isRevisionArchivedDocument(documentRecord) {
+  return Boolean(documentRecord?.revisionArchived);
+}
+
+function getAllReaderDocuments(subject) {
+  return getSortedDocuments(subject).filter((documentRecord) => !isHomeworkDocument(documentRecord));
+}
+
 function getReaderDocuments(subject) {
-  return getVisibleSubjectDocuments(subject);
+  return getAllReaderDocuments(subject).filter((documentRecord) => !isRevisionArchivedDocument(documentRecord));
+}
+
+function getRevisionReaderDocuments(subject) {
+  return getAllReaderDocuments(subject).filter((documentRecord) => isRevisionArchivedDocument(documentRecord));
+}
+
+function isRevisionSectionExpanded(subject) {
+  const activeDocuments = getReaderDocuments(subject || { documents: [] });
+  const revisionDocuments = getRevisionReaderDocuments(subject || { documents: [] });
+  return state.documentsRevisionExpanded || (!activeDocuments.length && revisionDocuments.length > 0);
 }
 
 function getSubjectHomeworkBundles(subject) {
@@ -1199,12 +2003,23 @@ function getActiveSubjectAssessments(subject) {
 }
 
 function getVisibleSubjectDocuments(subject) {
-  return getSortedDocuments(subject).filter((documentRecord) => !isHomeworkDocument(documentRecord));
+  return getReaderDocuments(subject);
+}
+
+function hasCurrentDocumentStudyPlan(documentRecord) {
+  const storedSections = Array.isArray(documentRecord?.studySections)
+    ? documentRecord.studySections.map(normaliseStudySection).filter((section) => section.sectionText)
+    : [];
+  return (
+    Number(documentRecord?.studyPlanVersion || 0) >= STUDY_PLAN_VERSION &&
+    storedSections.length > 0 &&
+    ["ready", "fallback"].includes(String(documentRecord?.studyPlanStatus || ""))
+  );
 }
 
 function getSelectedDocument() {
   const subject = getSelectedSubject();
-  return getVisibleSubjectDocuments(subject || { documents: [] }).find((doc) => doc.id === state.selectedDocumentId) || null;
+  return getAllReaderDocuments(subject || { documents: [] }).find((doc) => doc.id === state.selectedDocumentId) || null;
 }
 
 function isWholeStudyDocument(documentRecord) {
@@ -1317,10 +2132,10 @@ async function ensureDocumentStudyPlan(documentRecord, subject, { force = false 
   if (!documentRecord || !subject || !isWholeStudyDocument(documentRecord)) {
     return;
   }
-  if (!force && documentRecord.studyPlanStatus === "ready" && getDocumentSections(documentRecord).length) {
+  if (documentRecord.studyPlanStatus === "loading") {
     return;
   }
-  if (documentRecord.studyPlanStatus === "loading") {
+  if (!force && hasCurrentDocumentStudyPlan(documentRecord)) {
     return;
   }
 
@@ -1345,6 +2160,7 @@ async function ensureDocumentStudyPlan(documentRecord, subject, { force = false 
       documentRecord.studySections = fallbackPlan.sections;
       documentRecord.studyPlanStatus = "fallback";
     }
+    documentRecord.studyPlanVersion = STUDY_PLAN_VERSION;
   } catch (error) {
     console.error("Document study plan failed.", error);
     const fallbackPlan = buildFallbackStudyPlan(documentRecord);
@@ -1353,6 +2169,7 @@ async function ensureDocumentStudyPlan(documentRecord, subject, { force = false 
     documentRecord.studySections = fallbackPlan.sections;
     documentRecord.endQuiz = fallbackPlan.quiz;
     documentRecord.studyPlanStatus = "fallback";
+    documentRecord.studyPlanVersion = STUDY_PLAN_VERSION;
   }
 
   persistSubjects();
@@ -1397,7 +2214,7 @@ function awardDocumentQuizPointsIfNeeded(documentRecord) {
 
 function getAskDocument() {
   const subject = getSelectedSubject();
-  return getVisibleSubjectDocuments(subject || { documents: [] }).find((doc) => doc.id === state.askDocumentId) || null;
+  return getAllReaderDocuments(subject || { documents: [] }).find((doc) => doc.id === state.askDocumentId) || null;
 }
 
 function getUploadSubject() {
@@ -1413,8 +2230,48 @@ function scrollReaderIntoView() {
 }
 
 function focusAskComposer() {
-  elements.askInput.focus();
-  elements.askInput.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  const activeSurface = getActiveAskSurface();
+  activeSurface?.input?.focus();
+  activeSurface?.input?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function getDockAskSurface() {
+  return {
+    kind: "dock",
+    input: elements.askInput,
+    micButton: elements.askMicButton,
+    listenButton: elements.askListenButton,
+    context: elements.askContext,
+    response: elements.askResponse
+  };
+}
+
+function getSubjectLandingAskSurface() {
+  if (!state.subjectLandingAskOpen || !elements.subjectLandingView || elements.subjectLandingView.classList.contains("hidden")) {
+    return null;
+  }
+
+  const popup = elements.subjectLandingView.querySelector("[data-subject-landing-ask-popup]");
+  if (!popup) {
+    return null;
+  }
+
+  return {
+    kind: "landing",
+    input: popup.querySelector("[data-subject-landing-ask-input]"),
+    micButton: popup.querySelector("[data-subject-landing-ask-mic]"),
+    listenButton: popup.querySelector("[data-subject-landing-ask-listen]"),
+    context: popup.querySelector("[data-subject-landing-ask-context]"),
+    response: popup.querySelector("[data-subject-landing-ask-response]")
+  };
+}
+
+function getAskSurfaces() {
+  return [getDockAskSurface(), getSubjectLandingAskSurface()].filter(Boolean);
+}
+
+function getActiveAskSurface() {
+  return getSubjectLandingAskSurface() || getDockAskSurface();
 }
 
 function closeFocusAskPopup({ stopMic = false } = {}) {
@@ -1429,10 +2286,14 @@ function closeFocusAskPopup({ stopMic = false } = {}) {
 }
 
 function openSubjectsWorkspace(tab = "reader") {
+  const subject = getSelectedSubject();
+  const availableTabs = getAvailableSubjectTabs(subject);
+  const nextTab = availableTabs.includes(tab) ? tab : availableTabs[0] || "reader";
   state.currentView = "subjects";
-  state.activeSubjectTab = tab;
+  state.activeSubjectTab = nextTab;
+  resetSubjectWorkspaceView();
   state.focusAskOpen = false;
-  state.focusArea = state.focusMode ? tab : null;
+  state.focusArea = null;
   render();
 }
 
@@ -1524,7 +2385,7 @@ function getDocumentGroupsFromDocuments(documents) {
 }
 
 function getDocumentGroups(subject) {
-  return getDocumentGroupsFromDocuments(getVisibleSubjectDocuments(subject || { documents: [] }));
+  return getDocumentGroupsFromDocuments(getAllReaderDocuments(subject || { documents: [] }));
 }
 
 function getDocumentBundlesByFilter(subject, predicate) {
@@ -1970,14 +2831,46 @@ function setDocumentReviewedState(subject, documentIds, reviewed) {
   persistSubjects();
 }
 
+function setDocumentRevisionArchivedState(subject, documentIds, revisionArchived) {
+  const targetIds = new Set((documentIds || []).filter(Boolean));
+  if (!subject || !targetIds.size) {
+    return;
+  }
+
+  (subject.documents || []).forEach((documentRecord) => {
+    if (!targetIds.has(documentRecord.id) || isHomeworkDocument(documentRecord)) {
+      return;
+    }
+    documentRecord.revisionArchived = Boolean(revisionArchived);
+  });
+
+  const allReaderDocuments = getAllReaderDocuments(subject);
+  if (!allReaderDocuments.some((documentRecord) => documentRecord.id === state.selectedDocumentId)) {
+    state.selectedDocumentId = getReaderDocuments(subject)[0]?.id || getRevisionReaderDocuments(subject)[0]?.id || null;
+  }
+  if (!allReaderDocuments.some((documentRecord) => documentRecord.id === state.askDocumentId)) {
+    state.askDocumentId = getReaderDocuments(subject)[0]?.id || getRevisionReaderDocuments(subject)[0]?.id || null;
+  }
+
+  persistSubjects();
+}
+
 function getSelectedDocumentIndex() {
-  const documents = getVisibleSubjectDocuments(getSelectedSubject() || { documents: [] });
+  const documents = getAllReaderDocuments(getSelectedSubject() || { documents: [] });
   return documents.findIndex((documentRecord) => documentRecord.id === state.selectedDocumentId);
 }
 
 function getDocumentPages(documentRecord) {
   return Array.isArray(documentRecord?.pages)
-    ? documentRecord.pages.filter((page) => page?.imageUrl)
+    ? documentRecord.pages
+        .filter((page) => page && (page.imageUrl || page.text || page.pageNumber))
+        .map((page, index) => ({
+          ...page,
+          pageNumber: Number(page?.pageNumber || index + 1) || index + 1,
+          imageUrl:
+            page?.imageUrl ||
+            (index === 0 && documentRecord?.previewImageUrl ? documentRecord.previewImageUrl : null)
+        }))
     : [];
 }
 
@@ -2011,8 +2904,32 @@ function getDocumentPageText(page) {
   return String(page?.text || "").replace(/^Page\s+\d+\s*/i, "").trim();
 }
 
+function getRecommendedStudySectionCount(pageCount) {
+  const totalPages = Math.max(1, Number(pageCount || 0) || 1);
+  if (totalPages <= 1) {
+    return 1;
+  }
+  if (totalPages <= 4) {
+    return totalPages;
+  }
+  if (totalPages <= 12) {
+    return Math.ceil(totalPages / 2);
+  }
+  if (totalPages <= 36) {
+    return Math.ceil(totalPages / 3);
+  }
+  return Math.min(18, Math.ceil(totalPages / 4));
+}
+
+function getRecommendedStudySectionCountForDocument(documentRecord) {
+  const pageTotal = Array.isArray(documentRecord?.pages) && documentRecord.pages.length
+    ? documentRecord.pages.length
+    : Math.max(1, Math.ceil(String(documentRecord?.content || "").trim().length / 1800));
+  return getRecommendedStudySectionCount(pageTotal);
+}
+
 function selectAdjacentDocument(direction) {
-  const documents = getVisibleSubjectDocuments(getSelectedSubject() || { documents: [] });
+  const documents = getAllReaderDocuments(getSelectedSubject() || { documents: [] });
   if (!documents.length) {
     return;
   }
@@ -2075,16 +2992,949 @@ function renderSubjectHeader() {
   elements.subjectHeader.innerHTML = "";
 }
 
+function getSubjectLandingTone(type = "") {
+  const normalizedType = String(type || "").trim().toLowerCase();
+  if (normalizedType.includes("assessment")) {
+    return "peach";
+  }
+  if (normalizedType.includes("homework")) {
+    return "yellow";
+  }
+  if (normalizedType.includes("video")) {
+    return "mint";
+  }
+  return "lilac";
+}
+
+function getSubjectLandingResourceBundles(subject) {
+  return getDocumentGroupsFromDocuments(getReaderDocuments(subject || { documents: [] }));
+}
+
+function getSubjectLandingRevisionBundles(subject) {
+  return getDocumentGroupsFromDocuments(getRevisionReaderDocuments(subject || { documents: [] }));
+}
+
+function isSubjectLandingAssessmentBundle(bundle) {
+  const normalizedType = String(bundle?.type || "").trim().toLowerCase();
+  if (normalizedType.includes("assessment") || normalizedType.includes("rubric")) {
+    return true;
+  }
+
+  return Array.isArray(bundle?.documents) && bundle.documents.some((documentRecord) => {
+    const documentType = String(documentRecord?.type || "").trim().toLowerCase();
+    return Boolean(documentRecord?.flags?.assessment) || documentType.includes("assessment") || documentType.includes("rubric");
+  });
+}
+
+function getSubjectLandingFolderMarkup({
+  title,
+  itemCount,
+  expanded,
+  toggleId,
+  bodyMarkup = "",
+  emptyTitle,
+  emptyBody
+}) {
+  const countLabel = `${itemCount} item${itemCount === 1 ? "" : "s"}`;
+  return `
+    <section class="subject-landing-folder">
+      <button
+        type="button"
+        class="documents-folder-toggle subject-landing-folder__toggle"
+        data-subject-landing-folder-toggle="${escapeHtml(toggleId)}"
+        aria-expanded="${expanded ? "true" : "false"}"
+      >
+        <span class="subject-landing-folder__heading">
+          <span class="subject-landing-folder__icon" aria-hidden="true">${expanded ? "📂" : "📁"}</span>
+          <span class="subject-landing-folder__title-wrap">
+            <strong>${escapeHtml(title)}</strong>
+            <span class="subject-landing-folder__hint">Open folder</span>
+          </span>
+        </span>
+        <span class="subject-landing-folder__meta">
+          <span>${escapeHtml(countLabel)}</span>
+          <span class="subject-landing-folder__caret" aria-hidden="true">${expanded ? "▾" : "▸"}</span>
+        </span>
+      </button>
+      ${expanded
+        ? `
+          <div class="subject-landing-folder__list">
+            ${itemCount
+              ? bodyMarkup
+              : `
+                <article class="subject-landing__empty subject-landing__empty--folder">
+                  <strong>${escapeHtml(emptyTitle)}</strong>
+                  <span>${escapeHtml(emptyBody)}</span>
+                </article>
+              `}
+          </div>
+        `
+        : ""}
+    </section>
+  `;
+}
+
+function getSubjectLandingResourceRowMarkup(bundle, { revisionArchived = false } = {}) {
+  const primaryDocument = getBundlePrimaryDocument(bundle);
+  const tone = getSubjectLandingTone(bundle?.type);
+  const bundleId = bundle?.id || primaryDocument?.id || "";
+  const pageCount = getBundlePageCount(bundle);
+  return `
+    <article class="subject-landing-row subject-landing-row--resource${revisionArchived ? " subject-landing-row--revision" : ""}">
+      <button
+        type="button"
+        class="subject-landing-row__main"
+        data-subject-landing-open-document="${escapeHtml(bundleId)}"
+      >
+        <span class="subject-landing-row__cover subject-landing-row__cover--${escapeHtml(tone)}">
+          ${primaryDocument?.previewImageUrl
+            ? `<img src="${escapeHtml(primaryDocument.previewImageUrl)}" alt="${escapeHtml(bundle.title)}" />`
+            : `
+              <span class="subject-landing-row__sheet">
+                <span class="subject-landing-row__sheet-bar"></span>
+                <span class="subject-landing-row__sheet-line subject-landing-row__sheet-line--dark"></span>
+                <span class="subject-landing-row__sheet-line"></span>
+                <span class="subject-landing-row__sheet-line subject-landing-row__sheet-line--short"></span>
+              </span>
+            `}
+        </span>
+        <span class="subject-landing-row__copy">
+          <strong>${escapeHtml(bundle.title)}</strong>
+          <span>${escapeHtml(`${bundle.type || "Notes"} · ${bundle.added || "Recently added"}${pageCount ? ` · ${pageCount} pages` : ""}`)}</span>
+        </span>
+      </button>
+      <div class="subject-landing-row__actions">
+        <button
+          type="button"
+          class="subject-landing-row__revision-button"
+          data-subject-landing-toggle-revision="${escapeHtml(bundleId)}"
+        >
+          ${revisionArchived ? "Remove from revision" : "Add to revision"}
+        </button>
+        <button
+          type="button"
+          class="subject-landing-row__open-button"
+          data-subject-landing-open-document="${escapeHtml(bundleId)}"
+        >
+          Open →
+        </button>
+      </div>
+    </article>
+  `;
+}
+
+function getSubjectLandingOpenDocument(subject) {
+  if (!subject || !state.subjectLandingOpenDocumentId) {
+    return null;
+  }
+  return (Array.isArray(subject.documents) ? subject.documents : []).find((documentRecord) => {
+    const bundleId = documentRecord.uploadGroupId || documentRecord.id;
+    return documentRecord.id === state.subjectLandingOpenDocumentId || bundleId === state.subjectLandingOpenDocumentId;
+  }) || null;
+}
+
+function buildSubjectLandingSectionBullets(section) {
+  if (Array.isArray(section?.bullets) && section.bullets.length) {
+    return section.bullets.slice(0, 3);
+  }
+
+  return buildCoreStudyBullets(
+    String(section?.sectionText || ""),
+    Array.isArray(section?.importantTerms) ? section.importantTerms : [],
+    3
+  );
+}
+
+function buildSubjectLandingBeats(section, bullets) {
+  const labels = (section?.importantTerms?.length ? section.importantTerms : bullets)
+    .slice(0, 3)
+    .map((item) => String(item || "").replace(/[.!?]+$/, "").trim())
+    .filter(Boolean);
+  const icons = ["📘", "✏️", "💬"];
+  return (labels.length ? labels : ["Read closely", "Keep the details", "Explain it simply"]).map((label, index) => ({
+    icon: icons[index % icons.length],
+    label
+  }));
+}
+
+function getSubjectLandingSimplifiedPieces(documentRecord) {
+  return getDocumentSections(documentRecord).map((section, index, sections) => {
+    const bullets = buildSubjectLandingSectionBullets(section);
+    const beats = buildSubjectLandingBeats(section, bullets);
+    const hasPageRange = section?.pageStart || section?.pageEnd;
+    const pageLabel = hasPageRange
+      ? section.pageStart === section.pageEnd
+        ? `Page ${section.pageStart}`
+        : `Pages ${section.pageStart}-${section.pageEnd}`
+      : `Piece ${index + 1}`;
+    return {
+      id: section.id || `piece-${index + 1}`,
+      title: section.title || `Section ${index + 1}`,
+      summary: String(
+        section.summary || buildCoreStudySummary(section.sectionText || "", section.importantTerms || [])
+      ).trim(),
+      bullets,
+      beats,
+      badge: `Piece ${index + 1} of ${sections.length} · ${pageLabel}`
+    };
+  });
+}
+
+function buildSubjectLandingPieceListenText(documentRecord, piece) {
+  return [
+    documentRecord?.title || "",
+    piece?.title || "",
+    piece?.summary || "",
+    ...(Array.isArray(piece?.bullets) ? piece.bullets : [])
+  ]
+    .filter(Boolean)
+    .join(". ");
+}
+
+function sanitiseInlineJson(value) {
+  return JSON.stringify(value)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/&/g, "\\u0026")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}
+
+function getStandaloneDocumentStylesMarkup() {
+  return Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
+    .map((node) => node.outerHTML)
+    .join("\n");
+}
+
+function getSubjectLandingStandalonePayload(subject, documentRecord, initialView = "simple") {
+  const pieces = getSubjectLandingSimplifiedPieces(documentRecord);
+  const pages = getDocumentPages(documentRecord).map((page, index) => ({
+    pageNumber: Number(page?.pageNumber || index + 1) || index + 1,
+    imageUrl: page?.imageUrl || "",
+    text: getDocumentPageText(page)
+  }));
+
+  return {
+    subjectName: subject?.name || "Subject",
+    subjectIconMarkup: getSubjectTileCodeMarkup(subject),
+    yearLabel: `Year ${state.studentGrade}`,
+    documentTitle: documentRecord?.title || "Document",
+    pieces,
+    pages,
+    initialPieceIndex: Math.max(0, Math.min(state.subjectLandingPieceIndex, Math.max(0, pieces.length - 1))),
+    initialPageIndex: Math.max(0, Math.min(getCurrentDocumentPageIndex(documentRecord), Math.max(0, pages.length - 1))),
+    initialView: initialView === "original" ? "original" : "simple"
+  };
+}
+
+function buildStandaloneDocumentPageHtml(payload, stylesMarkup = "") {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>${escapeHtml(payload.documentTitle)} · PaperPanda</title>
+    ${stylesMarkup}
+  </head>
+  <body class="standalone-document-page">
+    <main id="standalone-document-root"></main>
+    <script>
+      const payload = ${sanitiseInlineJson(payload)};
+      const state = {
+        view: payload.initialView || "simple",
+        pieceIndex: Number(payload.initialPieceIndex || 0) || 0,
+        pageIndex: Number(payload.initialPageIndex || 0) || 0
+      };
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
+
+      function renderStandalone() {
+        const host = document.getElementById("standalone-document-root");
+        const pieces = Array.isArray(payload.pieces) ? payload.pieces : [];
+        const pages = Array.isArray(payload.pages) ? payload.pages : [];
+        const pieceIndex = Math.max(0, Math.min(state.pieceIndex, Math.max(0, pieces.length - 1)));
+        const pageIndex = Math.max(0, Math.min(state.pageIndex, Math.max(0, pages.length - 1)));
+        const currentPiece = pieces[pieceIndex] || {
+          title: "Overview",
+          summary: "PaperPanda is preparing the document summary.",
+          bullets: [],
+          beats: [],
+          badge: "Piece 1 of 1"
+        };
+        const currentPage = pages[pageIndex] || null;
+
+        host.innerHTML = \`
+          <section class="subject-landing subject-landing--open subject-landing--standalone">
+            <div class="subject-landing__bar">
+              <div class="subject-landing__bar-copy subject-landing__bar-copy--menu">
+                <span class="subject-landing__subject-pill subject-landing__subject-pill--static">
+                  <span class="subject-landing__subject-icon">\${payload.subjectIconMarkup || ""}</span>
+                  <span>\${escapeHtml(payload.subjectName || "Subject")}</span>
+                </span>
+                <span class="subject-landing__year">\${escapeHtml(payload.yearLabel || "")}</span>
+              </div>
+              <div class="subject-landing__bar-actions">
+                <button type="button" class="ghost-button subject-landing__nav-button" data-standalone-close="true">Close</button>
+              </div>
+            </div>
+            <div class="subject-landing__document-head">
+              <div class="subject-landing__document-copy">
+                <div>
+                  <h2>\${escapeHtml(payload.documentTitle || "Document")}</h2>
+                  <p>\${escapeHtml(\`\${Math.max(1, pages.length || 1)} pages · simplified into \${Math.max(1, pieces.length || 1)} bite-size pieces\`)}</p>
+                </div>
+              </div>
+              <div class="subject-landing__switch" role="tablist" aria-label="Document view">
+                <button type="button" class="\${state.view === "simple" ? "is-active" : ""}" data-standalone-view="simple">Simplified</button>
+                <button type="button" class="\${state.view === "original" ? "is-active" : ""}" data-standalone-view="original">Original doc</button>
+              </div>
+            </div>
+            \${state.view === "simple"
+              ? \`
+                <div class="subject-landing__progress-dots">
+                  \${pieces.map((_, index) => \`<span class="subject-landing__progress-dot\${index === pieceIndex ? " is-active" : index < pieceIndex ? " is-done" : ""}"></span>\`).join("")}
+                </div>
+                <div class="subject-landing__summary-layout">
+                  <button type="button" class="subject-landing__arrow" data-standalone-piece-move="-1" \${pieceIndex <= 0 ? "disabled" : ""}>←</button>
+                  <article class="subject-landing__summary-card">
+                    <span class="subject-landing__summary-pill">\${escapeHtml(currentPiece.badge || "")}</span>
+                    <h3>\${escapeHtml(currentPiece.title || "")}</h3>
+                    <p>\${escapeHtml(currentPiece.summary || "")}</p>
+                    <ul>
+                      \${(Array.isArray(currentPiece.bullets) ? currentPiece.bullets : []).map((bullet) => \`<li>\${escapeHtml(bullet)}</li>\`).join("")}
+                    </ul>
+                    <section class="subject-landing__explainer">
+                      <div class="subject-landing__explainer-beats">
+                        \${(Array.isArray(currentPiece.beats) ? currentPiece.beats : []).map((beat) => \`
+                          <article class="subject-landing__explainer-beat subject-landing__explainer-beat--visible">
+                            <span class="subject-landing__explainer-icon">\${escapeHtml(beat.icon || "📘")}</span>
+                            <strong>\${escapeHtml(beat.label || "")}</strong>
+                          </article>
+                        \`).join("")}
+                      </div>
+                    </section>
+                  </article>
+                  <button type="button" class="subject-landing__arrow" data-standalone-piece-move="1" \${pieceIndex >= pieces.length - 1 ? "disabled" : ""}>→</button>
+                </div>
+              \`
+              : \`
+                <div class="subject-landing__original-wrap">
+                  <button type="button" class="subject-landing__arrow" data-standalone-page-move="-1" \${pageIndex <= 0 ? "disabled" : ""}>←</button>
+                  <article class="subject-landing__summary-card subject-landing__summary-card--original subject-landing__summary-card--page">
+                    <span class="subject-landing__summary-pill">\${escapeHtml(currentPage ? \`Page \${currentPage.pageNumber} of \${Math.max(1, pages.length)}\` : "Original document")}</span>
+                    <div class="subject-landing__reader-stage">
+                      \${currentPage?.imageUrl
+                        ? \`
+                          <figure class="subject-landing__page-preview subject-landing__page-preview--reader">
+                            <img src="\${escapeHtml(currentPage.imageUrl)}" alt="\${escapeHtml(\`\${payload.documentTitle} page \${currentPage.pageNumber}\`)}" class="subject-landing__page-image subject-landing__page-image--reader" />
+                          </figure>
+                        \`
+                        : \`
+                          <div class="subject-landing__page-fallback">
+                            <h3>\${escapeHtml(currentPage ? \`Page \${currentPage.pageNumber}\` : "Original document")}</h3>
+                            <p>\${escapeHtml((currentPage && currentPage.text) || "No page preview is available for this document yet.")}</p>
+                          </div>
+                        \`}
+                    </div>
+                  </article>
+                  <button type="button" class="subject-landing__arrow" data-standalone-page-move="1" \${!pages.length || pageIndex >= pages.length - 1 ? "disabled" : ""}>→</button>
+                </div>
+              \`}
+          </section>
+        \`;
+
+        host.querySelectorAll("[data-standalone-view]").forEach((button) => {
+          button.addEventListener("click", () => {
+            state.view = button.dataset.standaloneView || "simple";
+            renderStandalone();
+          });
+        });
+        host.querySelectorAll("[data-standalone-piece-move]").forEach((button) => {
+          button.addEventListener("click", () => {
+            state.pieceIndex += Number(button.dataset.standalonePieceMove || 0) || 0;
+            renderStandalone();
+          });
+        });
+        host.querySelectorAll("[data-standalone-page-move]").forEach((button) => {
+          button.addEventListener("click", () => {
+            state.pageIndex += Number(button.dataset.standalonePageMove || 0) || 0;
+            renderStandalone();
+          });
+        });
+        host.querySelector("[data-standalone-close]")?.addEventListener("click", () => window.close());
+      }
+
+      renderStandalone();
+    </script>
+  </body>
+</html>`;
+}
+
+function openSubjectLandingStandalonePage(subject, documentRecord, initialView = "simple") {
+  if (!subject || !documentRecord) {
+    return;
+  }
+
+  const popup = window.open("", "_blank");
+  if (!popup) {
+    return;
+  }
+
+  popup.opener = null;
+  popup.document.open();
+  popup.document.write(
+    buildStandaloneDocumentPageHtml(
+      getSubjectLandingStandalonePayload(subject, documentRecord, initialView),
+      getStandaloneDocumentStylesMarkup()
+    )
+  );
+  popup.document.close();
+}
+
+function openSubjectLandingDocument(subject, documentId) {
+  const documentRecord = (Array.isArray(subject?.documents) ? subject.documents : []).find((candidate) => {
+    const bundleId = candidate.uploadGroupId || candidate.id;
+    return candidate.id === documentId || bundleId === documentId;
+  });
+  if (!documentRecord) {
+    return;
+  }
+  state.subjectLandingOpenDocumentId = documentRecord.id;
+  state.subjectLandingView = "simple";
+  state.subjectLandingPieceIndex = Math.max(0, getResumeDocumentSectionIndex(documentRecord));
+  state.subjectLandingSubjectMenuOpen = false;
+  resetSubjectLandingAskState();
+  state.selectedDocumentId = documentRecord.id;
+  state.askDocumentId = documentRecord.id;
+  render();
+  if (subject && isWholeStudyDocument(documentRecord)) {
+    void ensureDocumentStudyPlan(documentRecord, subject).then(() => render()).catch(() => render());
+  }
+}
+
+function renderSubjectLanding() {
+  const host = elements.subjectLandingView;
+  const workspaceMain = elements.subjectsWorkspaceMain;
+  const workspaceDock = elements.subjectsWorkspaceDock;
+  const subject = getSelectedSubject();
+  const showLanding = shouldShowSubjectLanding(subject);
+
+  if (workspaceMain) {
+    workspaceMain.classList.toggle("hidden", showLanding);
+  }
+  if (workspaceDock) {
+    workspaceDock.classList.toggle("hidden", showLanding);
+  }
+  if (!host) {
+    return;
+  }
+
+  host.classList.toggle("hidden", !showLanding);
+  if (!showLanding || !subject) {
+    host.innerHTML = "";
+    return;
+  }
+
+  const resourceBundles = getSubjectLandingResourceBundles(subject);
+  const revisionResourceBundles = getSubjectLandingRevisionBundles(subject);
+  const assessmentResourceBundles = resourceBundles.filter((bundle) => isSubjectLandingAssessmentBundle(bundle));
+  const classNoteResourceBundles = resourceBundles.filter((bundle) => !isSubjectLandingAssessmentBundle(bundle));
+  const landingResourceBundleMap = new Map([...resourceBundles, ...revisionResourceBundles].map((bundle) => [bundle.id, bundle]));
+  const openDocument = getSubjectLandingOpenDocument(subject);
+
+  if (!openDocument && subject.id === "spelling") {
+    const writingSubject = state.subjects.find((item) => item.id === "english") || null;
+    const spellingCount = getSpellingPendingActivityCount(subject);
+    const writingCount = writingSubject ? getSubjectWritingPendingSectionCount(writingSubject) : 0;
+
+    host.innerHTML = `
+      <section class="subject-landing">
+        <div class="subject-landing__bar">
+          <div class="subject-landing__bar-copy subject-landing__bar-copy--menu">
+            <button type="button" class="subject-landing__subject-pill" data-subject-landing-subject-toggle="true" aria-expanded="${state.subjectLandingSubjectMenuOpen ? "true" : "false"}">
+              <span class="subject-landing__subject-icon">${getSubjectTileCodeMarkup(subject)}</span>
+              <span>${escapeHtml(subject.name)}</span>
+              <span class="subject-landing__subject-caret" aria-hidden="true">▾</span>
+            </button>
+            ${state.subjectLandingSubjectMenuOpen
+              ? `
+                <div class="subject-landing__subject-menu" data-subject-landing-subject-menu>
+                  ${state.subjects.map((item) => `
+                    <button
+                      type="button"
+                      class="subject-landing__subject-option${item.id === subject.id ? " is-active" : ""}"
+                      data-subject-landing-subject-id="${escapeHtml(item.id)}"
+                    >
+                      <span class="subject-landing__subject-option-icon">${getSubjectTileCodeMarkup(item)}</span>
+                      <span>${escapeHtml(item.name)}</span>
+                    </button>
+                  `).join("")}
+                </div>
+              `
+              : ""}
+            <span class="subject-landing__year">${escapeHtml(`Year ${state.studentGrade}`)}</span>
+          </div>
+          <div class="subject-landing__bar-actions">
+            <button type="button" class="ghost-button subject-landing__nav-button" data-subject-landing-all-areas="true">← All areas</button>
+            <button type="button" class="primary-button primary-button--dark subject-landing__nav-button" data-subject-landing-upload="true">+ Upload</button>
+          </div>
+        </div>
+        <div class="subject-landing__content">
+          <button type="button" class="ghost-button subject-landing__resource-back" data-subject-landing-all-areas="true">← All areas</button>
+          <div class="subject-landing__heading">
+            <p class="eyebrow">${escapeHtml(`${subject.name.toUpperCase()} · YEAR ${state.studentGrade}`)}</p>
+            <h2>Choose Practice or Writing</h2>
+            <p>Pick the focused literacy space you want to open.</p>
+          </div>
+          <div class="subject-landing__list">
+            <button type="button" class="subject-landing-row" data-subject-landing-open-area="spelling">
+              <span class="subject-landing-row__cover subject-landing-row__cover--yellow">
+                <span class="subject-landing-row__sheet">
+                  <span class="subject-landing-row__sheet-bar"></span>
+                  <span class="subject-landing-row__sheet-line subject-landing-row__sheet-line--dark"></span>
+                  <span class="subject-landing-row__sheet-line"></span>
+                  <span class="subject-landing-row__sheet-line subject-landing-row__sheet-line--short"></span>
+                </span>
+              </span>
+              <span class="subject-landing-row__copy">
+                <strong>Spelling</strong>
+                <span>${escapeHtml(`${spellingCount} stage${spellingCount === 1 ? "" : "s"} left · spelling stables and pattern practice`)}</span>
+              </span>
+              <span class="subject-landing-row__action">Open →</span>
+            </button>
+            <button type="button" class="subject-landing-row" data-subject-landing-open-area="writing">
+              <span class="subject-landing-row__cover subject-landing-row__cover--lilac">
+                <span class="subject-landing-row__sheet">
+                  <span class="subject-landing-row__sheet-bar"></span>
+                  <span class="subject-landing-row__sheet-line subject-landing-row__sheet-line--dark"></span>
+                  <span class="subject-landing-row__sheet-line"></span>
+                  <span class="subject-landing-row__sheet-line subject-landing-row__sheet-line--short"></span>
+                </span>
+              </span>
+              <span class="subject-landing-row__copy">
+                <strong>Writing</strong>
+                <span>${escapeHtml(`${writingCount} section${writingCount === 1 ? "" : "s"} left · story builder and picture-book flow`)}</span>
+              </span>
+              <span class="subject-landing-row__action">Open →</span>
+            </button>
+          </div>
+        </div>
+      </section>
+    `;
+  } else if (!openDocument) {
+    host.innerHTML = `
+      <section class="subject-landing">
+        <div class="subject-landing__bar">
+          <div class="subject-landing__bar-copy subject-landing__bar-copy--menu">
+            <button type="button" class="subject-landing__subject-pill" data-subject-landing-subject-toggle="true" aria-expanded="${state.subjectLandingSubjectMenuOpen ? "true" : "false"}">
+              <span class="subject-landing__subject-icon">${getSubjectTileCodeMarkup(subject)}</span>
+              <span>${escapeHtml(subject.name)}</span>
+              <span class="subject-landing__subject-caret" aria-hidden="true">▾</span>
+            </button>
+            ${state.subjectLandingSubjectMenuOpen
+              ? `
+                <div class="subject-landing__subject-menu" data-subject-landing-subject-menu>
+                  ${state.subjects.map((item) => `
+                    <button
+                      type="button"
+                      class="subject-landing__subject-option${item.id === subject.id ? " is-active" : ""}"
+                      data-subject-landing-subject-id="${escapeHtml(item.id)}"
+                    >
+                      <span class="subject-landing__subject-option-icon">${getSubjectTileCodeMarkup(item)}</span>
+                      <span>${escapeHtml(item.name)}</span>
+                    </button>
+                  `).join("")}
+                </div>
+              `
+              : ""}
+            <span class="subject-landing__year">${escapeHtml(`Year ${state.studentGrade}`)}</span>
+          </div>
+          <div class="subject-landing__bar-actions">
+            <button type="button" class="ghost-button subject-landing__nav-button" data-subject-landing-all-areas="true">← All areas</button>
+            <button type="button" class="primary-button primary-button--dark subject-landing__nav-button" data-subject-landing-upload="true">+ Upload</button>
+          </div>
+        </div>
+        <div class="subject-landing__content">
+          <div class="subject-landing__heading">
+            <p class="eyebrow">${escapeHtml(`${subject.name.toUpperCase()} · YEAR ${state.studentGrade}`)}</p>
+            <h2>Pick something to open</h2>
+            <p>Open a folder below to browse assessment resources, class notes, or revision files for this subject.</p>
+          </div>
+          <div class="subject-landing__list">
+            ${getSubjectLandingFolderMarkup({
+              title: "Assessment resources",
+              itemCount: assessmentResourceBundles.length,
+              expanded: state.subjectLandingAssessmentExpanded,
+              toggleId: "assessment",
+              bodyMarkup: assessmentResourceBundles.map((bundle) => getSubjectLandingResourceRowMarkup(bundle)).join(""),
+              emptyTitle: "No assessment resources yet",
+              emptyBody: "Upload an assessment notification, rubric, or marking guide and it will appear in this folder."
+            })}
+            ${getSubjectLandingFolderMarkup({
+              title: "Class notes",
+              itemCount: classNoteResourceBundles.length,
+              expanded: state.subjectLandingClassNotesExpanded,
+              toggleId: "class-notes",
+              bodyMarkup: classNoteResourceBundles.map((bundle) => getSubjectLandingResourceRowMarkup(bundle)).join(""),
+              emptyTitle: "No class notes yet",
+              emptyBody: "Upload class notes, worksheets, or lesson files and they will appear in this folder."
+            })}
+            ${getSubjectLandingFolderMarkup({
+              title: "Revision folder",
+              itemCount: revisionResourceBundles.length,
+              expanded: state.subjectLandingRevisionExpanded,
+              toggleId: "revision",
+              bodyMarkup: revisionResourceBundles.map((bundle) => getSubjectLandingResourceRowMarkup(bundle, { revisionArchived: true })).join(""),
+              emptyTitle: "Nothing in revision yet",
+              emptyBody: "Move older resources into revision so they stay separate from current-term files."
+            })}
+          </div>
+        </div>
+      </section>
+    `;
+  } else {
+    const simplifiedPieces = getSubjectLandingSimplifiedPieces(openDocument);
+    const pieceIndex = Math.max(0, Math.min(state.subjectLandingPieceIndex, Math.max(0, simplifiedPieces.length - 1)));
+    const currentPiece = simplifiedPieces[pieceIndex] || simplifiedPieces[0] || {
+      title: "Overview",
+      summary: "PaperPanda is preparing the document summary.",
+      bullets: [],
+      beats: [],
+      badge: "Piece 1 of 1"
+    };
+    const beatsDuration = `${Math.max(1, currentPiece.beats.length) * 1.8}s`;
+    const pageList = getDocumentPages(openDocument);
+    const currentPageIndex = getCurrentDocumentPageIndex(openDocument);
+    const currentPage = pageList[currentPageIndex] || null;
+    const currentPageText = currentPage ? getDocumentPageText(currentPage) : String(openDocument.content || "").trim();
+    const totalPageCount = Array.isArray(openDocument.pages) && openDocument.pages.length
+      ? openDocument.pages.length
+      : Math.max(1, getBundlePageCount({ documents: [openDocument] }));
+    const landingAskDocument = getAskDocument() || openDocument;
+    const landingAskContext = landingAskDocument
+      ? `Asking about: ${landingAskDocument.title}`
+      : "No document selected for Ask yet.";
+    const landingAskResponse = state.subjectLandingAskStatus || getAskIdleStatus({ kind: "landing" });
+
+    host.innerHTML = `
+      <section class="subject-landing subject-landing--open${state.subjectLandingAskOpen ? " subject-landing--ask-open" : ""}">
+        <div class="subject-landing__bar">
+          <div class="subject-landing__bar-copy subject-landing__bar-copy--menu">
+            <button type="button" class="subject-landing__subject-pill" data-subject-landing-subject-toggle="true" aria-expanded="${state.subjectLandingSubjectMenuOpen ? "true" : "false"}">
+              <span class="subject-landing__subject-icon">${getSubjectTileCodeMarkup(subject)}</span>
+              <span>${escapeHtml(subject.name)}</span>
+              <span class="subject-landing__subject-caret" aria-hidden="true">▾</span>
+            </button>
+            ${state.subjectLandingSubjectMenuOpen
+              ? `
+                <div class="subject-landing__subject-menu" data-subject-landing-subject-menu>
+                  ${state.subjects.map((item) => `
+                    <button
+                      type="button"
+                      class="subject-landing__subject-option${item.id === subject.id ? " is-active" : ""}"
+                      data-subject-landing-subject-id="${escapeHtml(item.id)}"
+                    >
+                      <span class="subject-landing__subject-option-icon">${getSubjectTileCodeMarkup(item)}</span>
+                      <span>${escapeHtml(item.name)}</span>
+                    </button>
+                  `).join("")}
+                </div>
+              `
+              : ""}
+            <span class="subject-landing__year">${escapeHtml(`Year ${state.studentGrade}`)}</span>
+          </div>
+          <div class="subject-landing__bar-actions">
+            <button type="button" class="ghost-button subject-landing__nav-button" data-subject-landing-all-areas="true">← All areas</button>
+            <button type="button" class="primary-button primary-button--dark subject-landing__nav-button" data-subject-landing-upload="true">+ Upload</button>
+          </div>
+        </div>
+        <div class="subject-landing__document-head">
+          <div class="subject-landing__document-copy">
+            <button type="button" class="ghost-button subject-landing__resource-back" data-subject-landing-back="true">← Resources</button>
+            <div>
+              <h2>${escapeHtml(openDocument.title)}</h2>
+              <p>${escapeHtml(`${totalPageCount} pages · simplified into ${Math.max(1, simplifiedPieces.length)} bite-size pieces`)}</p>
+            </div>
+          </div>
+          <div class="subject-landing__switch" role="tablist" aria-label="Document view">
+            <button type="button" class="${state.subjectLandingView === "simple" ? "is-active" : ""}" data-subject-landing-view="simple">Simplified</button>
+            <button type="button" class="${state.subjectLandingView === "original" ? "is-active" : ""}" data-subject-landing-view="original">Original doc</button>
+          </div>
+        </div>
+        ${state.subjectLandingView === "simple"
+          ? `
+            <div class="subject-landing__progress-dots">
+              ${simplifiedPieces.map((_, index) => `<span class="subject-landing__progress-dot${index === pieceIndex ? " is-active" : index < pieceIndex ? " is-done" : ""}"></span>`).join("")}
+            </div>
+            <div class="subject-landing__summary-layout">
+              <button type="button" class="subject-landing__arrow" data-subject-landing-piece-move="-1" ${pieceIndex <= 0 ? "disabled" : ""}>←</button>
+              <article class="subject-landing__summary-card">
+                <span class="subject-landing__summary-pill">${escapeHtml(currentPiece.badge)}</span>
+                <h3>${escapeHtml(currentPiece.title)}</h3>
+                <p>${escapeHtml(currentPiece.summary)}</p>
+                <ul>
+                  ${currentPiece.bullets.map((bullet) => `<li>${escapeHtml(bullet)}</li>`).join("")}
+                </ul>
+                <section class="subject-landing__explainer" style="--subject-landing-duration:${escapeHtml(beatsDuration)};">
+                  <div class="subject-landing__explainer-track">
+                    <span class="subject-landing__explainer-fill"></span>
+                  </div>
+                  <div class="subject-landing__explainer-beats">
+                    ${currentPiece.beats.map((beat, index) => `
+                      <article class="subject-landing__explainer-beat" style="--subject-landing-delay:${escapeHtml(`${index * 1.8}s`)};">
+                        <span class="subject-landing__explainer-icon">${escapeHtml(beat.icon)}</span>
+                        <strong>${escapeHtml(beat.label)}</strong>
+                      </article>
+                    `).join("")}
+                  </div>
+                </section>
+              </article>
+              <button type="button" class="subject-landing__arrow" data-subject-landing-piece-move="1" ${pieceIndex >= simplifiedPieces.length - 1 ? "disabled" : ""}>→</button>
+            </div>
+            <div class="subject-landing__dock">
+              <div class="subject-landing__dock-inner">
+                <span class="subject-landing__dock-label">This piece</span>
+                <button type="button" class="subject-landing__dock-listen" data-subject-landing-listen-piece="true">▶ Listen</button>
+                <button type="button" class="subject-landing__dock-ask" data-subject-landing-ask="true">Ask Panda</button>
+              </div>
+            </div>
+            ${state.subjectLandingAskOpen
+              ? `
+                <aside class="subject-landing-ask-popup" data-subject-landing-ask-popup>
+                  <button type="button" class="subject-landing-ask-popup__close" data-subject-landing-ask-close aria-label="Close Ask Panda">×</button>
+                  <p class="subject-landing-ask-popup__eyebrow">Support</p>
+                  <div class="subject-landing-ask-popup__header">
+                    <img src="/paperpanda-logo.svg" alt="PaperPanda" class="subject-landing-ask-popup__avatar" />
+                    <div class="subject-landing-ask-popup__copy">
+                      <h3>Ask Panda</h3>
+                      <p>Ask about the current subject or what you're reading.</p>
+                    </div>
+                  </div>
+                  <button type="button" class="subject-landing-ask-popup__mic" data-subject-landing-ask-mic>
+                    ${state.askMicActive ? "Stop microphone" : "Use microphone"}
+                  </button>
+                  <div class="subject-landing-ask-popup__wave" aria-hidden="true">
+                    <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+                  </div>
+                  <div class="subject-landing-ask-popup__context" data-subject-landing-ask-context>${escapeHtml(landingAskContext)}</div>
+                  <div class="subject-landing-ask-popup__response" data-subject-landing-ask-response>${escapeHtml(landingAskResponse)}</div>
+                  <textarea
+                    class="subject-landing-ask-popup__input"
+                    data-subject-landing-ask-input
+                    rows="5"
+                    placeholder="Ask Panda about this document here."
+                  >${escapeHtml(state.subjectLandingAskDraft)}</textarea>
+                  <div class="subject-landing-ask-popup__actions">
+                    <button type="button" class="subject-landing-ask-popup__listen" data-subject-landing-ask-listen>${state.askResponseSpeaking ? "Stop" : "Listen to response"}</button>
+                  </div>
+                </aside>
+              `
+              : ""}
+          `
+          : `
+            <div class="subject-landing__original-wrap">
+              <button type="button" class="subject-landing__arrow" data-subject-landing-page-move="-1" ${currentPageIndex <= 0 ? "disabled" : ""}>←</button>
+              <article class="subject-landing__summary-card subject-landing__summary-card--original subject-landing__summary-card--page">
+                <span class="subject-landing__summary-pill">${escapeHtml(currentPage ? `Page ${currentPage.pageNumber || currentPageIndex + 1} of ${Math.max(1, pageList.length)}` : "Original document")}</span>
+                <div class="subject-landing__reader-stage">
+                  ${currentPage?.imageUrl
+                    ? `
+                      <figure class="subject-landing__page-preview subject-landing__page-preview--reader">
+                        <img src="${escapeHtml(currentPage.imageUrl)}" alt="${escapeHtml(`${openDocument.title} page ${currentPage.pageNumber || currentPageIndex + 1}`)}" class="subject-landing__page-image subject-landing__page-image--reader" />
+                      </figure>
+                    `
+                    : `
+                      <div class="subject-landing__page-fallback">
+                        <h3>${escapeHtml(currentPage ? `Page ${currentPage.pageNumber || currentPageIndex + 1}` : "Original document")}</h3>
+                        <p>${escapeHtml(currentPageText || "No page preview is available for this document yet.")}</p>
+                      </div>
+                    `}
+                </div>
+              </article>
+              <button type="button" class="subject-landing__arrow" data-subject-landing-page-move="1" ${!pageList.length || currentPageIndex >= pageList.length - 1 ? "disabled" : ""}>→</button>
+            </div>
+          `}
+      </section>
+    `;
+  }
+
+  host.querySelectorAll("[data-subject-landing-all-areas]").forEach((button) => {
+    button.addEventListener("click", () => {
+      selectSubjectForSubjectsView(subject.id, { returnToHome: true });
+    });
+  });
+  host.querySelector("[data-subject-landing-subject-toggle]")?.addEventListener("click", () => {
+    state.subjectLandingSubjectMenuOpen = !state.subjectLandingSubjectMenuOpen;
+    render();
+  });
+  host.querySelectorAll("[data-subject-landing-subject-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const nextSubjectId = String(button.dataset.subjectLandingSubjectId || "");
+      if (!nextSubjectId) {
+        return;
+      }
+      selectSubjectForSubjectsView(nextSubjectId);
+    });
+  });
+  host.querySelector("[data-subject-landing-upload]")?.addEventListener("click", openUploadModal);
+  host.querySelectorAll("[data-subject-landing-open-area]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const area = String(button.dataset.subjectLandingOpenArea || "");
+      if (area === "writing") {
+        openSubjectLandingArea(subject.id, "writing");
+        return;
+      }
+      if (area === "spelling") {
+        openSubjectLandingArea(subject.id, "spelling");
+      }
+    });
+  });
+  host.querySelectorAll("[data-subject-landing-open-document]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const documentId = String(button.dataset.subjectLandingOpenDocument || "");
+      if (documentId) {
+        openSubjectLandingDocument(subject, documentId);
+      }
+    });
+  });
+  host.querySelectorAll("[data-subject-landing-toggle-revision]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const bundleId = String(button.dataset.subjectLandingToggleRevision || "");
+      const bundle = landingResourceBundleMap.get(bundleId);
+      if (!bundle) {
+        return;
+      }
+      setDocumentRevisionArchivedState(
+        subject,
+        bundle.documents.map((documentRecord) => documentRecord.id),
+        !bundle.documents.every((documentRecord) => Boolean(documentRecord.revisionArchived))
+      );
+      render();
+    });
+  });
+  host.querySelectorAll("[data-subject-landing-folder-toggle]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const folderId = String(button.dataset.subjectLandingFolderToggle || "");
+      if (folderId === "assessment") {
+        state.subjectLandingAssessmentExpanded = !state.subjectLandingAssessmentExpanded;
+      } else if (folderId === "class-notes") {
+        state.subjectLandingClassNotesExpanded = !state.subjectLandingClassNotesExpanded;
+      } else if (folderId === "revision") {
+        state.subjectLandingRevisionExpanded = !state.subjectLandingRevisionExpanded;
+      }
+      render();
+    });
+  });
+  host.querySelector("[data-subject-landing-back]")?.addEventListener("click", () => {
+    state.subjectLandingOpenDocumentId = "";
+    state.subjectLandingView = "simple";
+    state.subjectLandingPieceIndex = 0;
+    state.subjectLandingSubjectMenuOpen = false;
+    closeSubjectLandingAsk();
+    render();
+  });
+  host.querySelectorAll("[data-subject-landing-view]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.subjectLandingView = String(button.dataset.subjectLandingView || "simple");
+      render();
+    });
+  });
+  host.querySelectorAll("[data-subject-landing-piece-move]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.subjectLandingPieceIndex += Number(button.dataset.subjectLandingPieceMove || 0) || 0;
+      render();
+    });
+  });
+  host.querySelectorAll("[data-subject-landing-page-move]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const documentRecord = getSubjectLandingOpenDocument(subject);
+      if (!documentRecord) {
+        return;
+      }
+      setCurrentDocumentPageIndex(documentRecord, getCurrentDocumentPageIndex(documentRecord) + (Number(button.dataset.subjectLandingPageMove || 0) || 0));
+      render();
+    });
+  });
+  host.querySelector("[data-subject-landing-listen-piece]")?.addEventListener("click", () => {
+    const documentRecord = getSubjectLandingOpenDocument(subject);
+    if (!documentRecord) {
+      return;
+    }
+    const pieces = getSubjectLandingSimplifiedPieces(documentRecord);
+    const piece = pieces[Math.max(0, Math.min(state.subjectLandingPieceIndex, Math.max(0, pieces.length - 1)))] || null;
+    if (!piece) {
+      return;
+    }
+    void speakTextWithOpenAi(buildSubjectLandingPieceListenText(documentRecord, piece), {
+      context: `subject-landing:piece:${documentRecord.id}:${piece.id}`,
+      statusMessages: {
+        preparing: "Preparing summary audio...",
+        playing: "Reading this piece...",
+        error: "Summary audio failed."
+      }
+    }).catch((error) => {
+      console.error("Subject landing piece audio failed.", error);
+    });
+  });
+  host.querySelector("[data-subject-landing-listen-full]")?.addEventListener("click", () => {
+    const documentRecord = getSubjectLandingOpenDocument(subject);
+    if (!documentRecord) {
+      return;
+    }
+    speakDocument(documentRecord);
+  });
+  host.querySelector("[data-subject-landing-ask]")?.addEventListener("click", () => {
+    const documentRecord = getSubjectLandingOpenDocument(subject);
+    if (!documentRecord) {
+      return;
+    }
+    const pieces = getSubjectLandingSimplifiedPieces(documentRecord);
+    const piece = pieces[Math.max(0, Math.min(state.subjectLandingPieceIndex, Math.max(0, pieces.length - 1)))] || null;
+    state.askDocumentId = documentRecord.id;
+    state.subjectLandingAskOpen = true;
+    state.subjectLandingAskDraft = state.subjectLandingAskDraft || (piece?.title
+      ? `Can you explain "${piece.title}" in even simpler language?`
+      : "Can you explain this section in simpler language?");
+    state.subjectLandingAskStatus = state.subjectLandingAskStatus || "Ask Panda about the current document here.";
+    render();
+    requestAnimationFrame(() => {
+      renderAskContext();
+      focusAskComposer();
+    });
+  });
+  host.querySelector("[data-subject-landing-ask-close]")?.addEventListener("click", () => {
+    closeSubjectLandingAsk();
+    render();
+  });
+  host.querySelector("[data-subject-landing-ask-input]")?.addEventListener("input", (event) => {
+    state.subjectLandingAskDraft = event.target.value;
+  });
+  host.querySelector("[data-subject-landing-ask-mic]")?.addEventListener("click", handleAskMicToggle);
+  host.querySelector("[data-subject-landing-ask-listen]")?.addEventListener("click", handleAskListen);
+}
+
 function renderSubjectTabs() {
   const subject = getSelectedSubject();
   if (!subject || !elements.subjectTabs) {
     return;
+  }
+  const availableTabs = getAvailableSubjectTabs(subject);
+  if (!availableTabs.includes(state.activeSubjectTab)) {
+    state.activeSubjectTab = availableTabs[0] || "reader";
   }
 
   const counts = {
     reader: getAllDocumentBundles(subject).length,
     homework: getHomeworkBundles(subject).length,
     spelling: getSpellingPendingActivityCount(subject),
+    writing: getSubjectWritingPendingSectionCount(subject),
     watch: getSubjectWatchItems(subject).length,
     assessments: Array.isArray(subject.assessments) ? subject.assessments.filter((assessment) => !assessment.completed).length : 0
   };
@@ -2092,15 +3942,18 @@ function renderSubjectTabs() {
   elements.tabCountReader.textContent = String(counts.reader);
   elements.tabCountHomework.textContent = String(counts.homework);
   elements.tabCountSpelling.textContent = String(counts.spelling);
+  elements.tabCountWriting.textContent = String(counts.writing);
   elements.tabCountWatch.textContent = String(counts.watch);
   elements.tabCountAssessments.textContent = String(counts.assessments);
   elements.subjectTabs.querySelectorAll("[data-viewer-tab]").forEach((button) => {
+    button.classList.toggle("hidden", !availableTabs.includes(button.dataset.viewerTab));
     button.classList.toggle("is-active", button.dataset.viewerTab === state.activeSubjectTab);
   });
   elements.readingViewerMeta.textContent = `${subject.name} · Year ${state.studentGrade}`;
   elements.viewerPanelReader.classList.toggle("hidden", state.activeSubjectTab !== "reader");
   elements.viewerPanelHomework.classList.toggle("hidden", state.activeSubjectTab !== "homework");
   elements.viewerPanelSpelling.classList.toggle("hidden", state.activeSubjectTab !== "spelling");
+  elements.viewerPanelWriting.classList.toggle("hidden", state.activeSubjectTab !== "writing");
   elements.viewerPanelWatch.classList.toggle("hidden", state.activeSubjectTab !== "watch");
   elements.viewerPanelAssessments.classList.toggle("hidden", state.activeSubjectTab !== "assessments");
 }
@@ -2117,6 +3970,9 @@ function renderSubjectFocusLaunchpad() {
     return;
   }
 
+  const englishSubject = state.subjects.find((item) => item.id === "english") || null;
+  const writingSubject = subject.id === "english" ? subject : subject.id === "spelling" ? englishSubject : null;
+
   const readerBundle = getAllDocumentBundles(subject).find((bundle) => !bundle.reviewed) || getAllDocumentBundles(subject)[0] || null;
   const homeworkBundle = getSubjectHomeworkBundles(subject)[0] || null;
   const watchItem = getSubjectWatchItems(subject)[0] || null;
@@ -2125,6 +3981,7 @@ function renderSubjectFocusLaunchpad() {
     reader: getAllDocumentBundles(subject).length,
     homework: getSubjectHomeworkBundles(subject).length,
     spelling: getSpellingPendingActivityCount(subject),
+    writing: writingSubject ? getSubjectWritingPendingSectionCount(writingSubject) : 0,
     watch: getSubjectWatchItems(subject).length,
     assessments: getActiveSubjectAssessments(subject).length
   };
@@ -2153,16 +4010,27 @@ function renderSubjectFocusLaunchpad() {
           meta: "Homework tasks will appear here when they are uploaded.",
           action: "✎ Open homework"
         },
-    spelling: subject.id === "english"
+    spelling: subject.id === "spelling"
       ? {
           title: SPELLING_UNIT_SEED.title,
-          meta: `${getSpellingPendingActivityCount(subject)} activity${getSpellingPendingActivityCount(subject) === 1 ? "" : "ies"} left · ${Math.round(getSpellingMasteryRatio(subject) * 100)}% mastery`,
-          action: "🐴 Open stables"
+          meta: `${getSpellingPendingActivityCount(subject)} stage${getSpellingPendingActivityCount(subject) === 1 ? "" : "s"} left · ${Math.round(getSpellingMasteryRatio(subject) * 100)}% complete`,
+          action: "Aa Open spelling"
         }
       : {
-          title: "Spelling Stables opens in English",
-          meta: "This first spelling lesson is currently attached to the English subject.",
-          action: "🐴 Open spelling"
+          title: "Spelling lives in its own subject",
+          meta: "Open the Practice subject from the subject list to train this lesson.",
+          action: "Aa Open spelling"
+        },
+    writing: writingSubject
+      ? {
+          title: WRITING_STUDIO_TAB_LABEL,
+          meta: `${getSubjectWritingPendingSectionCount(writingSubject)} section${getSubjectWritingPendingSectionCount(writingSubject) === 1 ? "" : "s"} left · picture-book flow`,
+          action: "✍ Open writing"
+        }
+      : {
+          title: "Writing Studio lives in English",
+          meta: "Open English to build a story section, choose a picture, and preview the book.",
+          action: "✍ Open writing"
         },
     watch: watchItem
       ? {
@@ -2196,7 +4064,14 @@ function renderSubjectFocusLaunchpad() {
     .map((item) => `<option value="${item.id}"${item.id === subject.id ? " selected" : ""}>${escapeHtml(item.name)}</option>`)
     .join("");
 
-  const cards = FOCUS_AREAS.map((area) => {
+  const cards = FOCUS_AREAS
+    .filter((area) => {
+      if (area.id === "writing" && subject.id === "spelling") {
+        return true;
+      }
+      return getAvailableSubjectTabs(subject).includes(area.id);
+    })
+    .map((area) => {
     const preview = focusPreview[area.id];
     return `
       <article class="focus-card focus-card--${area.id}" data-focus-area="${area.id}" tabindex="0" role="button">
@@ -2251,9 +4126,7 @@ function renderSubjectFocusLaunchpad() {
   `;
 
   host.querySelector("#focus-subject-select")?.addEventListener("change", (event) => {
-    state.selectedSubjectId = event.target.value;
-    state.focusArea = null;
-    render();
+    selectSubjectForSubjectsView(event.target.value);
   });
 
   host.querySelectorAll("[data-focus-area]").forEach((card) => {
@@ -2262,9 +4135,7 @@ function renderSubjectFocusLaunchpad() {
       if (!nextArea) {
         return;
       }
-      state.activeSubjectTab = nextArea;
-      state.focusArea = nextArea;
-      render();
+      openFocusLaunchpadArea(subject, nextArea);
     };
     card.addEventListener("click", drillIn);
     card.addEventListener("keydown", (event) => {
@@ -2299,7 +4170,11 @@ function renderSubjectFocusLaunchpad() {
         return;
       }
       if (area === "spelling") {
-        openSubjectsWorkspace("spelling");
+        openFocusLaunchpadArea(subject, "spelling");
+        return;
+      }
+      if (area === "writing") {
+        openFocusLaunchpadArea(subject, "writing");
         return;
       }
       if (area === "watch") {
@@ -2325,13 +4200,63 @@ function renderSubjectFocusLaunchpad() {
   });
 }
 
+function shouldShowSpellingLaunchpad(subject = getSelectedSubject()) {
+  return false;
+}
+
+function openSubjectLandingArea(subjectId, area) {
+  if (!subjectId || !area) {
+    return;
+  }
+
+  state.subjectWorkspaceReturnLandingSubjectId = subjectId;
+  if (area === "writing") {
+    state.selectedSubjectId = "english";
+    expandSubjectWorkspace("writing");
+    return;
+  }
+
+  state.selectedSubjectId = subjectId;
+  expandSubjectWorkspace(area);
+}
+
+function openFocusLaunchpadArea(subject, area) {
+  if (!subject || !area) {
+    return;
+  }
+
+  if (area === "writing") {
+    state.selectedSubjectId = "english";
+    expandSubjectWorkspace("writing");
+    return;
+  }
+
+  state.selectedSubjectId = subject.id;
+  expandSubjectWorkspace(area);
+}
+
+function shouldUseHomeFocusUi() {
+  return state.currentView === "home";
+}
+
+function shouldUseSpellingFocusUi(subject = getSelectedSubject()) {
+  return Boolean(
+    subject &&
+    state.currentView === "subjects" &&
+    subject.id === "spelling" &&
+    state.activeSubjectTab === "spelling" &&
+    state.subjectWorkspaceExpanded &&
+    state.subjectWorkspaceExpandedSubjectId === subject.id
+  );
+}
+
 function renderFocusHomeCard() {
   const host = elements.focusHomeNextCard;
   if (!host) {
     return;
   }
 
-  const show = state.focusMode && state.currentView === "home";
+  const show = shouldUseHomeFocusUi();
   host.classList.toggle("hidden", !show);
   elements.focusHomeSubjectHeading?.classList.toggle("hidden", !show);
   if (!show) {
@@ -2393,36 +4318,41 @@ function renderFocusHomeCard() {
 }
 
 function renderFocusAskFab() {
-  const shouldShow = state.focusMode && (state.currentView === "home" || state.currentView === "subjects") && !state.focusAskOpen;
+  const shouldShow = !state.focusAskOpen && (shouldUseHomeFocusUi() || shouldUseSpellingFocusUi());
   elements.focusAskFab?.classList.toggle("hidden", !shouldShow);
   if (elements.focusAskLabel) {
-    elements.focusAskLabel.textContent = state.currentView === "subjects" ? "Hold to talk" : "Ask Panda";
+    elements.focusAskLabel.textContent = shouldUseSpellingFocusUi() ? "Hold to talk" : "Ask Panda";
   }
 }
 
 function renderFocusMode() {
-  const askOpen = state.focusMode && state.currentView === "subjects" && state.focusAskOpen;
-  const showLaunchpad = state.focusMode && state.currentView === "subjects" && !state.focusArea && !askOpen;
-  const drilledIn = state.focusMode && state.currentView === "subjects" && Boolean(state.focusArea) && !askOpen;
-  const readerDrilled = drilledIn && state.focusArea === "reader";
+  const subject = getSelectedSubject();
+  const spellingLaunchpad = shouldShowSpellingLaunchpad(subject);
+  const spellingFocus = shouldUseSpellingFocusUi(subject);
+  const askOpen = spellingFocus && state.focusAskOpen;
+  const drilledIn = spellingFocus && !askOpen;
+  const showWorkspaceBack = Boolean(
+    state.currentView === "subjects" &&
+    state.subjectWorkspaceExpanded &&
+    state.subjectWorkspaceReturnLandingSubjectId
+  );
 
-  elements.subjectsView?.classList.toggle("focus-launchpad-open", showLaunchpad);
+  elements.subjectsView?.classList.toggle("focus-launchpad-open", spellingLaunchpad);
   elements.subjectsView?.classList.toggle("focus-drilled", drilledIn);
-  elements.subjectsView?.classList.toggle("focus-reader-drilled", readerDrilled);
+  elements.subjectsView?.classList.toggle("focus-reader-drilled", false);
   elements.subjectsView?.classList.toggle("focus-ask-open", askOpen);
-  elements.subjectFocusLaunchpad?.classList.toggle("hidden", !showLaunchpad);
-  elements.focusBackButton?.classList.toggle("hidden", !drilledIn);
+  elements.subjectFocusLaunchpad?.classList.toggle("hidden", !spellingLaunchpad);
+  elements.focusBackButton?.classList.toggle("hidden", !showWorkspaceBack);
 
   renderFocusHomeCard();
   renderFocusAskFab();
 
-  if (showLaunchpad) {
-    renderSubjectFocusLaunchpad();
-    return;
-  }
-
   if (elements.subjectFocusLaunchpad) {
-    elements.subjectFocusLaunchpad.innerHTML = "";
+    if (spellingLaunchpad) {
+      renderSubjectFocusLaunchpad();
+    } else {
+      elements.subjectFocusLaunchpad.innerHTML = "";
+    }
   }
 }
 
@@ -2494,17 +4424,26 @@ function renderDockContext() {
 
   if (state.activeSubjectTab === "spelling") {
     const spelling = getSubjectSpellingState(subject);
-    elements.dockContextTitle.textContent = "Horse skills";
-    elements.dockContextBody.innerHTML = subject.id === "english"
+    elements.dockContextTitle.textContent = "Spelling focus";
+    elements.dockContextBody.innerHTML = subject.id === "spelling"
       ? `
         <article class="dock-tile dock-tile--yellow">
           <div class="dock-tile__copy">
-            <strong>${escapeHtml(`${getSpellingCompletedActivityCount(subject)}/${getSpellingTotalActivityCount(subject)} activities complete`)}</strong>
-            <span>${escapeHtml(spelling.coachMessage || `${SPELLING_UNIT_SEED.horseName} is ready for the next pattern run.`)}</span>
+            <strong>${escapeHtml(`${getSpellingCompletedActivityCount(subject)}/${getSpellingTotalActivityCount(subject)} stages complete`)}</strong>
+            <span>${escapeHtml(spelling.coachMessage || "The next spelling stage is ready.")}</span>
           </div>
         </article>
       `
-      : `<div class="empty-state empty-state--compact">Spelling Stables is available in English for the first release.</div>`;
+      : `<div class="empty-state empty-state--compact">Open the Practice subject to train this lesson.</div>`;
+    return;
+  }
+
+  if (state.activeSubjectTab === "writing") {
+    const writing = getSubjectWritingState(subject);
+    elements.dockContextTitle.textContent = "Writing Studio";
+    elements.dockContextBody.innerHTML = subject.id === "english"
+      ? `<article class="dock-tile dock-tile--lilac"><div class="dock-tile__copy"><strong>${escapeHtml(`${getWritingCompletedSectionCount(writing)}/${WRITING_STUDIO_SECTION_COUNT} sections complete`)}</strong><span>${escapeHtml(writing.coachMessage || "The next story section is ready.")}</span></div></article>`
+      : `<div class="empty-state empty-state--compact">Open English to continue the story studio.</div>`;
     return;
   }
 
@@ -2604,9 +4543,13 @@ function renderRevisionPanel() {
   elements.revisionTopicWrap.classList.toggle("hidden", !topics.length);
 
   const selectedSubject = state.subjects.find((subject) => subject.id === state.revisionSelectedSubjectId) || getSelectedSubject();
-  const noteBundles = selectedSubject ? getAllDocumentBundles(selectedSubject) : [];
+  const noteBundles = selectedSubject ? getDocumentGroupsFromDocuments(getAllReaderDocuments(selectedSubject)) : [];
   elements.revisionNotesSelect.innerHTML = noteBundles
-    .map((bundle) => `<option value="${bundle.id}" ${state.revisionSelectedNoteIds.includes(bundle.id) ? "selected" : ""}>${escapeHtml(bundle.title)}</option>`)
+    .map((bundle) => {
+      const primaryDocument = getBundlePrimaryDocument(bundle);
+      const revisionLabel = isRevisionArchivedDocument(primaryDocument) ? " · Revision" : "";
+      return `<option value="${bundle.id}" ${state.revisionSelectedNoteIds.includes(bundle.id) ? "selected" : ""}>${escapeHtml(`${bundle.title}${revisionLabel}`)}</option>`;
+    })
     .join("");
 
   const isEnglish = selectedEntry?.subjectId === "english";
@@ -2620,7 +4563,7 @@ function renderRevisionPanel() {
 }
 
 function getSelectedRevisionNoteBundles(subject = state.subjects.find((item) => item.id === state.revisionSelectedSubjectId)) {
-  const allBundles = subject ? getAllDocumentBundles(subject) : [];
+  const allBundles = subject ? getDocumentGroupsFromDocuments(getAllReaderDocuments(subject)) : [];
   return allBundles.filter((bundle) => state.revisionSelectedNoteIds.includes(bundle.id));
 }
 
@@ -3154,12 +5097,42 @@ function syncSignInMode() {
   elements.studentNameWrap.classList.toggle("hidden", !isCreateMode);
   elements.studentGradeWrap.classList.toggle("hidden", !isCreateMode);
   elements.studentPasswordConfirmWrap.classList.toggle("hidden", !isCreateMode);
-  elements.openDashboardButton.textContent = isCreateMode ? "Create account" : "Sign in";
+  elements.openDashboardButton.textContent = state.authPending
+    ? isCreateMode
+      ? "Creating account..."
+      : "Signing in..."
+    : isCreateMode
+      ? "Create account"
+      : "Sign in";
   elements.signInModeCreateButton.classList.toggle("signin-mode-button--active", isCreateMode);
   elements.signInModeLoginButton.classList.toggle("signin-mode-button--active", !isCreateMode);
+  elements.openDashboardButton.classList.toggle("is-loading", state.authPending);
+  elements.openDashboardButton.disabled = state.authPending;
+  elements.openDashboardButton.setAttribute("aria-busy", state.authPending ? "true" : "false");
+  [elements.signInModeCreateButton, elements.signInModeLoginButton].forEach((button) => {
+    button.disabled = state.authPending;
+  });
+  elements.signInForm?.querySelectorAll("input, select").forEach((field) => {
+    field.disabled = state.authPending;
+  });
+  elements.signInForm?.classList.toggle("signin-card--busy", state.authPending);
   elements.signInNote.textContent = isCreateMode
     ? "Create an account first, then sign in with your school email and password."
     : "Use the school email and password you created for this portal.";
+}
+
+function setAuthPending(isPending, statusText = "") {
+  state.authPending = Boolean(isPending);
+  syncSignInMode();
+  if (statusText || !state.authPending) {
+    elements.signInStatus.textContent = statusText;
+  }
+}
+
+function flushUiFrame() {
+  return new Promise((resolve) => {
+    window.requestAnimationFrame(() => resolve());
+  });
 }
 
 function hydrateSettingsView() {
@@ -3235,7 +5208,7 @@ function openPreviewDatabase() {
 
   if (!previewDatabasePromise) {
     previewDatabasePromise = new Promise((resolve, reject) => {
-      const request = window.indexedDB.open(previewDatabaseName, 2);
+      const request = window.indexedDB.open(previewDatabaseName, 3);
       request.onerror = () => reject(request.error || new Error("Preview storage could not be opened."));
       request.onupgradeneeded = () => {
         const database = request.result;
@@ -3244,6 +5217,9 @@ function openPreviewDatabase() {
         }
         if (!database.objectStoreNames.contains(settingsAssetStoreName)) {
           database.createObjectStore(settingsAssetStoreName, { keyPath: "id" });
+        }
+        if (!database.objectStoreNames.contains(subjectsSnapshotStoreName)) {
+          database.createObjectStore(subjectsSnapshotStoreName, { keyPath: "accountKey" });
         }
       };
       request.onsuccess = () => resolve(request.result);
@@ -3333,6 +5309,38 @@ async function getPreviewRecord(documentId) {
     const request = transaction.objectStore(previewStoreName).get(documentId);
     request.onsuccess = () => resolve(request.result || null);
     request.onerror = () => reject(request.error || new Error("Preview image could not be loaded."));
+  });
+}
+
+async function putSubjectsSnapshotRecord(accountKey, subjects) {
+  const database = await openPreviewDatabase();
+  if (!database || !accountKey) {
+    return;
+  }
+
+  await new Promise((resolve, reject) => {
+    const transaction = database.transaction(subjectsSnapshotStoreName, "readwrite");
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error || new Error("Subject snapshot could not be saved."));
+    transaction.objectStore(subjectsSnapshotStoreName).put({
+      accountKey,
+      subjects,
+      updatedAt: new Date().toISOString()
+    });
+  });
+}
+
+async function getSubjectsSnapshotRecord(accountKey) {
+  const database = await openPreviewDatabase();
+  if (!database || !accountKey) {
+    return null;
+  }
+
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(subjectsSnapshotStoreName, "readonly");
+    const request = transaction.objectStore(subjectsSnapshotStoreName).get(accountKey);
+    request.onsuccess = () => resolve(Array.isArray(request.result?.subjects) ? request.result.subjects : null);
+    request.onerror = () => reject(request.error || new Error("Subject snapshot could not be loaded."));
   });
 }
 
@@ -3427,6 +5435,13 @@ async function hydratePreviewImages() {
           hydratedAnyPreview = true;
         }
       }
+      if (documentRecord.previewImageUrl && Array.isArray(documentRecord.pages) && documentRecord.pages.length) {
+        const firstPage = documentRecord.pages[0];
+        if (firstPage && !firstPage.imageUrl) {
+          firstPage.imageUrl = documentRecord.previewImageUrl;
+          hydratedAnyPreview = true;
+        }
+      }
     } catch (error) {
       console.error(`Preview image failed to load for ${documentRecord.id}.`, error);
     }
@@ -3440,6 +5455,7 @@ async function hydratePreviewImages() {
 function createPersistableDocument(documentRecord) {
   return {
     ...documentRecord,
+    revisionArchived: Boolean(documentRecord.revisionArchived),
     pages: Array.isArray(documentRecord.pages)
       ? documentRecord.pages.map((page) => ({
           pageNumber: Number(page?.pageNumber || 0),
@@ -3466,6 +5482,7 @@ function createQuotaFallbackDocument(documentRecord) {
     addedAt: documentRecord.addedAt,
     content: typeof documentRecord.content === "string" ? documentRecord.content.slice(0, 4000) : "",
     workNotes: typeof documentRecord.workNotes === "string" ? documentRecord.workNotes.slice(0, 4000) : "",
+    revisionArchived: Boolean(documentRecord.revisionArchived),
     flags: { ...(documentRecord.flags || {}) },
     pageNumber: documentRecord.pageNumber || null,
     pages: Array.isArray(documentRecord.pages)
@@ -3476,6 +5493,7 @@ function createQuotaFallbackDocument(documentRecord) {
       : [],
     studyOverview: String(documentRecord.studyOverview || "").slice(0, 1200),
     studyPlanStatus: documentRecord.studyPlanStatus || "idle",
+    studyPlanVersion: Math.max(0, Number(documentRecord.studyPlanVersion || 0) || 0),
     studySections: Array.isArray(documentRecord.studySections)
       ? documentRecord.studySections.slice(0, 8).map((section, index) => ({
           id: String(section?.id || `section-${index + 1}`),
@@ -3484,6 +5502,7 @@ function createQuotaFallbackDocument(documentRecord) {
           sectionText: String(section?.sectionText || "").slice(0, 2000),
           pageStart: Number(section?.pageStart || 0) || null,
           pageEnd: Number(section?.pageEnd || 0) || null,
+          bullets: Array.isArray(section?.bullets) ? section.bullets.slice(0, 4) : [],
           importantTerms: Array.isArray(section?.importantTerms) ? section.importantTerms.slice(0, 8) : []
         }))
       : [],
@@ -3517,6 +5536,35 @@ function createQuotaFallbackSubjects(subjects) {
   }));
 }
 
+function queueIndexedDbSubjectsPersist(accountKey, subjectsSnapshot) {
+  if (!accountKey || !Array.isArray(subjectsSnapshot)) {
+    return;
+  }
+
+  indexedDbSubjectsSaveQueuedSnapshot = {
+    accountKey,
+    subjects: subjectsSnapshot
+  };
+  if (indexedDbSubjectsSaveInFlight) {
+    return;
+  }
+
+  indexedDbSubjectsSaveInFlight = true;
+  void (async () => {
+    while (indexedDbSubjectsSaveQueuedSnapshot) {
+      const snapshot = indexedDbSubjectsSaveQueuedSnapshot;
+      indexedDbSubjectsSaveQueuedSnapshot = null;
+      try {
+        await putSubjectsSnapshotRecord(snapshot.accountKey, snapshot.subjects);
+      } catch (error) {
+        console.error("IndexedDB subject snapshot sync failed.", error);
+      }
+    }
+
+    indexedDbSubjectsSaveInFlight = false;
+  })();
+}
+
 function loadStoredSubjectsMap() {
   const raw = window.localStorage.getItem(subjectsStorageKey);
   if (!raw) {
@@ -3536,10 +5584,38 @@ function saveStoredSubjectsMap(subjectsByAccount) {
   window.localStorage.setItem(subjectsStorageKey, JSON.stringify(subjectsByAccount));
 }
 
+function saveStoredSubjectsMapForAccount(storedSubjectsMap, accountKey, subjects) {
+  const nextMap = storedSubjectsMap && typeof storedSubjectsMap === "object" ? { ...storedSubjectsMap } : {};
+  const fullSubjects = createPersistableSubjects(subjects);
+  const fallbackSubjects = createQuotaFallbackSubjects(subjects);
+  try {
+    nextMap[accountKey] = fullSubjects;
+    saveStoredSubjectsMap(nextMap);
+    return "full";
+  } catch (primaryError) {
+    try {
+      nextMap[accountKey] = fallbackSubjects;
+      saveStoredSubjectsMap(nextMap);
+      return "fallback";
+    } catch (fallbackError) {
+      try {
+        saveStoredSubjectsMap({
+          [accountKey]: fallbackSubjects
+        });
+        return "pruned-fallback";
+      } catch (prunedFallbackError) {
+        console.error("Subject store quota fallback failed.", prunedFallbackError);
+        return "failed";
+      }
+    }
+  }
+}
+
 function hydrateStoredSubject(subject, index) {
-  const resolvedSubjectId = String(subject?.id || subjectTemplateSeed[index]?.id || "");
+  const subjectSeedEntry = resolveSubjectSeedEntry(subject, index);
+  const resolvedSubjectId = String(subject?.id || subjectSeedEntry?.id || "");
   return {
-    ...structuredClone(subjectTemplateSeed[index] || {}),
+    ...structuredClone(subjectSeedEntry || {}),
     ...subject,
     documents: Array.isArray(subject.documents) ? subject.documents.map(normaliseDocument) : [],
     assessments: Array.isArray(subject.assessments) ? subject.assessments.map(normaliseAssessment) : [],
@@ -3560,163 +5636,428 @@ function hydrateStoredSubject(subject, index) {
       ? subject.savedRevisionTests.map(normaliseSavedRevisionTest)
       : [],
     spelling: normaliseSpellingState(subject.spelling, resolvedSubjectId),
+    writing: normaliseWritingState(subject.writing, resolvedSubjectId),
     practice: Array.isArray(subject.practice)
       ? subject.practice
-      : structuredClone(subjectTemplateSeed[index]?.practice || [])
+      : structuredClone(subjectSeedEntry?.practice || [])
   };
 }
 
-function createDefaultSpellingAssessmentActivity() {
+function getLatestCollectionTimestamp(items, fieldNames = ["addedAt", "savedAt", "completedAt", "dueDate"]) {
+  return (Array.isArray(items) ? items : []).reduce((latest, item) => {
+    const rawValue = fieldNames.map((fieldName) => String(item?.[fieldName] || "").trim()).find(Boolean);
+    if (!rawValue) {
+      return latest;
+    }
+    const timestamp = new Date(rawValue).getTime();
+    return Number.isFinite(timestamp) ? Math.max(latest, timestamp) : latest;
+  }, 0);
+}
+
+function getSubjectSnapshotPriority(subject) {
+  const documents = Array.isArray(subject?.documents) ? subject.documents : [];
+  const assessments = Array.isArray(subject?.assessments) ? subject.assessments : [];
+  const watchItems = Array.isArray(subject?.watch) ? subject.watch : [];
+  const savedTests = Array.isArray(subject?.savedRevisionTests) ? subject.savedRevisionTests : [];
+
   return {
-    answers: SPELLING_ASSESSMENT_WORDS.reduce((accumulator, word) => {
-      accumulator[word] = "";
-      return accumulator;
-    }, {}),
-    checked: false,
-    completed: false,
-    results: [],
-    attempts: []
+    documents: documents.length,
+    pages: documents.reduce((total, documentRecord) => total + (Array.isArray(documentRecord?.pages) ? documentRecord.pages.length : 0), 0),
+    assessments: assessments.length,
+    watchItems: watchItems.length,
+    savedTests: savedTests.length,
+    studySections: documents.reduce((total, documentRecord) => total + (Array.isArray(documentRecord?.studySections) ? documentRecord.studySections.length : 0), 0),
+    latestActivity: Math.max(
+      getLatestCollectionTimestamp(documents, ["addedAt"]),
+      getLatestCollectionTimestamp(assessments, ["dueDate"]),
+      getLatestCollectionTimestamp(watchItems, ["addedAt"]),
+      getLatestCollectionTimestamp(savedTests, ["savedAt"])
+    )
   };
 }
 
-function normaliseSpellingAssessmentResult(result) {
-  if (!result || typeof result !== "object" || Array.isArray(result)) {
+function compareSubjectSnapshotPriority(leftSubject, rightSubject) {
+  const left = getSubjectSnapshotPriority(leftSubject);
+  const right = getSubjectSnapshotPriority(rightSubject);
+  const fields = ["documents", "pages", "assessments", "watchItems", "savedTests", "studySections", "latestActivity"];
+  for (const field of fields) {
+    if (left[field] !== right[field]) {
+      return left[field] - right[field];
+    }
+  }
+  return 0;
+}
+
+function mergeSubjectCollection(preferredItems, fallbackItems, getKey, choosePreferred) {
+  const mergedMap = new Map();
+  [...(Array.isArray(fallbackItems) ? fallbackItems : []), ...(Array.isArray(preferredItems) ? preferredItems : [])].forEach((item, index) => {
+    const key = getKey(item, index);
+    if (!key) {
+      return;
+    }
+    const currentItem = mergedMap.get(key);
+    mergedMap.set(key, currentItem ? choosePreferred(currentItem, item) : item);
+  });
+  return [...mergedMap.values()];
+}
+
+function getDocumentMergeKey(documentRecord, index) {
+  const id = String(documentRecord?.id || "").trim();
+  if (id) {
+    return `id:${id}`;
+  }
+  const title = String(documentRecord?.title || "").trim().toLowerCase();
+  if (title) {
+    return `title:${title}`;
+  }
+  return `index:${index}`;
+}
+
+function choosePreferredDocumentRecord(currentRecord, candidateRecord) {
+  const currentPages = Array.isArray(currentRecord?.pages) ? currentRecord.pages.length : 0;
+  const candidatePages = Array.isArray(candidateRecord?.pages) ? candidateRecord.pages.length : 0;
+  if (candidatePages !== currentPages) {
+    return candidatePages > currentPages ? candidateRecord : currentRecord;
+  }
+
+  const currentSections = Array.isArray(currentRecord?.studySections) ? currentRecord.studySections.length : 0;
+  const candidateSections = Array.isArray(candidateRecord?.studySections) ? candidateRecord.studySections.length : 0;
+  if (candidateSections !== currentSections) {
+    return candidateSections > currentSections ? candidateRecord : currentRecord;
+  }
+
+  const currentContentLength = String(currentRecord?.content || "").length;
+  const candidateContentLength = String(candidateRecord?.content || "").length;
+  if (candidateContentLength !== currentContentLength) {
+    return candidateContentLength > currentContentLength ? candidateRecord : currentRecord;
+  }
+
+  const currentTimestamp = new Date(String(currentRecord?.addedAt || "")).getTime() || 0;
+  const candidateTimestamp = new Date(String(candidateRecord?.addedAt || "")).getTime() || 0;
+  return candidateTimestamp >= currentTimestamp ? candidateRecord : currentRecord;
+}
+
+function mergeDocumentsForSubject(preferredSubject, fallbackSubject) {
+  return mergeSubjectCollection(
+    preferredSubject?.documents,
+    fallbackSubject?.documents,
+    getDocumentMergeKey,
+    choosePreferredDocumentRecord
+  );
+}
+
+function mergeAssessmentsForSubject(preferredSubject, fallbackSubject) {
+  return mergeSubjectCollection(
+    preferredSubject?.assessments,
+    fallbackSubject?.assessments,
+    (assessment, index) => {
+      const id = String(assessment?.id || "").trim();
+      if (id) {
+        return `id:${id}`;
+      }
+      const title = String(assessment?.title || assessment?.componentTask || "").trim().toLowerCase();
+      return title ? `title:${title}` : `index:${index}`;
+    },
+    (currentAssessment, candidateAssessment) => {
+      const currentLinks = Array.isArray(currentAssessment?.linkedDocumentIds) ? currentAssessment.linkedDocumentIds.length : 0;
+      const candidateLinks = Array.isArray(candidateAssessment?.linkedDocumentIds) ? candidateAssessment.linkedDocumentIds.length : 0;
+      if (candidateLinks !== currentLinks) {
+        return candidateLinks > currentLinks ? candidateAssessment : currentAssessment;
+      }
+      return String(candidateAssessment?.workNotes || "").length >= String(currentAssessment?.workNotes || "").length
+        ? candidateAssessment
+        : currentAssessment;
+    }
+  );
+}
+
+function mergeWatchItemsForSubject(preferredSubject, fallbackSubject) {
+  return mergeSubjectCollection(
+    preferredSubject?.watch,
+    fallbackSubject?.watch,
+    (watchItem, index) => {
+      const id = String(watchItem?.id || "").trim();
+      if (id) {
+        return `id:${id}`;
+      }
+      const url = normaliseWatchUrl(watchItem?.url);
+      return url ? `url:${url}` : `index:${index}`;
+    },
+    (currentWatchItem, candidateWatchItem) =>
+      String(candidateWatchItem?.title || "").length >= String(currentWatchItem?.title || "").length
+        ? candidateWatchItem
+        : currentWatchItem
+  );
+}
+
+function mergeSavedRevisionTestsForSubject(preferredSubject, fallbackSubject) {
+  return mergeSubjectCollection(
+    preferredSubject?.savedRevisionTests,
+    fallbackSubject?.savedRevisionTests,
+    (savedTest, index) => {
+      const id = String(savedTest?.id || "").trim();
+      if (id) {
+        return `id:${id}`;
+      }
+      const title = String(savedTest?.title || "").trim().toLowerCase();
+      const savedAt = String(savedTest?.savedAt || "").trim();
+      return title || savedAt ? `saved:${title}:${savedAt}` : `index:${index}`;
+    },
+    (currentSavedTest, candidateSavedTest) =>
+      String(candidateSavedTest?.savedAt || "") >= String(currentSavedTest?.savedAt || "")
+        ? candidateSavedTest
+        : currentSavedTest
+  );
+}
+
+function mergeStoredSubjectSnapshots(primarySubject, secondarySubject, index) {
+  if (!primarySubject) {
+    return hydrateStoredSubject(secondarySubject, index);
+  }
+  if (!secondarySubject) {
+    return hydrateStoredSubject(primarySubject, index);
+  }
+
+  const preferredSubject = compareSubjectSnapshotPriority(primarySubject, secondarySubject) >= 0
+    ? primarySubject
+    : secondarySubject;
+  const fallbackSubject = preferredSubject === primarySubject ? secondarySubject : primarySubject;
+
+  return hydrateStoredSubject({
+    ...fallbackSubject,
+    ...preferredSubject,
+    documents: mergeDocumentsForSubject(preferredSubject, fallbackSubject),
+    assessments: mergeAssessmentsForSubject(preferredSubject, fallbackSubject),
+    watch: mergeWatchItemsForSubject(preferredSubject, fallbackSubject),
+    savedRevisionTests: mergeSavedRevisionTestsForSubject(preferredSubject, fallbackSubject),
+    hiddenWatchUrls: [...new Set([...(fallbackSubject.hiddenWatchUrls || []), ...(preferredSubject.hiddenWatchUrls || [])])]
+  }, index);
+}
+
+function mergeSubjectSources(primarySubjects, secondarySubjects) {
+  if (!Array.isArray(primarySubjects) && !Array.isArray(secondarySubjects)) {
     return null;
   }
-  const word = String(result.word || "").trim();
-  if (!word) {
-    return null;
-  }
-  const accuracy = Math.max(0, Math.min(100, Number(result.accuracy || 0) || 0));
+
+  const primaryMap = new Map();
+  const secondaryMap = new Map();
+  const orderedIds = [];
+
+  const addSubjectsToMap = (subjects, targetMap) => {
+    (Array.isArray(subjects) ? subjects : []).forEach((subject, index) => {
+      const hydratedSubject = hydrateStoredSubject(subject, index);
+      if (!hydratedSubject.id) {
+        return;
+      }
+      targetMap.set(hydratedSubject.id, hydratedSubject);
+      if (!orderedIds.includes(hydratedSubject.id)) {
+        orderedIds.push(hydratedSubject.id);
+      }
+    });
+  };
+
+  addSubjectsToMap(primarySubjects, primaryMap);
+  addSubjectsToMap(secondarySubjects, secondaryMap);
+
+  return orderedIds.map((subjectId, index) =>
+    mergeStoredSubjectSnapshots(primaryMap.get(subjectId), secondaryMap.get(subjectId), index)
+  );
+}
+
+function mergeAvailableSubjectSources(...sources) {
+  return sources.reduce((mergedSubjects, source) => {
+    if (!Array.isArray(source)) {
+      return mergedSubjects;
+    }
+    if (!Array.isArray(mergedSubjects)) {
+      return source;
+    }
+    return mergeSubjectSources(mergedSubjects, source);
+  }, null);
+}
+
+function createDefaultWritingSections() {
+  return Array.from({ length: WRITING_STUDIO_SECTION_COUNT }, (_, index) => ({
+    id: `section-${index + 1}`,
+    number: index + 1,
+    text: "",
+    hint: WRITING_STUDIO_SECTION_HINTS[index] || WRITING_STUDIO_SECTION_HINTS[WRITING_STUDIO_SECTION_HINTS.length - 1],
+    illustrationOptions: [],
+    selectedIllustrationId: "",
+    completed: false
+  }));
+}
+
+function createDefaultWritingState(subjectId = "") {
+  const enabled = subjectId === "english";
   return {
-    word,
-    response: String(result.response || ""),
-    accuracy,
-    correct: Boolean(result.correct) || accuracy === 100
+    enabled,
+    view: "begin",
+    storyTitle: "",
+    openingAnswers: {
+      who: "",
+      where: "",
+      want: ""
+    },
+    currentSectionIndex: 0,
+    bookPreviewIndex: 0,
+    returnToBookAfterIllustration: false,
+    illustrationStyle: null,
+    coachMessage: enabled ? "Answer the three quick questions to begin your story." : "",
+    activeSuggestion: null,
+    isGeneratingIllustrations: false,
+    illustrationError: "",
+    sections: createDefaultWritingSections()
   };
 }
 
-function normaliseSpellingAssessmentAttempt(attempt) {
-  if (!attempt || typeof attempt !== "object" || Array.isArray(attempt)) {
-    return null;
-  }
+function normaliseWritingState(writing, subjectId = "") {
+  const base = createDefaultWritingState(subjectId);
+  const next = writing && typeof writing === "object" && !Array.isArray(writing) ? writing : {};
+  const openingAnswers = next.openingAnswers && typeof next.openingAnswers === "object" ? next.openingAnswers : {};
+  const sections = Array.isArray(next.sections) ? next.sections : [];
+  const illustrationStyle = next.illustrationStyle && typeof next.illustrationStyle === "object"
+    ? {
+        styleId: String(next.illustrationStyle.styleId || ""),
+        label: String(next.illustrationStyle.label || ""),
+        brief: String(next.illustrationStyle.brief || ""),
+        prompt: String(next.illustrationStyle.prompt || ""),
+        imageUrl: String(next.illustrationStyle.imageUrl || ""),
+        sourceSectionId: String(next.illustrationStyle.sourceSectionId || "")
+      }
+    : null;
   return {
-    id: String(attempt.id || createId()),
-    savedAt: String(attempt.savedAt || new Date().toISOString()),
-    results: Array.isArray(attempt.results)
-      ? attempt.results.map(normaliseSpellingAssessmentResult).filter(Boolean)
-      : []
+    ...base,
+    ...next,
+    enabled: subjectId === "english",
+    view: ["begin", "write", "illustrate", "book"].includes(String(next.view || "")) ? String(next.view) : base.view,
+    storyTitle: String(next.storyTitle || ""),
+    openingAnswers: {
+      who: String(openingAnswers.who || ""),
+      where: String(openingAnswers.where || ""),
+      want: String(openingAnswers.want || "")
+    },
+    currentSectionIndex: Math.max(0, Math.min(WRITING_STUDIO_SECTION_COUNT - 1, Number(next.currentSectionIndex || 0) || 0)),
+    bookPreviewIndex: Math.max(0, Math.min(WRITING_STUDIO_SECTION_COUNT - 1, Number(next.bookPreviewIndex || 0) || 0)),
+    returnToBookAfterIllustration: Boolean(next.returnToBookAfterIllustration),
+    illustrationStyle: illustrationStyle && illustrationStyle.label && illustrationStyle.brief ? illustrationStyle : null,
+    coachMessage: String(next.coachMessage || base.coachMessage || ""),
+    isGeneratingIllustrations: Boolean(next.isGeneratingIllustrations),
+    illustrationError: String(next.illustrationError || ""),
+    activeSuggestion: next.activeSuggestion && typeof next.activeSuggestion === "object"
+      ? {
+          sectionId: String(next.activeSuggestion.sectionId || ""),
+          wrong: String(next.activeSuggestion.wrong || ""),
+          correct: String(next.activeSuggestion.correct || ""),
+          message: String(next.activeSuggestion.message || "")
+        }
+      : null,
+    sections: createDefaultWritingSections().map((section, index) => {
+      const incoming = sections[index] && typeof sections[index] === "object" ? sections[index] : {};
+      const illustrationOptions = Array.isArray(incoming.illustrationOptions)
+        ? incoming.illustrationOptions
+            .map((option, optionIndex) => ({
+              id: String(option?.id || `${section.id}-option-${optionIndex + 1}`),
+              prompt: String(option?.prompt || ""),
+              imageUrl: String(option?.imageUrl || ""),
+              label: String(option?.label || ""),
+              description: String(option?.description || ""),
+              styleId: String(option?.styleId || ""),
+              styleLabel: String(option?.styleLabel || ""),
+              styleBrief: String(option?.styleBrief || "")
+            }))
+            .filter((option) => option.prompt)
+        : [];
+      return {
+        ...section,
+        ...incoming,
+        id: section.id,
+        number: section.number,
+        text: String(incoming.text || ""),
+        hint: String(incoming.hint || section.hint),
+        illustrationOptions,
+        selectedIllustrationId: illustrationOptions.some((option) => option.id === String(incoming.selectedIllustrationId || ""))
+          ? String(incoming.selectedIllustrationId || "")
+          : "",
+        completed: Boolean(incoming.completed)
+      };
+    })
   };
-}
-
-function normaliseSpellingAssessmentActivity(activity) {
-  const next = activity && typeof activity === "object" && !Array.isArray(activity) ? activity : {};
-  const answers = SPELLING_ASSESSMENT_WORDS.reduce((accumulator, word) => {
-    accumulator[word] = String(next.answers?.[word] || "");
-    return accumulator;
-  }, {});
-  return {
-    answers,
-    checked: Boolean(next.checked),
-    completed: Boolean(next.completed),
-    results: Array.isArray(next.results) ? next.results.map(normaliseSpellingAssessmentResult).filter(Boolean) : [],
-    attempts: Array.isArray(next.attempts) ? next.attempts.map(normaliseSpellingAssessmentAttempt).filter(Boolean) : []
-  };
-}
-
-function normaliseSpellingWordHistory(history) {
-  return Array.isArray(history)
-    ? history
-        .map((entry) => {
-          if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-            return null;
-          }
-          const word = String(entry.word || "").trim();
-          if (!word) {
-            return null;
-          }
-          return {
-            word,
-            stageId: SPELLING_ACTIVITY_ORDER.includes(entry.stageId) ? entry.stageId : "jump",
-            at: String(entry.at || new Date().toISOString())
-          };
-        })
-        .filter(Boolean)
-    : [];
 }
 
 function createDefaultSpellingState(subjectId = "") {
-  const enabled = subjectId === "english";
+  const enabled = subjectId === "spelling";
   return {
     resetVersion: SPELLING_RESET_VERSION,
     enabled,
     activeUnitId: SPELLING_UNIT_SEED.id,
-    homeTab: "session",
-    selectedStageId: "jump",
     coachMessage: enabled
-      ? `${SPELLING_UNIT_SEED.horseName} says: start with stage 1, then use stage 5 to prove the spelling improved.`
+      ? "Start with the spelling challenge so the stable work is built from the words that still need attention."
       : "",
     preferences: {
       font: "lexend",
       spacing: "wide",
       tint: "cream"
     },
-    wordHistory: [],
-    activities: {
-      jump: createDefaultSpellingAssessmentActivity(),
-      tag: {
-        letter: "",
-        completed: false
-      },
-      sort: {
-        air: [],
-        are: [],
-        ear: [],
-        completed: false
-      },
-      family: {
-        slots: ["", "", "", ""],
-        completed: false
-      },
-      sentence: createDefaultSpellingAssessmentActivity()
-    }
+    focusSummary: [],
+    attemptPoolOffset: 0,
+    followUpWordIds: buildSpellingAttemptWordIds(),
+    diagnostic: {
+      currentIndex: 0,
+      currentInput: "",
+      responses: {},
+      completed: false
+    },
+    looksRight: {
+      answers: {},
+      currentWordId: "",
+      awaitingAdvanceWordId: "",
+      feedbackKind: "",
+      feedbackMessage: "",
+      checked: false,
+      completed: false
+    },
+    flashcards: {
+      version: SPELLING_FLASHCARDS_VERSION,
+      cards: {},
+      currentWordId: "",
+      completed: false
+    },
+    tenseTransfer: {
+      version: SPELLING_TENSE_TRANSFER_VERSION,
+      answers: {},
+      currentWordId: "",
+      completed: false
+    },
+    repeatCheck: {
+      currentIndex: 0,
+      currentInput: "",
+      responses: {},
+      completed: false
+    },
+    homeTab: "stable",
+    selectedStageId: "",
+    celebrationStageId: "",
+    sessionCompletionReady: false,
+    currentAttemptId: createId(),
+    sessionPreparedKey: "",
+    completedAttempts: [],
+    challenge: {
+      version: SPELLING_CHALLENGE_VERSION,
+      active: false,
+      weekKey: "",
+      currentIndex: 0,
+      items: [],
+      checked: false,
+      completed: false,
+      inputValue: "",
+      lastCompletedWeekKey: ""
+    },
+    paddockHorses: [],
+    paddockState: {},
+    lastUnlockedHorseId: "",
+    lastOverallScorePercent: 0
   };
-}
-
-function isSpellingStageUnlocked(spelling, stageId) {
-  if (stageId === "jump") {
-    return true;
-  }
-  if (stageId === "sentence") {
-    return Boolean(
-      spelling.activities.jump.completed &&
-        spelling.activities.tag.completed &&
-        spelling.activities.sort.completed &&
-        spelling.activities.family.completed
-    );
-  }
-  return Boolean(spelling.activities.jump.completed);
-}
-
-function getUnlockedSpellingStageIds(spelling) {
-  return SPELLING_ACTIVITY_ORDER.filter(
-    (stageId) => isSpellingStageUnlocked(spelling, stageId) || Boolean(spelling.activities[stageId]?.completed)
-  );
-}
-
-function getRecommendedSpellingStageId(spelling) {
-  const unlocked = getUnlockedSpellingStageIds(spelling);
-  return unlocked.find((stageId) => !spelling.activities[stageId]?.completed) || unlocked[unlocked.length - 1] || "jump";
-}
-
-function ensureSpellingSelectedStage(spelling) {
-  if (!SPELLING_ACTIVITY_ORDER.includes(spelling.selectedStageId)) {
-    spelling.selectedStageId = "jump";
-  }
-  if (!getUnlockedSpellingStageIds(spelling).includes(spelling.selectedStageId)) {
-    spelling.selectedStageId = getRecommendedSpellingStageId(spelling);
-  }
-  return spelling;
 }
 
 function normaliseSpellingState(spelling, subjectId = "") {
@@ -3724,74 +6065,306 @@ function normaliseSpellingState(spelling, subjectId = "") {
   const next = spelling && typeof spelling === "object" && !Array.isArray(spelling) ? spelling : {};
   const resetVersion = Math.max(0, Number(next.resetVersion || 0) || 0);
   if (resetVersion !== SPELLING_RESET_VERSION) {
-    return ensureSpellingSelectedStage({
+    return {
       ...base,
       preferences: {
         ...base.preferences,
         ...(next.preferences && typeof next.preferences === "object" ? next.preferences : {})
       }
-    });
+    };
   }
-  const activities = next.activities && typeof next.activities === "object" ? next.activities : {};
+  const diagnostic = next.diagnostic && typeof next.diagnostic === "object" ? next.diagnostic : {};
+  const looksRight = next.looksRight && typeof next.looksRight === "object" ? next.looksRight : {};
+  const flashcards = next.flashcards && typeof next.flashcards === "object" ? next.flashcards : {};
+  const tenseTransfer = next.tenseTransfer && typeof next.tenseTransfer === "object" ? next.tenseTransfer : {};
+  const repeatCheck = next.repeatCheck && typeof next.repeatCheck === "object" ? next.repeatCheck : {};
+  const challenge = next.challenge && typeof next.challenge === "object" ? next.challenge : {};
+  const isCurrentFlashcardsVersion = Number(flashcards.version || 0) === SPELLING_FLASHCARDS_VERSION;
+  const isCurrentTenseTransferVersion = Number(tenseTransfer.version || 0) === SPELLING_TENSE_TRANSFER_VERSION;
+  const isCurrentChallengeVersion = Number(challenge.version || 0) === SPELLING_CHALLENGE_VERSION;
+  const followUpWordIds = Array.isArray(next.followUpWordIds)
+    ? next.followUpWordIds
+        .map((value) => String(value || ""))
+        .filter((value) => SPELLING_INTERVENTION_LIBRARY[value])
+        .slice(0, SPELLING_UNIT_SEED.followUpWordCount)
+    : [];
 
-  return ensureSpellingSelectedStage({
+  const normalisedHomeTabRaw = String(next.homeTab || "");
+  const normalisedHomeTab = normalisedHomeTabRaw === "paddock"
+    ? "stable"
+    : normalisedHomeTabRaw === "review"
+      ? "progress"
+      : normalisedHomeTabRaw;
+  const normalisedPaddockHorses = normaliseSpellingPaddockHorseIds(next.paddockHorses || []);
+  const normalisedPaddockStateEntries = next.paddockState && typeof next.paddockState === "object" && !Array.isArray(next.paddockState)
+    ? Object.entries(next.paddockState)
+        .map(([horseId, entry], index) => {
+          const normalisedHorseId = normaliseSpellingPaddockHorseId(horseId);
+          if (!normalisedHorseId) {
+            return null;
+          }
+          return [
+            normalisedHorseId,
+            {
+              stallId: String(entry?.stallId || `s${index + 1}`),
+              roaming: Boolean(entry?.roaming),
+              left: Math.max(0, Number(entry?.left || 24) || 24),
+              top: Math.max(0, Number(entry?.top || 24) || 24)
+            }
+          ];
+        })
+        .filter(Boolean)
+    : [];
+
+  return {
     ...base,
     ...next,
     resetVersion: SPELLING_RESET_VERSION,
-    enabled: subjectId === "english",
+    enabled: subjectId === "spelling",
     activeUnitId: next.activeUnitId || base.activeUnitId,
-    homeTab: SPELLING_HOME_TABS.includes(next.homeTab) ? next.homeTab : base.homeTab,
-    selectedStageId: SPELLING_ACTIVITY_ORDER.includes(next.selectedStageId) ? next.selectedStageId : base.selectedStageId,
     coachMessage: String(next.coachMessage || base.coachMessage || ""),
     preferences: {
       ...base.preferences,
       ...(next.preferences && typeof next.preferences === "object" ? next.preferences : {})
     },
-    wordHistory: normaliseSpellingWordHistory(next.wordHistory),
-    activities: {
-      jump: normaliseSpellingAssessmentActivity(activities.jump),
-      tag: {
-        ...base.activities.tag,
-        ...(activities.tag && typeof activities.tag === "object" ? activities.tag : {}),
-        letter: String(activities.tag?.letter || "")
-      },
-      sort: {
-        ...base.activities.sort,
-        ...(activities.sort && typeof activities.sort === "object" ? activities.sort : {}),
-        air: Array.isArray(activities.sort?.air) ? activities.sort.air.map((value) => String(value || "")) : [],
-        are: Array.isArray(activities.sort?.are) ? activities.sort.are.map((value) => String(value || "")) : [],
-        ear: Array.isArray(activities.sort?.ear) ? activities.sort.ear.map((value) => String(value || "")) : []
-      },
-      family: {
-        ...base.activities.family,
-        ...(activities.family && typeof activities.family === "object" ? activities.family : {}),
-        slots: Array.isArray(activities.family?.slots)
-          ? activities.family.slots.slice(0, 4).map((value) => String(value || ""))
-          : [...base.activities.family.slots]
-      },
-      sentence: normaliseSpellingAssessmentActivity(activities.sentence)
-    }
-  });
+    focusSummary: Array.isArray(next.focusSummary)
+      ? next.focusSummary
+          .map((entry) => ({
+            id: String(entry?.id || ""),
+            count: Number(entry?.count || 0)
+          }))
+          .filter((entry) => entry.id && SPELLING_FOCUS_LABELS[entry.id] && entry.count > 0)
+      : [],
+    attemptPoolOffset: 0,
+    followUpWordIds: followUpWordIds.length ? followUpWordIds : buildSpellingAttemptWordIds(),
+    diagnostic: {
+      ...base.diagnostic,
+      ...diagnostic,
+      currentIndex: Math.min(
+        SPELLING_UNIT_SEED.diagnosticTargetCount,
+        Math.max(0, Number(diagnostic.currentIndex || 0))
+      ),
+      currentInput: String(diagnostic.currentInput || ""),
+      responses: diagnostic.responses && typeof diagnostic.responses === "object" && !Array.isArray(diagnostic.responses)
+        ? Object.fromEntries(
+            Object.entries(diagnostic.responses).map(([wordId, entry]) => [
+              wordId,
+              {
+                attempt: String(entry?.attempt || ""),
+                correct: Boolean(entry?.correct)
+              }
+            ])
+          )
+        : {},
+      completed: Boolean(diagnostic.completed)
+    },
+    looksRight: {
+      ...base.looksRight,
+      ...looksRight,
+      answers: looksRight.answers && typeof looksRight.answers === "object" && !Array.isArray(looksRight.answers)
+        ? Object.fromEntries(
+            Object.entries(looksRight.answers).map(([wordId, value]) => [wordId, String(value || "")])
+          )
+        : {},
+      currentWordId: String(looksRight.currentWordId || ""),
+      awaitingAdvanceWordId: String(looksRight.awaitingAdvanceWordId || ""),
+      feedbackKind: ["correct", "incorrect"].includes(String(looksRight.feedbackKind || "")) ? String(looksRight.feedbackKind) : "",
+      feedbackMessage: String(looksRight.feedbackMessage || ""),
+      checked: Boolean(looksRight.checked),
+      completed: Boolean(looksRight.completed)
+    },
+    flashcards: {
+      ...base.flashcards,
+      ...(isCurrentFlashcardsVersion ? flashcards : {}),
+      version: SPELLING_FLASHCARDS_VERSION,
+      cards: isCurrentFlashcardsVersion && flashcards.cards && typeof flashcards.cards === "object" && !Array.isArray(flashcards.cards)
+        ? Object.fromEntries(
+            Object.entries(flashcards.cards).map(([wordId, entry]) => [
+              wordId,
+              {
+                exposureIndex: Math.max(0, Math.min(getSpellingFlashcardExposureLimit(wordId), Number(entry?.exposureIndex || 0) || 0)),
+                isShowingSentence: Boolean(entry?.isShowingSentence),
+                typedValue: String(entry?.typedValue || ""),
+                checked: Boolean(entry?.checked),
+                completed: Boolean(entry?.completed),
+                awaitingAdvance: Boolean(entry?.awaitingAdvance),
+                feedbackKind: ["correct", "incorrect"].includes(String(entry?.feedbackKind || "")) ? String(entry.feedbackKind) : "",
+                feedbackMessage: String(entry?.feedbackMessage || "")
+              }
+            ])
+          )
+        : {},
+      currentWordId: isCurrentFlashcardsVersion ? String(flashcards.currentWordId || "") : "",
+      completed: isCurrentFlashcardsVersion ? Boolean(flashcards.completed) : false
+    },
+    tenseTransfer: {
+      ...base.tenseTransfer,
+      ...(isCurrentTenseTransferVersion ? tenseTransfer : {}),
+      version: SPELLING_TENSE_TRANSFER_VERSION,
+      answers: isCurrentTenseTransferVersion && tenseTransfer.answers && typeof tenseTransfer.answers === "object" && !Array.isArray(tenseTransfer.answers)
+        ? Object.fromEntries(
+            Object.entries(tenseTransfer.answers).map(([wordId, entry]) => [
+              wordId,
+              {
+                selectedTense: ["past", "present", "future"].includes(String(entry?.selectedTense || "")) ? String(entry.selectedTense) : "",
+                checked: Boolean(entry?.checked),
+                completed: Boolean(entry?.completed),
+                awaitingAdvance: Boolean(entry?.awaitingAdvance),
+                feedbackKind: ["correct", "incorrect"].includes(String(entry?.feedbackKind || "")) ? String(entry.feedbackKind) : "",
+                feedbackMessage: String(entry?.feedbackMessage || ""),
+                lastCheckedAt: String(entry?.lastCheckedAt || "")
+              }
+            ])
+          )
+        : {},
+      currentWordId: isCurrentTenseTransferVersion ? String(tenseTransfer.currentWordId || "") : "",
+      completed: isCurrentTenseTransferVersion ? Boolean(tenseTransfer.completed) : false
+    },
+    repeatCheck: {
+      ...base.repeatCheck,
+      ...repeatCheck,
+      currentIndex: Math.min(
+        SPELLING_UNIT_SEED.diagnosticTargetCount,
+        Math.max(0, Number(repeatCheck.currentIndex || 0))
+      ),
+      currentInput: String(repeatCheck.currentInput || ""),
+      responses: repeatCheck.responses && typeof repeatCheck.responses === "object" && !Array.isArray(repeatCheck.responses)
+        ? Object.fromEntries(
+            Object.entries(repeatCheck.responses).map(([wordId, entry]) => [
+              wordId,
+              {
+                attempt: String(entry?.attempt || ""),
+                correct: Boolean(entry?.correct)
+              }
+            ])
+          )
+        : {},
+      completed: Boolean(repeatCheck.completed)
+    },
+    homeTab: SPELLING_HOME_TABS.includes(normalisedHomeTab) ? normalisedHomeTab : "stable",
+    selectedStageId: SPELLING_STAGE_ORDER.includes(String(next.selectedStageId || "")) ? String(next.selectedStageId || "") : "",
+    celebrationStageId: SPELLING_STAGE_ORDER.includes(String(next.celebrationStageId || "")) ? String(next.celebrationStageId || "") : "",
+    sessionCompletionReady: Boolean(next.sessionCompletionReady),
+    currentAttemptId: String(next.currentAttemptId || base.currentAttemptId || createId()),
+    sessionPreparedKey: String(next.sessionPreparedKey || ""),
+    completedAttempts: Array.isArray(next.completedAttempts)
+      ? next.completedAttempts
+          .map((entry) => ({
+            attemptId: String(entry?.attemptId || ""),
+            instanceNumber: Math.max(1, Number(entry?.instanceNumber || 0) || 0),
+            weekKey: String(entry?.weekKey || ""),
+            completedAt: String(entry?.completedAt || ""),
+            stageOneCorrect: Math.max(0, Number(entry?.stageOneCorrect || 0) || 0),
+            stageFiveCorrect: Math.max(0, Number(entry?.stageFiveCorrect || 0) || 0),
+            overallScorePercent: Math.max(0, Math.min(100, Number(entry?.overallScorePercent || 0) || 0)),
+            wordIds: Array.isArray(entry?.wordIds)
+              ? entry.wordIds.map((value) => String(value || "")).filter((value) => SPELLING_INTERVENTION_LIBRARY[value]).slice(0, SPELLING_UNIT_SEED.followUpWordCount)
+              : [],
+            wordResults: Array.isArray(entry?.wordResults)
+              ? entry.wordResults
+                  .map((result) => ({
+                    wordId: String(result?.wordId || ""),
+                    word: String(result?.word || ""),
+                    stageOneAttempt: String(result?.stageOneAttempt || ""),
+                    stageOneAccuracy: Math.max(0, Math.min(100, Number(result?.stageOneAccuracy || 0) || 0)),
+                    stageFiveAttempt: String(result?.stageFiveAttempt || ""),
+                    stageFiveAccuracy: Math.max(0, Math.min(100, Number(result?.stageFiveAccuracy || 0) || 0))
+                  }))
+                  .filter((result) => result.wordId && result.word)
+              : []
+          }))
+          .filter((entry) => entry.attemptId && entry.weekKey && entry.wordIds.length)
+      : [],
+    challenge: {
+      ...base.challenge,
+      ...(isCurrentChallengeVersion ? challenge : {}),
+      version: SPELLING_CHALLENGE_VERSION,
+      active: isCurrentChallengeVersion ? Boolean(challenge.active) : false,
+      weekKey: isCurrentChallengeVersion ? String(challenge.weekKey || "") : "",
+      currentIndex: isCurrentChallengeVersion ? Math.max(0, Number(challenge.currentIndex || 0)) : 0,
+      items: isCurrentChallengeVersion && Array.isArray(challenge.items)
+        ? challenge.items
+            .map((item, index) => ({
+              id: String(item?.id || `challenge-item-${index + 1}`),
+              mode: SPELLING_CHALLENGE_MODE_ORDER.includes(String(item?.mode || "")) ? String(item.mode) : SPELLING_CHALLENGE_MODE_ORDER[index % SPELLING_CHALLENGE_MODE_ORDER.length],
+              wordId: String(item?.wordId || ""),
+              familyWord: String(item?.familyWord || ""),
+              missingIndex: Math.max(0, Number(item?.missingIndex || 0))
+            }))
+            .filter((item) => SPELLING_INTERVENTION_LIBRARY[item.wordId])
+        : [],
+      checked: isCurrentChallengeVersion ? Boolean(challenge.checked) : false,
+      completed: isCurrentChallengeVersion ? Boolean(challenge.completed) : false,
+      inputValue: isCurrentChallengeVersion ? String(challenge.inputValue || "") : "",
+      lastCompletedWeekKey: isCurrentChallengeVersion ? String(challenge.lastCompletedWeekKey || "") : ""
+    },
+    paddockHorses: normalisedPaddockHorses,
+    paddockState: Object.fromEntries(normalisedPaddockStateEntries),
+    lastUnlockedHorseId: normaliseSpellingPaddockHorseId(next.lastUnlockedHorseId || ""),
+    lastOverallScorePercent: Math.max(0, Math.min(100, Number(next.lastOverallScorePercent || 0) || 0))
+  };
 }
 
 function getSubjectSpellingState(subject) {
   if (!subject) {
     return createDefaultSpellingState("");
   }
-  subject.spelling = ensureSpellingSelectedStage(normaliseSpellingState(subject.spelling, subject.id));
+  subject.spelling = normaliseSpellingState(subject.spelling, subject.id);
+  reconcileSpellingPaddockHorses(subject.spelling);
   return subject.spelling;
 }
 
+function getSubjectWritingState(subject) {
+  if (!subject) {
+    return createDefaultWritingState("");
+  }
+  subject.writing = normaliseWritingState(subject.writing, subject.id);
+  return subject.writing;
+}
+
+function normalizeSpellingAttempt(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z]/g, "");
+}
+
+function calculateSpellingWordAccuracy(expectedWord, attemptWord) {
+  const expected = normalizeSpellingAttempt(expectedWord);
+  const attempt = normalizeSpellingAttempt(attemptWord);
+  if (!expected) {
+    return 0;
+  }
+  let correctLetters = 0;
+  for (let index = 0; index < expected.length; index += 1) {
+    if (expected[index] === attempt[index]) {
+      correctLetters += 1;
+    }
+  }
+  return Math.round((correctLetters / expected.length) * 100);
+}
+
+function getSpellingStageCompletionMap(subject) {
+  const spelling = getSubjectSpellingState(subject);
+  return {
+    diagnostic: Boolean(spelling.diagnostic.completed),
+    "looks-right": Boolean(spelling.looksRight.completed),
+    "word-families": Boolean(spelling.flashcards.completed),
+    "tense-transfer": Boolean(spelling.tenseTransfer.completed),
+    "repeat-check": Boolean(spelling.repeatCheck.completed)
+  };
+}
+
 function getSpellingTotalActivityCount(subject) {
-  return getSubjectSpellingState(subject).enabled ? SPELLING_ACTIVITY_ORDER.length : 0;
+  return getSubjectSpellingState(subject).enabled ? SPELLING_STAGE_ORDER.length : 0;
 }
 
 function getSpellingCompletedActivityCount(subject) {
-  const spelling = getSubjectSpellingState(subject);
-  if (!spelling.enabled) {
+  const completionMap = getSpellingStageCompletionMap(subject);
+  if (!getSubjectSpellingState(subject).enabled) {
     return 0;
   }
-  return SPELLING_ACTIVITY_ORDER.filter((stageId) => Boolean(spelling.activities[stageId]?.completed)).length;
+  return Object.values(completionMap).filter(Boolean).length;
 }
 
 function getSpellingPendingActivityCount(subject) {
@@ -3799,272 +6372,1898 @@ function getSpellingPendingActivityCount(subject) {
   return Math.max(0, total - getSpellingCompletedActivityCount(subject));
 }
 
+function isSpellingAttemptComplete(subject) {
+  return SPELLING_STAGE_ORDER.every((stageId) => getSpellingStageCompletionMap(subject)[stageId]);
+}
+
 function getSpellingMasteryRatio(subject) {
   const total = getSpellingTotalActivityCount(subject);
   return total ? getSpellingCompletedActivityCount(subject) / total : 0;
 }
 
+function getSpellingStageScoreSummary(spelling) {
+  const diagnosticWords = getSpellingAttemptWords(spelling);
+  const followUpWords = getSpellingFollowUpWords(spelling);
+  const flashcardWords = getSpellingFlashcardWords(spelling);
+
+  const diagnosticCorrect = diagnosticWords.filter((wordEntry) => spelling.diagnostic.responses[wordEntry.id]?.correct).length;
+  const looksRightCorrect = followUpWords.filter((entry) => spelling.looksRight.answers[entry.id] === entry.word).length;
+  const flashcardCorrect = flashcardWords.filter((entry) => ensureSpellingFlashcardCard(spelling, entry.id).feedbackKind === "correct").length;
+  const tenseCorrect = followUpWords.filter((entry) => ensureSpellingTenseAnswer(spelling, entry.id).feedbackKind === "correct").length;
+  const repeatCorrect = diagnosticWords.filter((wordEntry) => spelling.repeatCheck.responses[wordEntry.id]?.correct).length;
+
+  return {
+    diagnostic: {
+      label: "Stage 1",
+      correct: diagnosticCorrect,
+      total: diagnosticWords.length
+    },
+    "looks-right": {
+      label: "Stage 2",
+      correct: looksRightCorrect,
+      total: followUpWords.length
+    },
+    "word-families": {
+      label: "Stage 3",
+      correct: flashcardCorrect,
+      total: flashcardWords.length
+    },
+    "tense-transfer": {
+      label: "Stage 4",
+      correct: tenseCorrect,
+      total: followUpWords.length
+    },
+    "repeat-check": {
+      label: "Stage 5",
+      correct: repeatCorrect,
+      total: diagnosticWords.length
+    }
+  };
+}
+
+function getSpellingStageScorePercent(spelling, stageId) {
+  const summary = getSpellingStageScoreSummary(spelling)[stageId];
+  if (!summary || !summary.total) {
+    return 0;
+  }
+  return Math.round((summary.correct / summary.total) * 100);
+}
+
+function getSpellingOverallScorePercent(spelling) {
+  const summaries = Object.values(getSpellingStageScoreSummary(spelling));
+  const totalCorrect = summaries.reduce((sum, stage) => sum + stage.correct, 0);
+  const totalItems = summaries.reduce((sum, stage) => sum + stage.total, 0);
+  return totalItems ? Math.round((totalCorrect / totalItems) * 100) : 0;
+}
+
+function unlockSpellingPaddockHorse(spelling) {
+  spelling.paddockHorses = normaliseSpellingPaddockHorseIds(spelling.paddockHorses || []);
+  const earnedHorseCount = Array.isArray(spelling.paddockHorses) ? spelling.paddockHorses.length : 0;
+  const nextHorse = SPELLING_PADDOCK_HORSES[earnedHorseCount];
+  if (!nextHorse) {
+    return "";
+  }
+  spelling.paddockHorses = [...(spelling.paddockHorses || []), nextHorse.id];
+  ensureSpellingPaddockState(spelling);
+  spelling.lastUnlockedHorseId = nextHorse.id;
+  return nextHorse.id;
+}
+
+function getSpellingPaddockHorseMeta(horseId = "") {
+  return SPELLING_PADDOCK_HORSE_BY_ID[String(horseId || "")] || null;
+}
+
+function normaliseSpellingPaddockHorseId(horseId = "") {
+  const rawHorseId = String(horseId || "").trim().toLowerCase();
+  if (!rawHorseId) {
+    return "";
+  }
+  return SPELLING_PADDOCK_HORSE_ID_ALIASES[rawHorseId] || "";
+}
+
+function normaliseSpellingPaddockHorseIds(horseIds = []) {
+  const seenHorseIds = new Set();
+  return (Array.isArray(horseIds) ? horseIds : [])
+    .map((horseId) => normaliseSpellingPaddockHorseId(horseId))
+    .filter((horseId) => {
+      if (!horseId || seenHorseIds.has(horseId)) {
+        return false;
+      }
+      seenHorseIds.add(horseId);
+      return true;
+    })
+    .slice(0, SPELLING_PADDOCK_HORSES.length);
+}
+
+function getSpellingVisibleHorseCount(spelling) {
+  return getSpellingOwnedHorseMeta(spelling).length;
+}
+
+function getSpellingHorseRankLabel(horseCount = 0) {
+  if (horseCount <= 0) {
+    return SPELLING_HORSE_RANKS[0];
+  }
+  const rankIndex = Math.min(
+    SPELLING_HORSE_RANKS.length - 1,
+    Math.floor((Math.max(0, horseCount - 1)) / 4)
+  );
+  return SPELLING_HORSE_RANKS[rankIndex];
+}
+
+function buildDefaultSpellingPaddockEntry(index = 0) {
+  return {
+    stallId: `s${index + 1}`,
+    roaming: false,
+    left: 28 + (index % 4) * 34,
+    top: 140 + Math.floor(index / 4) * 18
+  };
+}
+
+function ensureSpellingPaddockState(spelling) {
+  spelling.paddockHorses = normaliseSpellingPaddockHorseIds(spelling.paddockHorses || []);
+  if (!spelling.paddockState || typeof spelling.paddockState !== "object" || Array.isArray(spelling.paddockState)) {
+    spelling.paddockState = {};
+  }
+  const nextPaddockState = {};
+  (spelling.paddockHorses || []).forEach((horseId, index) => {
+    const normalizedHorseId = String(horseId || "");
+    if (!normalizedHorseId) {
+      return;
+    }
+    const existingEntry = spelling.paddockState[normalizedHorseId];
+    nextPaddockState[normalizedHorseId] = {
+      ...buildDefaultSpellingPaddockEntry(index),
+      ...(existingEntry && typeof existingEntry === "object" ? existingEntry : {}),
+      stallId: String(existingEntry?.stallId || `s${index + 1}`)
+    };
+  });
+  spelling.paddockState = nextPaddockState;
+  return spelling.paddockState;
+}
+
+function reconcileSpellingPaddockHorses(spelling) {
+  const completedAttemptCount = Math.min(
+    SPELLING_PADDOCK_HORSES.length,
+    Array.isArray(spelling?.completedAttempts) ? spelling.completedAttempts.length : 0
+  );
+  const earnedHorseIds = SPELLING_PADDOCK_HORSES.slice(0, completedAttemptCount).map((horse) => horse.id);
+  const ownedHorseIds = normaliseSpellingPaddockHorseIds(spelling?.paddockHorses || []);
+  spelling.paddockHorses = ownedHorseIds.length < earnedHorseIds.length ? earnedHorseIds : ownedHorseIds;
+  ensureSpellingPaddockState(spelling);
+  if (!getSpellingPaddockHorseMeta(spelling.lastUnlockedHorseId || "") && spelling.paddockHorses.length) {
+    spelling.lastUnlockedHorseId = spelling.paddockHorses[spelling.paddockHorses.length - 1];
+  }
+  return spelling.paddockHorses;
+}
+
+function clampSpellingPaddockEntry(entry, stageWidth, stageHeight, horseWidth = 170, horseHeight = 132) {
+  const safeStageWidth = Math.max(horseWidth + 24, Number(stageWidth || 0) || 0);
+  const safeStageHeight = Math.max(horseHeight + 96, Number(stageHeight || 0) || 0);
+  return {
+    ...entry,
+    left: Math.max(8, Math.min(Math.round(Number(entry?.left || 0) || 0), safeStageWidth - horseWidth - 8)),
+    top: Math.max(76, Math.min(Math.round(Number(entry?.top || 0) || 0), safeStageHeight - horseHeight - 8))
+  };
+}
+
+function getSpellingOwnedHorseMeta(spelling) {
+  ensureSpellingPaddockState(spelling);
+  return (spelling.paddockHorses || [])
+    .map((horseId, index) => {
+      const meta = getSpellingPaddockHorseMeta(horseId);
+      if (!meta) {
+        return null;
+      }
+      const stateEntry = spelling.paddockState[horseId] || buildDefaultSpellingPaddockEntry(index);
+      return {
+        ...meta,
+        number: index + 1,
+        rank: getSpellingHorseRankLabel(index + 1),
+        state: stateEntry
+      };
+    })
+    .filter(Boolean);
+}
+
 function getSpellingStageId(subject) {
-  const completed = getSpellingCompletedActivityCount(subject);
-  return SPELLING_STAGE_ORDER[Math.min(completed, SPELLING_STAGE_ORDER.length - 1)] || SPELLING_STAGE_ORDER[0];
+  const completionMap = getSpellingStageCompletionMap(subject);
+  if (!completionMap.diagnostic) {
+    return "diagnostic";
+  }
+  const firstMiddleIncomplete = SPELLING_MIDDLE_STAGE_IDS.find((stageId) => !completionMap[stageId]);
+  if (firstMiddleIncomplete) {
+    return firstMiddleIncomplete;
+  }
+  if (!completionMap["repeat-check"]) {
+    return "repeat-check";
+  }
+  return "repeat-check";
+}
+
+function getSpellingNextStageAfterCelebration(subject, celebrationStageId = "") {
+  const normalizedStageId = String(celebrationStageId || "");
+  const completionMap = getSpellingStageCompletionMap(subject);
+  if (normalizedStageId === "diagnostic") {
+    return SPELLING_MIDDLE_STAGE_IDS.find((stageId) => !completionMap[stageId]) || SPELLING_MIDDLE_STAGE_IDS[0] || "repeat-check";
+  }
+  if (SPELLING_MIDDLE_STAGE_IDS.includes(normalizedStageId)) {
+    return SPELLING_MIDDLE_STAGE_IDS.find((stageId) => !completionMap[stageId]) || "repeat-check";
+  }
+  return "repeat-check";
+}
+
+function getSpellingStageActionLabel(stageId) {
+  return SPELLING_STAGE_LABELS[String(stageId || "")] || "next stage";
+}
+
+function canOpenSpellingStage(subject, stageId) {
+  const normalizedStageId = String(stageId || "");
+  if (!SPELLING_STAGE_ORDER.includes(normalizedStageId)) {
+    return false;
+  }
+  const completionMap = getSpellingStageCompletionMap(subject);
+  if (normalizedStageId === "diagnostic") {
+    return true;
+  }
+  if (SPELLING_MIDDLE_STAGE_IDS.includes(normalizedStageId)) {
+    return completionMap.diagnostic;
+  }
+  if (normalizedStageId === "repeat-check") {
+    return completionMap.diagnostic && SPELLING_MIDDLE_STAGE_IDS.every((candidateStageId) => completionMap[candidateStageId]);
+  }
+  return false;
+}
+
+function getSpellingDiagnosticWordCount(spelling) {
+  return getSpellingAttemptWords(spelling).length || SPELLING_UNIT_SEED.diagnosticTargetCount;
+}
+
+function shuffleSpellingWordIds(wordIds = []) {
+  const shuffled = [...wordIds];
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+  }
+  return shuffled;
+}
+
+function buildSpellingAttemptWordIds(completedAttempts = [], currentWordIds = []) {
+  const wordIds = [...SPELLING_DEFAULT_FOLLOW_UP_WORD_IDS];
+  if (!wordIds.length) {
+    return [];
+  }
+  const usageCounts = new Map(wordIds.map((wordId) => [wordId, 0]));
+  (Array.isArray(completedAttempts) ? completedAttempts : []).forEach((attempt) => {
+    (attempt?.wordIds || []).forEach((wordId) => {
+      const normalizedWordId = String(wordId || "");
+      if (!usageCounts.has(normalizedWordId)) {
+        return;
+      }
+      usageCounts.set(normalizedWordId, (usageCounts.get(normalizedWordId) || 0) + 1);
+    });
+  });
+  const currentSet = new Set(
+    (Array.isArray(currentWordIds) ? currentWordIds : [])
+      .map((value) => String(value || ""))
+      .filter((value) => SPELLING_INTERVENTION_LIBRARY[value])
+  );
+  const buckets = new Map();
+  wordIds.forEach((wordId) => {
+    const usageCount = usageCounts.get(wordId) || 0;
+    if (!buckets.has(usageCount)) {
+      buckets.set(usageCount, []);
+    }
+    buckets.get(usageCount).push(wordId);
+  });
+  const nextPool = [...buckets.keys()]
+    .sort((left, right) => left - right)
+    .flatMap((usageCount) => {
+      const bucket = buckets.get(usageCount) || [];
+      const unusedCurrentWords = shuffleSpellingWordIds(bucket.filter((wordId) => !currentSet.has(wordId)));
+      const currentWords = shuffleSpellingWordIds(bucket.filter((wordId) => currentSet.has(wordId)));
+      return [...unusedCurrentWords, ...currentWords];
+    });
+  return nextPool.slice(0, Math.min(SPELLING_UNIT_SEED.followUpWordCount, wordIds.length));
+}
+
+function assignRandomSpellingAttemptWordIds(spelling, currentWordIds = []) {
+  spelling.attemptPoolOffset = 0;
+  spelling.followUpWordIds = buildSpellingAttemptWordIds(spelling.completedAttempts || [], currentWordIds);
+}
+
+function getSpellingAttemptWords(spelling) {
+  const attemptWordIds = Array.isArray(spelling.followUpWordIds) && spelling.followUpWordIds.length
+    ? spelling.followUpWordIds
+    : buildSpellingAttemptWordIds();
+  return attemptWordIds
+    .map((wordId) =>
+      SPELLING_DIAGNOSTIC_WORDS.find((entry) => entry.interventionId === wordId || normalizeSpellingAttempt(entry.word) === normalizeSpellingAttempt(wordId))
+        || SPELLING_DIAGNOSTIC_WORDS.find((entry) => entry.interventionId === wordId)
+    )
+    .filter(Boolean)
+    .slice(0, SPELLING_UNIT_SEED.diagnosticTargetCount);
+}
+
+function buildSpellingChallengeItemsFromAttempts(completedAttempts = []) {
+  return completedAttempts
+    .slice(-4)
+    .flatMap((attempt, attemptIndex) =>
+      (attempt.wordIds || []).map((wordId, wordIndex) => {
+        const entry = SPELLING_INTERVENTION_LIBRARY[wordId];
+        if (!entry) {
+          return null;
+        }
+        const mode = SPELLING_CHALLENGE_MODE_ORDER[(attemptIndex * SPELLING_UNIT_SEED.followUpWordCount + wordIndex) % SPELLING_CHALLENGE_MODE_ORDER.length];
+        const familyWord = entry.familyWords[wordIndex % Math.max(1, entry.familyWords.length)] || entry.word;
+        const missingIndex = Math.max(1, Math.min(entry.word.length - 2, (attemptIndex + wordIndex) % Math.max(2, entry.word.length - 1)));
+        return {
+          id: `${attempt.attemptId}:${wordId}:${wordIndex}`,
+          mode,
+          wordId,
+          familyWord,
+          missingIndex
+        };
+      })
+    )
+    .filter(Boolean);
+}
+
+function resetSpellingProgressForNewAttempt(spelling) {
+  assignRandomSpellingAttemptWordIds(spelling, spelling.followUpWordIds);
+  spelling.focusSummary = [];
+  spelling.diagnostic = {
+    currentIndex: 0,
+    currentInput: "",
+    responses: {},
+    completed: false
+  };
+  spelling.looksRight = {
+    answers: {},
+    currentWordId: "",
+    awaitingAdvanceWordId: "",
+    feedbackKind: "",
+    feedbackMessage: "",
+    checked: false,
+    completed: false
+  };
+  spelling.flashcards = {
+    version: SPELLING_FLASHCARDS_VERSION,
+    cards: {},
+    currentWordId: "",
+    completed: false
+  };
+  spelling.tenseTransfer = {
+    version: SPELLING_TENSE_TRANSFER_VERSION,
+    answers: {},
+    currentWordId: "",
+    completed: false
+  };
+  spelling.repeatCheck = {
+    currentIndex: 0,
+    currentInput: "",
+    responses: {},
+    completed: false
+  };
+  spelling.homeTab = "stable";
+  spelling.selectedStageId = "";
+  spelling.celebrationStageId = "";
+  spelling.sessionCompletionReady = false;
+  spelling.currentAttemptId = createId();
+  spelling.challenge.active = false;
+  spelling.challenge.version = SPELLING_CHALLENGE_VERSION;
+  spelling.challenge.currentIndex = 0;
+  spelling.challenge.items = [];
+  spelling.challenge.checked = false;
+  spelling.challenge.completed = false;
+  spelling.challenge.inputValue = "";
+  spelling.lastUnlockedHorseId = "";
+  spelling.coachMessage = "Start with the spelling challenge so the stable work is built from the ten words for this attempt.";
+}
+
+function getWeeklyCompletedSpellingAttempts(spelling, weekKey = currentWeekKey()) {
+  return (spelling.completedAttempts || []).filter((entry) => entry.weekKey === weekKey);
+}
+
+function ensureSpellingSessionState(subject) {
+  const spelling = getSubjectSpellingState(subject);
+  if (!spelling.enabled) {
+    return;
+  }
+
+  const attemptComplete = isSpellingAttemptComplete(subject);
+
+  // Migrate older completed sessions into the final summary state so the
+  // session can always be closed from Stage 5, even if the legacy flag was missed.
+  if (attemptComplete && spelling.repeatCheck.completed && spelling.homeTab === "session" && !spelling.celebrationStageId) {
+    spelling.selectedStageId = "repeat-check";
+    spelling.sessionCompletionReady = true;
+  }
+
+  if (spelling.sessionPreparedKey === currentSpellingSessionKey) {
+    return;
+  }
+
+  spelling.sessionPreparedKey = currentSpellingSessionKey;
+  const weekKey = currentWeekKey();
+  const weeklyAttempts = getWeeklyCompletedSpellingAttempts(spelling, weekKey);
+
+  if (weeklyAttempts.length >= 4 && spelling.challenge.lastCompletedWeekKey !== weekKey) {
+    spelling.challenge = {
+      version: SPELLING_CHALLENGE_VERSION,
+      active: true,
+      weekKey,
+      currentIndex: 0,
+      items: buildSpellingChallengeItemsFromAttempts(weeklyAttempts),
+      checked: false,
+      completed: false,
+      inputValue: "",
+      lastCompletedWeekKey: spelling.challenge.lastCompletedWeekKey || ""
+    };
+  } else if (attemptComplete && weeklyAttempts.length < 4) {
+    spelling.coachMessage = spelling.coachMessage || "This spelling set is complete. Start the next set from the stable when you are ready.";
+  }
+}
+
+function getSpellingVisibleStageId(subject) {
+  const spelling = getSubjectSpellingState(subject);
+  const selectedStageId = String(spelling.selectedStageId || "");
+  if (selectedStageId && canOpenSpellingStage(subject, selectedStageId)) {
+    return selectedStageId;
+  }
+  return getSpellingStageId(subject);
+}
+
+function activateSpellingSession(subject) {
+  const spelling = getSubjectSpellingState(subject);
+  const attemptComplete = isSpellingAttemptComplete(subject);
+  if (attemptComplete) {
+    spelling.homeTab = "session";
+    spelling.selectedStageId = "repeat-check";
+    spelling.celebrationStageId = "";
+    spelling.sessionCompletionReady = true;
+    return;
+  }
+
+  const visibleStageId = getSpellingVisibleStageId(subject);
+  const fallbackStageId = getSpellingStageId(subject);
+  const nextSelectedStageId = canOpenSpellingStage(subject, visibleStageId)
+    ? visibleStageId
+    : canOpenSpellingStage(subject, fallbackStageId)
+      ? fallbackStageId
+      : "diagnostic";
+  const nextSpelling = getSubjectSpellingState(subject);
+  nextSpelling.homeTab = "session";
+  nextSpelling.selectedStageId = nextSelectedStageId;
+  nextSpelling.celebrationStageId = "";
+  nextSpelling.sessionCompletionReady = false;
+}
+
+function setSpellingHomeTab(subject, tabId) {
+  const spelling = getSubjectSpellingState(subject);
+  const normalizedTabId = String(tabId || "") === "paddock"
+    ? "stable"
+    : String(tabId || "") === "review"
+      ? "progress"
+      : String(tabId || "");
+  if (!["session", "stable", "progress"].includes(normalizedTabId)) {
+    return;
+  }
+  if (normalizedTabId === "session") {
+    activateSpellingSession(subject);
+    return;
+  }
+  if (
+    spelling.homeTab === normalizedTabId &&
+    !spelling.celebrationStageId &&
+    !spelling.sessionCompletionReady
+  ) {
+    return;
+  }
+  spelling.homeTab = normalizedTabId;
+  spelling.celebrationStageId = "";
+  spelling.sessionCompletionReady = false;
+}
+
+function setSpellingSelectedStage(subject, stageId) {
+  const normalizedStageId = String(stageId || "");
+  if (!canOpenSpellingStage(subject, normalizedStageId)) {
+    return;
+  }
+  const spelling = getSubjectSpellingState(subject);
+  if (
+    spelling.homeTab === "session" &&
+    spelling.selectedStageId === normalizedStageId &&
+    !spelling.celebrationStageId
+  ) {
+    return;
+  }
+  const nextSpelling = getSubjectSpellingState(subject);
+  nextSpelling.homeTab = "session";
+  nextSpelling.selectedStageId = normalizedStageId;
+  nextSpelling.celebrationStageId = "";
+  nextSpelling.sessionCompletionReady = false;
+}
+
+function getActiveSpellingSubject() {
+  const subject = getSelectedSubject();
+  if (!subject || state.activeSubjectTab !== "spelling") {
+    return null;
+  }
+  return subject;
+}
+
+function getSpellingNavigationAction(eventOrTarget) {
+  let target = null;
+  if (eventOrTarget && typeof eventOrTarget.composedPath === "function") {
+    target = eventOrTarget.composedPath().find((node) => node instanceof Element) || null;
+  } else {
+    const rawTarget = eventOrTarget instanceof Event ? eventOrTarget.target : eventOrTarget;
+    target = rawTarget instanceof Element ? rawTarget : rawTarget?.parentElement || null;
+  }
+  if (!target) {
+    return null;
+  }
+
+  const homeTabButton = target.closest("[data-spelling-home-tab]");
+  if (homeTabButton?.dataset.spellingHomeTab) {
+    return {
+      type: "home-tab",
+      button: homeTabButton,
+      value: homeTabButton.dataset.spellingHomeTab
+    };
+  }
+
+  const beginSessionButton = target.closest("[data-spelling-begin-session]");
+  if (beginSessionButton) {
+    return {
+      type: "begin-session",
+      button: beginSessionButton,
+      value: "session"
+    };
+  }
+
+  const openStageButton = target.closest("[data-spelling-open-stage]");
+  if (openStageButton?.dataset.spellingOpenStage) {
+    return {
+      type: "open-stage",
+      button: openStageButton,
+      value: openStageButton.dataset.spellingOpenStage
+    };
+  }
+
+  return null;
+}
+
+function applySpellingNavigationAction(subject, action) {
+  if (!subject || !action) {
+    return false;
+  }
+
+  if (action.type === "home-tab") {
+    setSpellingHomeTab(subject, action.value);
+    return true;
+  }
+
+  if (action.type === "begin-session") {
+    activateSpellingSession(subject);
+    return true;
+  }
+
+  if (action.type === "open-stage") {
+    setSpellingSelectedStage(subject, action.value);
+    return true;
+  }
+
+  return false;
+}
+
+function bindSpellingNavigationInteractions(subject, host) {
+  const root = host?.querySelector(".ss-root");
+  if (!root) {
+    return;
+  }
+  if (root.dataset.spellingNavigationReady === subject.id) {
+    return;
+  }
+
+  root.querySelectorAll("[data-spelling-home-tab]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setSpellingHomeTab(subject, button.dataset.spellingHomeTab);
+      persistSubjects({ skipRemoteSync: true });
+      render();
+    });
+  });
+
+  root.querySelectorAll("[data-spelling-begin-session]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      activateSpellingSession(subject);
+      persistSubjects({ skipRemoteSync: true });
+      render();
+    });
+  });
+
+  root.querySelectorAll("[data-spelling-open-stage]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setSpellingSelectedStage(subject, button.dataset.spellingOpenStage);
+      persistSubjects({ skipRemoteSync: true });
+      render();
+    });
+  });
+
+  root.dataset.spellingNavigationReady = subject.id;
+}
+
+function celebrateSpellingStage(subject, stageId, coachMessage) {
+  const spelling = getSubjectSpellingState(subject);
+  spelling.homeTab = "session";
+  spelling.selectedStageId = stageId;
+  spelling.celebrationStageId = stageId;
+  spelling.sessionCompletionReady = false;
+  if (coachMessage) {
+    spelling.coachMessage = coachMessage;
+  }
+  persistSubjects();
+}
+
+function continueSpellingStage(subject) {
+  const spelling = getSubjectSpellingState(subject);
+  const celebrationStageId = String(spelling.celebrationStageId || "");
+  const completionMap = getSpellingStageCompletionMap(subject);
+  if (celebrationStageId === "repeat-check" && SPELLING_STAGE_ORDER.every((stageId) => completionMap[stageId])) {
+    const nextSpelling = getSubjectSpellingState(subject);
+    nextSpelling.homeTab = "session";
+    nextSpelling.celebrationStageId = "";
+    nextSpelling.selectedStageId = "repeat-check";
+    nextSpelling.sessionCompletionReady = true;
+    persistSubjects();
+    return;
+  }
+  let nextStageId = getSpellingNextStageAfterCelebration(subject, celebrationStageId);
+  if (celebrationStageId === "repeat-check" && !SPELLING_STAGE_ORDER.every((stageId) => completionMap[stageId])) {
+    nextStageId = getSpellingStageId(subject);
+  }
+  const nextSpelling = getSubjectSpellingState(subject);
+  nextSpelling.homeTab = "session";
+  nextSpelling.celebrationStageId = "";
+  nextSpelling.sessionCompletionReady = false;
+  nextSpelling.selectedStageId = nextStageId;
+  persistSubjects();
+}
+
+function continueSpellingStageToTarget(subject, targetStageId = "") {
+  const normalizedTarget = String(targetStageId || "");
+  if (!normalizedTarget) {
+    continueSpellingStage(subject);
+    return;
+  }
+  if (normalizedTarget === "repeat-check" || canOpenSpellingStage(subject, normalizedTarget)) {
+    const spelling = getSubjectSpellingState(subject);
+    spelling.homeTab = "session";
+    spelling.celebrationStageId = "";
+    spelling.sessionCompletionReady = false;
+    spelling.selectedStageId = normalizedTarget;
+    persistSubjects();
+    return;
+  }
+  continueSpellingStage(subject);
+}
+
+function finishSpellingSession(subject) {
+  const spelling = getSubjectSpellingState(subject);
+  spelling.homeTab = "stable";
+  spelling.selectedStageId = "repeat-check";
+  spelling.celebrationStageId = "";
+  spelling.sessionCompletionReady = isSpellingAttemptComplete(subject);
+  persistSubjects();
+}
+
+function sendSpellingHorseToPaddock(subject, horseId, stageElement) {
+  const spelling = getSubjectSpellingState(subject);
+  ensureSpellingPaddockState(spelling);
+  const horseState = spelling.paddockState[horseId];
+  if (!horseState) {
+    return;
+  }
+  const stageWidth = Math.max(320, Math.round(stageElement?.clientWidth || 520));
+  const stageHeight = Math.max(220, Math.round(stageElement?.clientHeight || 320));
+  horseState.roaming = true;
+  horseState.left = Math.max(16, Math.min(stageWidth - 170, Math.round(stageWidth * (0.18 + Math.random() * 0.5))));
+  horseState.top = Math.max(92, Math.min(stageHeight - 150, Math.round(stageHeight * (0.44 + Math.random() * 0.24))));
+  persistSubjects();
+  render();
+}
+
+function returnSpellingHorseToStall(subject, horseId) {
+  const spelling = getSubjectSpellingState(subject);
+  ensureSpellingPaddockState(spelling);
+  const horseState = spelling.paddockState[horseId];
+  if (!horseState) {
+    return;
+  }
+  horseState.roaming = false;
+  persistSubjects();
+  render();
+}
+
+function returnAllSpellingHorsesToStalls(subject) {
+  const spelling = getSubjectSpellingState(subject);
+  ensureSpellingPaddockState(spelling);
+  let didUpdate = false;
+  Object.values(spelling.paddockState || {}).forEach((entry) => {
+    if (!entry?.roaming) {
+      return;
+    }
+    entry.roaming = false;
+    didUpdate = true;
+  });
+  if (!didUpdate) {
+    return;
+  }
+  persistSubjects();
+  render();
+}
+
+function clampSpellingPaddockRoamingPositions(subject, stageElement) {
+  if (!subject || !stageElement) {
+    return false;
+  }
+
+  const spelling = getSubjectSpellingState(subject);
+  ensureSpellingPaddockState(spelling);
+  const stageWidth = Math.round(stageElement.clientWidth || stageElement.offsetWidth || 0);
+  const stageHeight = Math.round(stageElement.clientHeight || stageElement.offsetHeight || 0);
+  let didUpdate = false;
+
+  Object.entries(spelling.paddockState || {}).forEach(([horseId, entry]) => {
+    if (!entry?.roaming || !SPELLING_PADDOCK_HORSE_BY_ID[horseId]) {
+      return;
+    }
+
+    const clampedEntry = clampSpellingPaddockEntry(entry, stageWidth, stageHeight);
+    if (clampedEntry.left !== entry.left || clampedEntry.top !== entry.top) {
+      spelling.paddockState[horseId] = clampedEntry;
+      didUpdate = true;
+    }
+  });
+
+  return didUpdate;
+}
+
+function setupSpellingPaddockInteractions(subject, host) {
+  if (!host) {
+    return;
+  }
+  if (typeof host._spellingPaddockCleanup === "function") {
+    host._spellingPaddockCleanup();
+  }
+
+  const stage = host.querySelector("[data-spelling-paddock-stage]");
+  if (!stage) {
+    return;
+  }
+
+  const syncRoamingHorsePositions = () => {
+    if (!clampSpellingPaddockRoamingPositions(subject, stage)) {
+      return;
+    }
+    persistSubjects({ skipRemoteSync: true });
+    const spelling = getSubjectSpellingState(subject);
+    host.querySelectorAll('[data-spelling-horse-mode="roaming"]').forEach((horseElement) => {
+      const horseId = horseElement.dataset.spellingHorse || "";
+      const horseState = spelling.paddockState?.[horseId];
+      if (!horseState) {
+        return;
+      }
+      horseElement.style.left = `${horseState.left}px`;
+      horseElement.style.top = `${horseState.top}px`;
+    });
+  };
+
+  syncRoamingHorsePositions();
+
+  let drag = null;
+
+  const handlePointerDown = (event) => {
+    const horse = event.target.closest("[data-spelling-horse]");
+    if (!horse) {
+      return;
+    }
+    event.preventDefault();
+    const horseId = horse.dataset.spellingHorse || "";
+    const mode = horse.dataset.spellingHorseMode || "stall";
+    if (!horseId) {
+      return;
+    }
+    if (mode === "stall") {
+      drag = {
+        horseId,
+        stage,
+        moved: false,
+        startX: event.clientX,
+        startY: event.clientY,
+        send: true
+      };
+      return;
+    }
+    const rect = horse.getBoundingClientRect();
+    drag = {
+      horseId,
+      horse,
+      stage,
+      moved: false,
+      startX: event.clientX,
+      startY: event.clientY,
+      roam: true,
+      dx: event.clientX - rect.left,
+      dy: event.clientY - rect.top
+    };
+    try {
+      horse.setPointerCapture(event.pointerId);
+    } catch (error) {
+      // Ignore environments without pointer capture support.
+    }
+  };
+
+  const handlePointerMove = (event) => {
+    if (!drag) {
+      return;
+    }
+    if (Math.abs(event.clientX - drag.startX) + Math.abs(event.clientY - drag.startY) > 4) {
+      drag.moved = true;
+    }
+    if (!drag.roam || !drag.horse) {
+      return;
+    }
+    const stageRect = drag.stage.getBoundingClientRect();
+    let nextLeft = event.clientX - stageRect.left - drag.dx;
+    let nextTop = event.clientY - stageRect.top - drag.dy;
+    nextLeft = Math.max(8, Math.min(nextLeft, stageRect.width - drag.horse.offsetWidth - 8));
+    nextTop = Math.max(76, Math.min(nextTop, stageRect.height - drag.horse.offsetHeight - 8));
+    drag.horse.style.left = `${nextLeft}px`;
+    drag.horse.style.top = `${nextTop}px`;
+  };
+
+  const handlePointerUp = () => {
+    if (!drag) {
+      return;
+    }
+    if (drag.send) {
+      if (!drag.moved) {
+        sendSpellingHorseToPaddock(subject, drag.horseId, drag.stage);
+      }
+      drag = null;
+      return;
+    }
+    if (!drag.moved) {
+      returnSpellingHorseToStall(subject, drag.horseId);
+      drag = null;
+      return;
+    }
+    const spelling = getSubjectSpellingState(subject);
+    ensureSpellingPaddockState(spelling);
+    const horseState = spelling.paddockState[drag.horseId];
+    if (horseState && drag.horse) {
+      horseState.roaming = true;
+      horseState.left = Math.max(0, Math.round(parseFloat(drag.horse.style.left) || horseState.left || 0));
+      horseState.top = Math.max(0, Math.round(parseFloat(drag.horse.style.top) || horseState.top || 0));
+      persistSubjects({ skipRemoteSync: true });
+    }
+    drag = null;
+  };
+
+  host.addEventListener("pointerdown", handlePointerDown);
+  window.addEventListener("pointermove", handlePointerMove);
+  window.addEventListener("pointerup", handlePointerUp);
+  window.addEventListener("resize", syncRoamingHorsePositions);
+  host.querySelector("[data-spelling-return-all-stalls]")?.addEventListener("click", () => {
+    returnAllSpellingHorsesToStalls(subject);
+  });
+  host._spellingPaddockCleanup = () => {
+    host.removeEventListener("pointerdown", handlePointerDown);
+    window.removeEventListener("pointermove", handlePointerMove);
+    window.removeEventListener("pointerup", handlePointerUp);
+    window.removeEventListener("resize", syncRoamingHorsePositions);
+  };
+}
+
+function getSpellingCelebrationCopy(subject, stageId) {
+  if (stageId === "diagnostic") {
+    const nextStageId = getSpellingNextStageAfterCelebration(subject, stageId);
+    return {
+      eyebrow: "Ribbon earned",
+      title: "Stage 1 complete",
+      body: "The spelling profile is ready. Continue to the next spelling activity so the follow-up words can be narrowed to the patterns that still need attention.",
+      action: `Continue to ${getSpellingStageActionLabel(nextStageId)}`,
+      nextStageId
+    };
+  }
+  if (stageId === "looks-right") {
+    const nextStageId = getSpellingNextStageAfterCelebration(subject, stageId);
+    return {
+      eyebrow: "Ribbon earned",
+      title: "Stage 2 complete",
+      body: "The words that still look unstable have been identified. Continue to the next stage to rehearse them one at a time through word-family sentences.",
+      action: `Continue to ${getSpellingStageActionLabel(nextStageId)}`,
+      nextStageId
+    };
+  }
+  if (stageId === "word-families") {
+    const nextStageId = getSpellingNextStageAfterCelebration(subject, stageId);
+    return {
+      eyebrow: "Ribbon earned",
+      title: "Stage 3 complete",
+      body: "Those family clues held. Continue to the next spelling activity to check how the word changes across tense.",
+      action: `Continue to ${getSpellingStageActionLabel(nextStageId)}`,
+      nextStageId
+    };
+  }
+  if (stageId === "tense-transfer") {
+    const nextStageId = getSpellingNextStageAfterCelebration(subject, stageId);
+    return {
+      eyebrow: "Ribbon earned",
+      title: "Stage 4 complete",
+      body: nextStageId === "repeat-check"
+        ? "The tense check is complete. Continue to the final spelling check so you can compare the first dictation with what changed after the lesson."
+        : "The tense check is complete. Continue to the next open spelling activity before the final check unlocks.",
+      action: `Continue to ${getSpellingStageActionLabel(nextStageId)}`,
+      nextStageId
+    };
+  }
+  return {
+    eyebrow: "Final ribbon",
+    title: "Stage 5 complete",
+    body: "All five stages are complete. Continue to review the session summary, compare the two dictation checks, and then reset for the next spelling round.",
+    action: "Continue",
+    nextStageId: "repeat-check"
+  };
 }
 
 function getSpellingStageLabel(subject) {
   const stageId = getSpellingStageId(subject);
-  return SPELLING_STAGE_LABELS[stageId] || SPELLING_STAGE_LABELS.foal;
+  return SPELLING_STAGE_LABELS[stageId] || SPELLING_STAGE_LABELS.diagnostic;
 }
 
-function setSpellingHomeTab(subject, tabId) {
-  if (!subject) {
-    return;
-  }
-  const spelling = getSubjectSpellingState(subject);
-  const normalizedTabId = SPELLING_HOME_TABS.includes(tabId) ? tabId : "session";
-  spelling.homeTab = normalizedTabId;
-  if (normalizedTabId === "session") {
-    spelling.selectedStageId = SPELLING_ACTIVITY_ORDER.includes(spelling.selectedStageId)
-      ? spelling.selectedStageId
-      : getRecommendedSpellingStageId(spelling);
-  }
-  persistSubjects();
+function getSpellingDiagnosticCurrentWord(spelling) {
+  return getSpellingAttemptWords(spelling)[spelling.diagnostic.currentIndex] || null;
 }
 
-function setSpellingSelectedStage(subject, stageId) {
-  if (!subject || !SPELLING_ACTIVITY_ORDER.includes(stageId)) {
-    return;
-  }
-  const spelling = getSubjectSpellingState(subject);
-  if (!getUnlockedSpellingStageIds(spelling).includes(stageId)) {
-    return;
-  }
-  spelling.selectedStageId = stageId;
-  persistSubjects();
+function getSpellingDiagnosticCorrectCount(spelling) {
+  return getSpellingAttemptWords(spelling).filter((wordEntry) => spelling.diagnostic.responses[wordEntry.id]?.correct).length;
 }
 
-function getSpellingSortBankWords(spelling) {
-  const placed = new Set([
-    ...(spelling.activities.sort.air || []),
-    ...(spelling.activities.sort.are || []),
-    ...(spelling.activities.sort.ear || [])
-  ]);
-  return Object.values(SPELLING_UNIT_SEED.sortBuckets)
-    .flat()
-    .filter((word) => !placed.has(word));
+function getSpellingRepeatCurrentWord(spelling) {
+  return getSpellingAttemptWords(spelling)[spelling.repeatCheck.currentIndex] || null;
 }
 
-function getSpellingFamilyBankWords(spelling) {
-  const placed = new Set(spelling.activities.family.slots || []);
-  return SPELLING_UNIT_SEED.familyOrder.filter((word) => !placed.has(word));
+function getSpellingRepeatCorrectCount(spelling) {
+  return getSpellingAttemptWords(spelling).filter((wordEntry) => spelling.repeatCheck.responses[wordEntry.id]?.correct).length;
 }
 
-function normalizeSpellingWord(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z]/g, "");
-}
-
-function calculateSpellingWordAccuracy(expectedWord, responseWord) {
-  const expected = normalizeSpellingWord(expectedWord);
-  const response = normalizeSpellingWord(responseWord);
-  if (!expected) {
-    return 0;
-  }
-  let correctLetters = 0;
-  for (let index = 0; index < expected.length; index += 1) {
-    if (expected[index] === response[index]) {
-      correctLetters += 1;
-    }
-  }
-  return Math.round((correctLetters / expected.length) * 100);
-}
-
-function buildSpellingAssessmentResults(answers) {
-  return SPELLING_ASSESSMENT_WORDS.map((word) => {
-    const response = String(answers?.[word] || "").trim();
-    const accuracy = calculateSpellingWordAccuracy(word, response);
-    return {
-      word,
-      response,
-      accuracy,
-      correct: accuracy === 100
-    };
-  });
-}
-
-function getSpellingAssessmentAverageAccuracy(activity) {
-  const results = Array.isArray(activity?.results) ? activity.results : [];
-  if (!results.length) {
-    return 0;
-  }
-  return Math.round(results.reduce((sum, result) => sum + result.accuracy, 0) / results.length);
-}
-
-function recordSpellingWordHistory(subject, stageId, words) {
-  if (!subject || !Array.isArray(words) || !words.length) {
-    return;
-  }
-  const spelling = getSubjectSpellingState(subject);
-  const timestamp = new Date().toISOString();
-  words
-    .map((word) => String(word || "").trim())
-    .filter(Boolean)
-    .forEach((word) => {
-      spelling.wordHistory.push({
-        word,
-        stageId,
-        at: timestamp
-      });
-    });
-}
-
-function getSpellingProgressEntries(subject) {
-  const spelling = getSubjectSpellingState(subject);
-  const wordOrder = [];
-  const seenWords = new Set();
-  spelling.wordHistory.forEach((entry) => {
-    const key = normalizeSpellingWord(entry.word);
-    if (!key || seenWords.has(key)) {
+function buildSpellingFocusSummaryFromResponses(responses, spelling = null) {
+  const counts = new Map();
+  const diagnosticWords = spelling ? getSpellingAttemptWords(spelling) : SPELLING_DIAGNOSTIC_WORDS;
+  diagnosticWords.forEach((wordEntry) => {
+    const response = responses[wordEntry.id];
+    if (!response || response.correct) {
       return;
     }
-    seenWords.add(key);
-    wordOrder.push(entry.word);
+    (wordEntry.focuses || []).forEach((focusId) => {
+      counts.set(focusId, (counts.get(focusId) || 0) + 1);
+    });
   });
-  SPELLING_ASSESSMENT_WORDS.forEach((word) => {
-    const key = normalizeSpellingWord(word);
-    if (!seenWords.has(key)) {
-      seenWords.add(key);
-      wordOrder.push(word);
-    }
-  });
+  return [...counts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .map(([id, count]) => ({ id, count }));
+}
 
-  const baselineResults = new Map(
-    (spelling.activities.jump.results || []).map((result) => [normalizeSpellingWord(result.word), result])
-  );
-  const stageFiveResults = new Map(
-    (spelling.activities.sentence.results || []).map((result) => [normalizeSpellingWord(result.word), result])
-  );
+function getSpellingTopFocuses(spelling, limit = 3) {
+  const focusSummary = spelling.focusSummary.length
+    ? spelling.focusSummary
+    : buildSpellingFocusSummaryFromResponses(spelling.diagnostic.responses, spelling);
+  return focusSummary.slice(0, limit);
+}
 
-  return wordOrder.map((word) => {
-    const key = normalizeSpellingWord(word);
-    const attempts = spelling.wordHistory.filter((entry) => normalizeSpellingWord(entry.word) === key).length;
-    const baseline = baselineResults.get(key) || null;
-    const stageFive = stageFiveResults.get(key) || null;
-    return {
-      word,
-      attempts,
-      baselineAccuracy: baseline ? baseline.accuracy : null,
-      stageFiveAccuracy: stageFive ? stageFive.accuracy : null,
-      improvement:
-        baseline && stageFive
-          ? stageFive.accuracy - baseline.accuracy
-          : null
+function buildSpellingFollowUpWordIdsFromResponses(responses, spelling = null) {
+  const diagnosticWords = spelling ? getSpellingAttemptWords(spelling) : SPELLING_DIAGNOSTIC_WORDS;
+  const missedWordIds = diagnosticWords
+    .filter((wordEntry) => responses[wordEntry.id] && !responses[wordEntry.id].correct)
+    .map((wordEntry) => String(wordEntry.interventionId || ""))
+    .filter(Boolean);
+  const fallbackWordIds = diagnosticWords
+    .map((wordEntry) => String(wordEntry.interventionId || ""))
+    .filter(Boolean);
+  const followUpWordIds = missedWordIds.length ? missedWordIds : fallbackWordIds;
+  return followUpWordIds.slice(0, SPELLING_UNIT_SEED.followUpWordCount);
+}
+
+function ensureSpellingFollowUpWordIds(spelling) {
+  if (!spelling.followUpWordIds.length) {
+    spelling.followUpWordIds = buildSpellingFollowUpWordIdsFromResponses(spelling.diagnostic.responses, spelling);
+  }
+  return spelling.followUpWordIds;
+}
+
+function getSpellingFollowUpWords(spelling) {
+  return ensureSpellingFollowUpWordIds(spelling)
+    .map((wordId) => SPELLING_INTERVENTION_LIBRARY[wordId])
+    .filter(Boolean);
+}
+
+function getSpellingFlashcardWords(spelling) {
+  const followUpWords = getSpellingFollowUpWords(spelling);
+  const missedLooksRightIds = followUpWords
+    .filter((entry) => spelling.looksRight.answers[entry.id] !== entry.word)
+    .map((entry) => entry.id);
+  const stableIds = followUpWords
+    .filter((entry) => spelling.looksRight.answers[entry.id] === entry.word)
+    .map((entry) => entry.id);
+  return [...missedLooksRightIds, ...stableIds]
+    .map((wordId) => SPELLING_INTERVENTION_LIBRARY[wordId])
+    .filter(Boolean);
+}
+
+function ensureSpellingFlashcardCard(spelling, wordId) {
+  if (!spelling.flashcards.cards[wordId]) {
+    spelling.flashcards.cards[wordId] = {
+      exposureIndex: 0,
+      isShowingSentence: false,
+      typedValue: "",
+      checked: false,
+      completed: false,
+      awaitingAdvance: false,
+      feedbackKind: "",
+      feedbackMessage: ""
     };
-  });
+  }
+  const card = spelling.flashcards.cards[wordId];
+  if (typeof card.exposureIndex !== "number" || Number.isNaN(card.exposureIndex)) {
+    card.exposureIndex = 0;
+  }
+  if (typeof card.isShowingSentence !== "boolean") {
+    card.isShowingSentence = false;
+  }
+  if (typeof card.typedValue !== "string") {
+    card.typedValue = "";
+  }
+  return card;
+}
+
+function getSpellingFlashcardCurrentWord(spelling) {
+  const flashcardWords = getSpellingFlashcardWords(spelling);
+  if (!flashcardWords.length) {
+    return null;
+  }
+
+  if (spelling.flashcards.currentWordId) {
+    const activeWord = flashcardWords.find((entry) => entry.id === spelling.flashcards.currentWordId);
+    if (activeWord && !ensureSpellingFlashcardCard(spelling, activeWord.id).completed) {
+      return activeWord;
+    }
+  }
+
+  const nextWord = flashcardWords.find((entry) => !ensureSpellingFlashcardCard(spelling, entry.id).completed) || null;
+  spelling.flashcards.currentWordId = nextWord?.id || "";
+  return nextWord;
+}
+
+function ensureSpellingTenseAnswer(spelling, wordId) {
+  if (!spelling.tenseTransfer.answers[wordId]) {
+    spelling.tenseTransfer.answers[wordId] = {
+      selectedTense: "",
+      checked: false,
+      completed: false,
+      awaitingAdvance: false,
+      feedbackKind: "",
+      feedbackMessage: "",
+      lastCheckedAt: ""
+    };
+  }
+  return spelling.tenseTransfer.answers[wordId];
+}
+
+function isSpellingLooksRightComplete(spelling) {
+  const followUpWords = getSpellingFollowUpWords(spelling);
+  return Boolean(followUpWords.length) && followUpWords.every((entry) => Boolean(spelling.looksRight.answers[entry.id]));
+}
+
+function getSpellingLooksRightSentence(entry) {
+  const diagnosticMatch = SPELLING_DIAGNOSTIC_WORDS.find(
+    (wordEntry) => wordEntry.interventionId === entry.id || normalizeSpellingAttempt(wordEntry.word) === normalizeSpellingAttempt(entry.word)
+  );
+  return diagnosticMatch?.sentence || `Use ${entry.word} in a sentence with precision.`;
+}
+
+function buildSpellingLooksRightChoiceSentence(sentence, originalWord, replacementWord) {
+  const wordPattern = new RegExp(`\\b${escapeRegex(originalWord)}\\b`, "i");
+  const match = sentence.match(wordPattern);
+  if (match && match.index !== undefined) {
+    const before = sentence.slice(0, match.index);
+    const after = sentence.slice(match.index + match[0].length);
+    return `${escapeHtml(before)}<span class="spelling-inline-target">${escapeHtml(replacementWord)}</span>${escapeHtml(after)}`;
+  }
+  return `${escapeHtml(sentence)} <span class="spelling-inline-target">(${escapeHtml(replacementWord)})</span>`;
+}
+
+function buildSpellingSessionDotRow(total, currentIndex, completedCount = 0) {
+  return Array.from({ length: Math.max(0, total) }, (_, index) => {
+    const isComplete = index < completedCount;
+    const isCurrent = index === currentIndex;
+    return `<span class="ss-dot${isComplete ? " is-complete" : ""}${isCurrent ? " is-current" : ""}"></span>`;
+  }).join("");
+}
+
+function getSpellingFlashcardExposureLimit(wordId = "") {
+  const entry = SPELLING_INTERVENTION_LIBRARY[String(wordId || "")];
+  if (!entry) {
+    return SPELLING_FLASHCARD_EXPOSURE_COUNT;
+  }
+  const availableSentenceCount = Array.isArray(entry.familySentences) ? entry.familySentences.length : 0;
+  const availableFamilyWordCount = Array.isArray(entry.familyWords) ? entry.familyWords.length : 0;
+  return Math.max(1, Math.min(SPELLING_FLASHCARD_EXPOSURE_COUNT, availableSentenceCount, availableFamilyWordCount));
+}
+
+function getSpellingTensePrompt(spelling, entry) {
+  const promptSet = SPELLING_TENSE_PROMPTS[entry?.id] || {};
+  const promptSeed = String(`${spelling?.currentAttemptId || "attempt"}:${entry?.id || ""}`);
+  const promptIndex = promptSeed.split("").reduce((total, character, index) => total + character.charCodeAt(0) * (index + 1), 0) % SPELLING_TENSE_IDS.length;
+  const tenseId = SPELLING_TENSE_IDS[promptIndex] || "present";
+  const wordForm = entry?.tense?.[tenseId] || entry?.word || "";
+  const sentence = String(promptSet[tenseId] || `They ${wordForm} it carefully.`).trim();
+  return {
+    tenseId,
+    sentence,
+    wordForm
+  };
+}
+
+function getSpellingLooksRightCurrentWord(spelling) {
+  const followUpWords = getSpellingFollowUpWords(spelling);
+  if (spelling.looksRight.currentWordId) {
+    const activeWord = followUpWords.find((entry) => entry.id === spelling.looksRight.currentWordId);
+    if (activeWord && !spelling.looksRight.completed) {
+      return activeWord;
+    }
+  }
+  const nextWord = followUpWords.find((entry) => !spelling.looksRight.answers[entry.id]) || followUpWords[0] || null;
+  spelling.looksRight.currentWordId = nextWord?.id || "";
+  return nextWord;
+}
+
+function shouldSpellingLooksRightShowCorrectFirst(wordId) {
+  const hash = String(wordId || "").split("").reduce((total, character) => total + character.charCodeAt(0), 0);
+  return hash % 2 === 0;
+}
+
+function getSpellingTenseCurrentWord(spelling) {
+  const followUpWords = getSpellingFollowUpWords(spelling);
+  if (!followUpWords.length) {
+    return null;
+  }
+
+  if (spelling.tenseTransfer.currentWordId) {
+    const activeWord = followUpWords.find((entry) => entry.id === spelling.tenseTransfer.currentWordId);
+    if (activeWord && !ensureSpellingTenseAnswer(spelling, activeWord.id).completed) {
+      return activeWord;
+    }
+  }
+
+  const nextWord = followUpWords.find((entry) => !ensureSpellingTenseAnswer(spelling, entry.id).completed) || null;
+  spelling.tenseTransfer.currentWordId = nextWord?.id || "";
+  return nextWord;
+}
+
+function isSpellingFlashcardsComplete(spelling) {
+  const flashcardWords = getSpellingFlashcardWords(spelling);
+  return Boolean(flashcardWords.length) && flashcardWords.every((entry) => ensureSpellingFlashcardCard(spelling, entry.id).completed);
+}
+
+function isSpellingTenseTransferComplete(spelling) {
+  const followUpWords = getSpellingFollowUpWords(spelling);
+  return Boolean(followUpWords.length) && followUpWords.every((entry) => ensureSpellingTenseAnswer(spelling, entry.id).completed);
+}
+
+function finaliseSpellingDiagnostic(subject) {
+  const spelling = getSubjectSpellingState(subject);
+  spelling.diagnostic.completed = true;
+  spelling.focusSummary = buildSpellingFocusSummaryFromResponses(spelling.diagnostic.responses, spelling);
+  spelling.followUpWordIds = buildSpellingFollowUpWordIdsFromResponses(spelling.diagnostic.responses, spelling);
+  spelling.looksRight.checked = false;
+  spelling.looksRight.completed = false;
+  spelling.flashcards = {
+    version: SPELLING_FLASHCARDS_VERSION,
+    cards: {},
+    currentWordId: "",
+    completed: false
+  };
+  spelling.tenseTransfer = {
+    version: SPELLING_TENSE_TRANSFER_VERSION,
+    answers: {},
+    currentWordId: "",
+    completed: false
+  };
+  spelling.repeatCheck = {
+    currentIndex: 0,
+    currentInput: "",
+    responses: {},
+    completed: false
+  };
+  const topFocuses = getSpellingTopFocuses(spelling, 2).map((entry) => SPELLING_FOCUS_LABELS[entry.id] || entry.id);
+  celebrateSpellingStage(
+    subject,
+    "diagnostic",
+    topFocuses.length
+      ? `Diagnostic complete. The strongest follow-up needs are ${topFocuses.join(" and ").toLowerCase()}.`
+      : "Diagnostic complete. The follow-up stages are ready."
+  );
+}
+
+function finaliseSpellingRepeatCheck(subject) {
+  const spelling = getSubjectSpellingState(subject);
+  spelling.repeatCheck.completed = true;
+  const initialScore = getSpellingDiagnosticCorrectCount(spelling);
+  const repeatScore = getSpellingRepeatCorrectCount(spelling);
+  const overallScorePercent = getSpellingOverallScorePercent(spelling);
+  const attemptAlreadyRecorded = (spelling.completedAttempts || []).some((entry) => entry.attemptId === spelling.currentAttemptId);
+  spelling.lastOverallScorePercent = overallScorePercent;
+  const unlockedHorse = attemptAlreadyRecorded ? "" : unlockSpellingPaddockHorse(spelling);
+  const unlockedHorseMeta = getSpellingPaddockHorseMeta(unlockedHorse);
+  recordCompletedSpellingAttempt(subject);
+  const completionMessage = unlockedHorse
+    ? `Final spelling check complete. You moved from ${initialScore}/${SPELLING_UNIT_SEED.diagnosticTargetCount} to ${repeatScore}/${SPELLING_UNIT_SEED.diagnosticTargetCount}. ${unlockedHorseMeta?.name || "A new horse"} has been added to the paddock.`
+    : `Final spelling check complete. You moved from ${initialScore}/${SPELLING_UNIT_SEED.diagnosticTargetCount} to ${repeatScore}/${SPELLING_UNIT_SEED.diagnosticTargetCount}.`;
+  spelling.homeTab = "session";
+  spelling.selectedStageId = "repeat-check";
+  spelling.celebrationStageId = "";
+  spelling.sessionCompletionReady = true;
+  spelling.coachMessage = completionMessage;
+  spelling.lastUnlockedHorseId = unlockedHorse || spelling.lastUnlockedHorseId;
+  persistSubjects();
+}
+
+function recordCompletedSpellingAttempt(subject) {
+  const spelling = getSubjectSpellingState(subject);
+  if ((spelling.completedAttempts || []).some((entry) => entry.attemptId === spelling.currentAttemptId)) {
+    return;
+  }
+  const attemptWords = getSpellingAttemptWords(spelling);
+  const stageOneCorrect = getSpellingDiagnosticCorrectCount(spelling);
+  const stageFiveCorrect = getSpellingRepeatCorrectCount(spelling);
+  const overallScorePercent = getSpellingOverallScorePercent(spelling);
+  spelling.completedAttempts = [
+    ...(spelling.completedAttempts || []),
+    {
+      attemptId: spelling.currentAttemptId,
+      instanceNumber: (spelling.completedAttempts || []).length + 1,
+      weekKey: currentWeekKey(),
+      completedAt: new Date().toISOString(),
+      stageOneCorrect,
+      stageFiveCorrect,
+      overallScorePercent,
+      wordIds: [...spelling.followUpWordIds].slice(0, SPELLING_UNIT_SEED.followUpWordCount),
+      wordResults: attemptWords.map((wordEntry) => {
+        const stageOneAttempt = String(spelling.diagnostic.responses[wordEntry.id]?.attempt || "");
+        const stageFiveAttempt = String(spelling.repeatCheck.responses[wordEntry.id]?.attempt || "");
+        return {
+          wordId: wordEntry.id,
+          word: wordEntry.word,
+          stageOneAttempt,
+          stageOneAccuracy: calculateSpellingWordAccuracy(wordEntry.word, stageOneAttempt),
+          stageFiveAttempt,
+          stageFiveAccuracy: calculateSpellingWordAccuracy(wordEntry.word, stageFiveAttempt)
+        };
+      })
+    }
+  ];
 }
 
 function resetSpellingActivity(subject, activityId) {
   const spelling = getSubjectSpellingState(subject);
-  if (activityId === "jump") {
-    spelling.activities.jump = createDefaultSpellingAssessmentActivity();
-    spelling.coachMessage = `${SPELLING_UNIT_SEED.horseName} says: spell every lesson word in stage 1 so stage 5 has something real to compare against.`;
-  } else if (activityId === "tag") {
-    spelling.activities.tag = { letter: "", completed: false };
-    spelling.coachMessage = `${SPELLING_UNIT_SEED.horseName} says: after q, check whether the word needs a helper u.`;
-  } else if (activityId === "sort") {
-    spelling.activities.sort = { air: [], are: [], ear: [], completed: false };
-    spelling.coachMessage = `${SPELLING_UNIT_SEED.horseName} says: listen for the same /air/ sound, then choose the matching spelling pattern.`;
-  } else if (activityId === "family") {
-    spelling.activities.family = { slots: ["", "", "", ""], completed: false };
-    spelling.coachMessage = `${SPELLING_UNIT_SEED.horseName} says: keep the base word square stable as the ending changes.`;
-  } else if (activityId === "sentence") {
-    spelling.activities.sentence = createDefaultSpellingAssessmentActivity();
-    spelling.coachMessage = `${SPELLING_UNIT_SEED.horseName} says: repeat stage 1 in stage 5 so we can compare both attempts word by word.`;
+  if (activityId === "diagnostic") {
+    assignRandomSpellingAttemptWordIds(spelling, spelling.followUpWordIds);
+    spelling.diagnostic = {
+      currentIndex: 0,
+      currentInput: "",
+      responses: {},
+      completed: false
+    };
+    spelling.looksRight = {
+      answers: {},
+      currentWordId: "",
+      awaitingAdvanceWordId: "",
+      feedbackKind: "",
+      feedbackMessage: "",
+      checked: false,
+      completed: false
+    };
+    spelling.flashcards = {
+      version: SPELLING_FLASHCARDS_VERSION,
+      cards: {},
+      currentWordId: "",
+      completed: false
+    };
+    spelling.tenseTransfer = {
+      version: SPELLING_TENSE_TRANSFER_VERSION,
+      answers: {},
+      currentWordId: "",
+      completed: false
+    };
+    spelling.repeatCheck = {
+      currentIndex: 0,
+      currentInput: "",
+      responses: {},
+      completed: false
+    };
+    spelling.focusSummary = [];
+    spelling.currentAttemptId = createId();
+    spelling.challenge.active = false;
+    spelling.challenge.currentIndex = 0;
+    spelling.challenge.items = [];
+    spelling.challenge.checked = false;
+    spelling.challenge.completed = false;
+    spelling.challenge.inputValue = "";
+    spelling.coachMessage = "Start with the spelling challenge so the stable work is built from the same ten words across this attempt.";
+  } else if (activityId === "looks-right") {
+    spelling.looksRight = {
+      answers: {},
+      currentWordId: "",
+      awaitingAdvanceWordId: "",
+      feedbackKind: "",
+      feedbackMessage: "",
+      checked: false,
+      completed: false
+    };
+    spelling.flashcards = {
+      version: SPELLING_FLASHCARDS_VERSION,
+      cards: {},
+      currentWordId: "",
+      completed: false
+    };
+    spelling.tenseTransfer = {
+      version: SPELLING_TENSE_TRANSFER_VERSION,
+      answers: {},
+      currentWordId: "",
+      completed: false
+    };
+    spelling.repeatCheck = {
+      currentIndex: 0,
+      currentInput: "",
+      responses: {},
+      completed: false
+    };
+    spelling.coachMessage = "Choose the spelling that looks right, then use the rule note before moving on.";
+  } else if (activityId === "word-families") {
+    spelling.flashcards = {
+      version: SPELLING_FLASHCARDS_VERSION,
+      cards: {},
+      currentWordId: "",
+      completed: false
+    };
+    spelling.tenseTransfer = {
+      version: SPELLING_TENSE_TRANSFER_VERSION,
+      answers: {},
+      currentWordId: "",
+      completed: false
+    };
+    spelling.repeatCheck = {
+      currentIndex: 0,
+      currentInput: "",
+      responses: {},
+      completed: false
+    };
+    spelling.coachMessage = "Tap the key word, listen to the family sentences, then write the root from memory.";
+  } else if (activityId === "tense-transfer") {
+    spelling.tenseTransfer = {
+      version: SPELLING_TENSE_TRANSFER_VERSION,
+      answers: {},
+      currentWordId: "",
+      completed: false
+    };
+    spelling.repeatCheck = {
+      currentIndex: 0,
+      currentInput: "",
+      responses: {},
+      completed: false
+    };
+    spelling.coachMessage = "Read the sentence, choose the tense, and help the horse reach the stable.";
+  } else if (activityId === "repeat-check") {
+    spelling.repeatCheck = {
+      currentIndex: 0,
+      currentInput: "",
+      responses: {},
+      completed: false
+    };
+    spelling.coachMessage = "Listen again to the same ten words and compare them with the first spelling check.";
   } else {
     subject.spelling = createDefaultSpellingState(subject.id);
   }
-  ensureSpellingSelectedStage(spelling);
+  spelling.homeTab = activityId === "diagnostic" ? "stable" : "session";
+  spelling.selectedStageId = "";
+  spelling.celebrationStageId = "";
+  spelling.sessionCompletionReady = false;
   persistSubjects();
 }
 
-function handleSpellingDrop(subject, sourceActivityId, targetActivityId, dropKey, value) {
-  if (!subject || !value || sourceActivityId !== targetActivityId) {
-    return;
-  }
+function getSpellingAudioContext(mode, wordEntry, variant = "word") {
+  return `spelling:${String(mode || "diagnostic")}:${String(wordEntry?.id || "")}:${String(variant || "word")}`;
+}
 
-  const spelling = getSubjectSpellingState(subject);
-
-  if (targetActivityId === "tag") {
-    if (value !== "u") {
-      spelling.coachMessage = `${SPELLING_UNIT_SEED.horseName} says: close. In square, q is followed by u before the /air/ ending.`;
-      persistSubjects();
-      return;
-    }
-    spelling.activities.tag.letter = value;
-    spelling.activities.tag.completed = true;
-    spelling.coachMessage = `${SPELLING_UNIT_SEED.horseName} says: yes. The missing letter is u, so the word starts with squ.`;
-    spelling.selectedStageId = getRecommendedSpellingStageId(spelling);
-    persistSubjects();
-    return;
-  }
-
-  if (targetActivityId === "sort") {
-    const expectedBucket = Object.entries(SPELLING_UNIT_SEED.sortBuckets).find(([, words]) => words.includes(value))?.[0] || "";
-    if (dropKey !== expectedBucket) {
-      spelling.coachMessage = `${SPELLING_UNIT_SEED.horseName} says: listen again. ${value} uses the ${expectedBucket.toUpperCase()} spelling for the /air/ sound.`;
-      persistSubjects();
-      return;
-    }
-    const nextBucketWords = new Set(spelling.activities.sort[dropKey] || []);
-    nextBucketWords.add(value);
-    spelling.activities.sort[dropKey] = [...nextBucketWords];
-    spelling.activities.sort.completed = getSpellingSortBankWords(spelling).length === 0;
-    recordSpellingWordHistory(subject, "sort", [value]);
-    spelling.coachMessage = spelling.activities.sort.completed
-      ? `${SPELLING_UNIT_SEED.horseName} says: strong sorting. Now you can see three ways English spells the same /air/ sound.`
-      : `${SPELLING_UNIT_SEED.horseName} says: good pick. Keep sorting by spelling pattern, not by the first letter.`;
-    spelling.selectedStageId = getRecommendedSpellingStageId(spelling);
-    persistSubjects();
-    return;
-  }
-
-  if (targetActivityId === "family") {
-    const slotIndex = Number(dropKey);
-    const expectedWord = SPELLING_UNIT_SEED.familyOrder[slotIndex];
-    if (value !== expectedWord) {
-      spelling.coachMessage = `${SPELLING_UNIT_SEED.horseName} says: keep the base word square first, then add the ending that changes the job of the word.`;
-      persistSubjects();
-      return;
-    }
-    spelling.activities.family.slots[slotIndex] = value;
-    spelling.activities.family.completed = SPELLING_UNIT_SEED.familyOrder.every(
-      (word, index) => spelling.activities.family.slots[index] === word
-    );
-    recordSpellingWordHistory(subject, "family", [value]);
-    spelling.coachMessage = spelling.activities.family.completed
-      ? `${SPELLING_UNIT_SEED.horseName} says: excellent. The spelling stayed stable all the way from square to squareness.`
-      : `${SPELLING_UNIT_SEED.horseName} says: nice. Add the next family word without changing the base square spelling.`;
-    spelling.selectedStageId = getRecommendedSpellingStageId(spelling);
-    persistSubjects();
+function setSpellingAudioStatus(context, tone, message, { skipRender = false } = {}) {
+  state.spellingAudioStatus = {
+    context: String(context || ""),
+    tone: String(tone || ""),
+    message: String(message || "")
+  };
+  if (!skipRender) {
+    render();
   }
 }
 
-function buildSpellingSurfaceTabs(activeTab) {
+function clearSpellingAudioStatus(context = "", { skipRender = false } = {}) {
+  const requestedContext = String(context || "");
+  const activeContext = String(state.spellingAudioStatus?.context || "");
+  if (requestedContext && requestedContext !== activeContext) {
+    return;
+  }
+  if (!activeContext && !String(state.spellingAudioStatus?.message || "")) {
+    return;
+  }
+  state.spellingAudioStatus = {
+    context: "",
+    tone: "",
+    message: ""
+  };
+  if (!skipRender) {
+    render();
+  }
+}
+
+function buildSpellingAudioStatusMarkup(mode, wordEntry) {
+  if (!wordEntry) {
+    return "";
+  }
+  const activeContext = String(state.spellingAudioStatus?.context || "");
+  const message = String(state.spellingAudioStatus?.message || "").trim();
+  if (!message || !activeContext.startsWith(`spelling:${String(mode || "diagnostic")}:${wordEntry.id}:`)) {
+    return "";
+  }
+  const tone = String(state.spellingAudioStatus?.tone || "");
+  const toneClass = tone === "error" ? " is-incorrect" : tone ? " is-active" : "";
   return `
-    <div class="spelling-surface-tabs" role="tablist" aria-label="Spelling views">
-      ${[
-        ["session", "Session"],
-        ["paddock", "Paddock"],
-        ["progress", "Progress"]
-      ]
+    <div class="ss-status-note ss-status-note--feedback${toneClass}">
+      <p>${escapeHtml(message)}</p>
+    </div>
+  `;
+}
+
+function speakSpellingWordAudio(wordEntry, { mode = "diagnostic" } = {}) {
+  if (!wordEntry) {
+    return;
+  }
+  const audioContext = getSpellingAudioContext(mode, wordEntry, "word");
+  if (currentAudioContext === audioContext) {
+    stopListening();
+    clearSpellingAudioStatus(audioContext, { skipRender: true });
+  }
+
+  const cueWord = String(wordEntry.word || "").trim();
+  const articulationCue = String(wordEntry.articulation || "").trim();
+  const cueText = articulationCue
+    ? `${cueWord}. ${cueWord}. Listen for the beats: ${articulationCue}.`
+    : `${cueWord}. ${cueWord}.`;
+
+  setSpellingAudioStatus(audioContext, "pending", "Preparing AI voice...", { skipRender: true });
+  void speakTextWithOpenAi(cueText, {
+    context: audioContext,
+    statusMessages: {
+      preparing: "Preparing spelling audio...",
+      playing: "Reading spelling word...",
+      error: "Spelling audio failed."
+    },
+    chunksOverride: [cueText],
+    onStatusChange: (tone, message) => {
+      setSpellingAudioStatus(audioContext, tone, message);
+    }
+  })
+    .then(() => {
+      clearSpellingAudioStatus(audioContext);
+    })
+    .catch((error) => {
+      console.error("Spelling audio failed.", error);
+      setSpellingAudioStatus(
+        audioContext,
+        "error",
+        error instanceof Error ? error.message : "Spelling audio failed."
+      );
+    });
+}
+
+function speakSpellingDiagnosticWord(wordEntry) {
+  speakSpellingWordAudio(wordEntry, { mode: "diagnostic" });
+}
+
+function speakSpellingDiagnosticSentence(wordEntry, { mode = "diagnostic" } = {}) {
+  if (!wordEntry) {
+    return;
+  }
+  const audioContext = getSpellingAudioContext(mode, wordEntry, "sentence");
+  if (currentAudioContext === audioContext) {
+    stopListening();
+    clearSpellingAudioStatus(audioContext, { skipRender: true });
+  }
+
+  const sentenceText = wordEntry.sentence || `Use ${wordEntry.word} in a sentence.`;
+  setSpellingAudioStatus(audioContext, "pending", "Preparing AI voice...", { skipRender: true });
+  void speakTextWithOpenAi(sentenceText, {
+    context: audioContext,
+    statusMessages: {
+      preparing: "Preparing sentence audio...",
+      playing: "Reading sentence...",
+      error: "Sentence audio failed."
+    },
+    chunksOverride: [sentenceText],
+    onStatusChange: (tone, message) => {
+      setSpellingAudioStatus(audioContext, tone, message);
+    }
+  })
+    .then(() => {
+      clearSpellingAudioStatus(audioContext);
+    })
+    .catch((error) => {
+      console.error("Spelling sentence audio failed.", error);
+      setSpellingAudioStatus(
+        audioContext,
+        "error",
+        error instanceof Error ? error.message : "Sentence audio failed."
+      );
+    });
+}
+
+function speakSpellingRepeatWord(wordEntry) {
+  speakSpellingWordAudio(wordEntry, { mode: "repeat-check" });
+}
+
+function speakSpellingRepeatSentence(wordEntry) {
+  speakSpellingDiagnosticSentence(wordEntry, { mode: "repeat-check" });
+}
+
+function submitSpellingDiagnosticWord(subject, attemptOverride = null) {
+  const spelling = getSubjectSpellingState(subject);
+  const wordEntry = getSpellingDiagnosticCurrentWord(spelling);
+  const diagnosticWordCount = getSpellingDiagnosticWordCount(spelling);
+  if (!wordEntry) {
+    return;
+  }
+  const attempt = String(
+    attemptOverride !== null && attemptOverride !== undefined
+      ? attemptOverride
+      : spelling.diagnostic.currentInput || ""
+  ).trim();
+  if (!attempt) {
+    spelling.coachMessage = "Type the word before moving to the next item.";
+    persistSubjects();
+    return;
+  }
+  spelling.diagnostic.responses[wordEntry.id] = {
+    attempt,
+    correct: normalizeSpellingAttempt(attempt) === normalizeSpellingAttempt(wordEntry.word)
+  };
+  spelling.diagnostic.currentInput = "";
+  spelling.diagnostic.currentIndex += 1;
+
+  if (spelling.diagnostic.currentIndex >= diagnosticWordCount) {
+    finaliseSpellingDiagnostic(subject);
+  } else {
+    const nextWord = getSpellingDiagnosticCurrentWord(spelling);
+    spelling.coachMessage = nextWord
+      ? `Saved. Word ${spelling.diagnostic.currentIndex + 1} of ${diagnosticWordCount} is ready.`
+      : spelling.coachMessage;
+  }
+
+  persistSubjects();
+}
+
+function submitSpellingRepeatWord(subject, attemptOverride = null) {
+  const spelling = getSubjectSpellingState(subject);
+  const wordEntry = getSpellingRepeatCurrentWord(spelling);
+  const diagnosticWordCount = getSpellingDiagnosticWordCount(spelling);
+  if (!wordEntry) {
+    return;
+  }
+  const attempt = String(
+    attemptOverride !== null && attemptOverride !== undefined
+      ? attemptOverride
+      : spelling.repeatCheck.currentInput || ""
+  ).trim();
+  if (!attempt) {
+    spelling.coachMessage = "Type the word before moving to the next item.";
+    persistSubjects();
+    return;
+  }
+  spelling.repeatCheck.responses[wordEntry.id] = {
+    attempt,
+    correct: normalizeSpellingAttempt(attempt) === normalizeSpellingAttempt(wordEntry.word)
+  };
+  spelling.repeatCheck.currentInput = "";
+  spelling.repeatCheck.currentIndex += 1;
+
+  if (spelling.repeatCheck.currentIndex >= diagnosticWordCount) {
+    finaliseSpellingRepeatCheck(subject);
+  } else {
+    const nextWord = getSpellingRepeatCurrentWord(spelling);
+    spelling.coachMessage = nextWord
+      ? `Saved. Word ${spelling.repeatCheck.currentIndex + 1} of ${diagnosticWordCount} is ready.`
+      : spelling.coachMessage;
+  }
+
+  persistSubjects();
+}
+
+function checkSpellingLooksRight(subject) {
+  const spelling = getSubjectSpellingState(subject);
+  const followUpWords = getSpellingFollowUpWords(spelling);
+  spelling.looksRight.checked = true;
+  spelling.looksRight.completed = isSpellingLooksRightComplete(spelling);
+  const incorrectWords = followUpWords.filter((entry) => spelling.looksRight.answers[entry.id] !== entry.word);
+  const unansweredWords = followUpWords.filter((entry) => !spelling.looksRight.answers[entry.id]);
+  if (spelling.looksRight.completed) {
+    celebrateSpellingStage(
+      subject,
+      "looks-right",
+      incorrectWords.length
+        ? `Visual check complete. Stage 3 will start with ${incorrectWords[0].word} because it still needs stabilising.`
+        : "Visual check complete. You are ready to stabilise the same words across their families."
+    );
+    return;
+  }
+  spelling.coachMessage = incorrectWords.length
+    ? `Recheck ${incorrectWords[0].word}. Ask whether the spelling looks settled before you submit again.`
+    : unansweredWords.length
+      ? "Choose an answer for each sentence before checking this stage."
+      : "Visual check complete. Continue to the next stage.";
+  persistSubjects();
+}
+
+function selectSpellingLooksRightAnswer(subject, wordId, value) {
+  const spelling = getSubjectSpellingState(subject);
+  const entry = SPELLING_INTERVENTION_LIBRARY[wordId];
+  if (!entry) {
+    return;
+  }
+  spelling.looksRight.answers[wordId] = value;
+  spelling.looksRight.checked = false;
+  spelling.looksRight.completed = false;
+  spelling.looksRight.currentWordId = wordId;
+  spelling.looksRight.awaitingAdvanceWordId = wordId;
+  spelling.looksRight.feedbackKind = value === entry.word ? "correct" : "incorrect";
+  spelling.looksRight.feedbackMessage = value === entry.word
+    ? `${entry.word} is the settled spelling in this word family.`
+    : `The correct spelling is ${entry.word}.`;
+  spelling.coachMessage = value === entry.word
+    ? `Correct. ${entry.lookRightNote || entry.familyNote || ""}`.trim()
+    : `Incorrect. ${entry.lookRightNote || `Look back at how ${entry.word} is built.`}`.trim();
+  persistSubjects();
+}
+
+function advanceSpellingLooksRightWord(subject) {
+  const spelling = getSubjectSpellingState(subject);
+  const currentWordId = String(spelling.looksRight.awaitingAdvanceWordId || spelling.looksRight.currentWordId || "");
+  if (!currentWordId) {
+    return;
+  }
+  const followUpWords = getSpellingFollowUpWords(spelling);
+  const allAnswered = followUpWords.every((entry) => Boolean(spelling.looksRight.answers[entry.id]));
+  spelling.looksRight.awaitingAdvanceWordId = "";
+  spelling.looksRight.feedbackKind = "";
+  spelling.looksRight.feedbackMessage = "";
+  spelling.looksRight.currentWordId = "";
+  if (allAnswered) {
+    checkSpellingLooksRight(subject);
+    return;
+  }
+  const nextWord = getSpellingLooksRightCurrentWord(spelling);
+  const answeredCount = followUpWords.filter((entry) => Boolean(spelling.looksRight.answers[entry.id])).length;
+  spelling.coachMessage = nextWord
+    ? `Sentence ${Math.min(answeredCount + 1, followUpWords.length)} of ${followUpWords.length} is ready.`
+    : spelling.coachMessage;
+  persistSubjects();
+}
+
+function buildSpellingFamilySentenceMarkup(sentence, highlightWord) {
+  const wordPattern = new RegExp(`\\b${escapeRegex(highlightWord)}\\b`, "i");
+  const match = sentence.match(wordPattern);
+  if (!match || match.index === undefined) {
+    return escapeHtml(sentence);
+  }
+  const before = sentence.slice(0, match.index);
+  const after = sentence.slice(match.index + match[0].length);
+  return `${escapeHtml(before)}<span class="spelling-inline-target">${escapeHtml(match[0])}</span>${escapeHtml(after)}`;
+}
+
+function buildSpellingMismatchExplanation(expectedWord, typedValue) {
+  const expected = normalizeSpellingAttempt(expectedWord);
+  const attempt = normalizeSpellingAttempt(typedValue);
+  if (!attempt) {
+    return "No letters were entered yet.";
+  }
+
+  const mismatchIndex = [...expected].findIndex((character, index) => attempt[index] !== character);
+  if (mismatchIndex === -1) {
+    if (attempt.length < expected.length) {
+      return `The ending is incomplete. The missing finish is ${expectedWord.slice(attempt.length)}.`;
+    }
+    if (attempt.length > expected.length) {
+      return `Extra letters were added after ${expectedWord}.`;
+    }
+    return "The spelling matches.";
+  }
+
+  const expectedLetter = expected[mismatchIndex] || "";
+  const actualLetter = attempt[mismatchIndex] || "nothing";
+  return `The mismatch starts at letter ${mismatchIndex + 1}: expected ${expectedLetter} but got ${actualLetter}.`;
+}
+
+function buildSpellingRecallFeedback(entry, typedValue, isCorrect) {
+  if (isCorrect) {
+    return `Correct. ${entry.familyNote}`;
+  }
+  return `Incorrect. You typed ${typedValue || "nothing"}. The correct spelling is ${entry.word}. ${buildSpellingMismatchExplanation(entry.word, typedValue)} ${entry.familyNote}`;
+}
+
+function getSpellingWordFamilyReferenceMarkup(entry) {
+  return `
+    <div class="spelling-family-reference">
+      <div class="spelling-family-reference__chips">
+        ${[entry.word, ...(entry.familyWords || [])]
+          .map((word, index) => `<span class="spelling-skill${index === 0 ? " is-strong" : ""}">${escapeHtml(word)}</span>`)
+          .join("")}
+      </div>
+    </div>
+  `;
+}
+
+function buildSpellingSyntheticDistractor(entry) {
+  const baseWrong = String(entry?.lookRightWrong || "").trim();
+  const baseWord = String(entry?.word || "").trim();
+  if (!baseWrong || !baseWord) {
+    return baseWrong || baseWord;
+  }
+  if (baseWrong.endsWith("e")) {
+    return baseWrong.slice(0, -1);
+  }
+  if (baseWord.endsWith("e")) {
+    return `${baseWrong}e`;
+  }
+  return `${baseWrong}${baseWrong.at(-1) || ""}`;
+}
+
+function buildSpellingLooksRightOptions(spelling, entry) {
+  const diagnosticEntry = SPELLING_DIAGNOSTIC_WORDS.find((wordEntry) => wordEntry.interventionId === entry.id);
+  const diagnosticAttempt = String(spelling.diagnostic.responses[diagnosticEntry?.id || ""]?.attempt || "").trim();
+  const options = [
+    {
+      value: entry.word,
+      displayWord: entry.lookRightChoiceCorrect || entry.articulation || entry.word
+    },
+    {
+      value: entry.lookRightWrong,
+      displayWord: entry.lookRightChoiceWrong || entry.lookRightWrong
+    },
+    diagnosticAttempt && normalizeSpellingAttempt(diagnosticAttempt) !== normalizeSpellingAttempt(entry.word)
+      ? {
+          value: diagnosticAttempt,
+          displayWord: diagnosticAttempt
+        }
+      : {
+          value: buildSpellingSyntheticDistractor(entry),
+          displayWord: buildSpellingSyntheticDistractor(entry)
+        }
+  ]
+    .filter((option) => option.value)
+    .filter((option, index, array) => array.findIndex((candidate) => normalizeSpellingAttempt(candidate.value) === normalizeSpellingAttempt(option.value)) === index);
+
+  while (options.length < 3) {
+    const fallbackValue = `${entry.lookRightWrong}${options.length}`;
+    options.push({
+      value: fallbackValue,
+      displayWord: fallbackValue
+    });
+  }
+
+  const seededRank = (value) =>
+    String(`${spelling.currentAttemptId || "attempt"}:${entry.id}:${value}`)
+      .split("")
+      .reduce((total, character, index) => total + character.charCodeAt(0) * (index + 1), 0);
+
+  return options
+    .slice(0, 3)
+    .sort((left, right) => {
+      const difference = (seededRank(left.value) % 101) - (seededRank(right.value) % 101);
+      return difference || left.value.localeCompare(right.value);
+    });
+}
+
+function buildSpellingPaddockMarkup(spelling) {
+  const ownedHorses = getSpellingOwnedHorseMeta(spelling);
+  const stalls = ownedHorses.length ? ownedHorses : [];
+  const stallCount = Math.max(6, stalls.length || 0);
+  const roamingCount = ownedHorses.filter((horse) => horse.state.roaming).length;
+  const stallMarkup = Array.from({ length: stallCount }, (_, index) => {
+    const horse = stalls[index] || null;
+    const stateEntry = horse?.state || buildDefaultSpellingPaddockEntry(index);
+    const isRoaming = Boolean(horse && stateEntry.roaming);
+    return `
+      <div class="ss-stall${isRoaming ? " is-empty" : ""}" data-spelling-stall="${escapeHtml(`s${index + 1}`)}">
+        <div class="ss-stall-cell">
+          <div class="ss-stall-inner">
+            ${horse && !isRoaming ? `<img class="ss-horse ss-horse--stall" src="${escapeHtml(horse.image)}" alt="${escapeHtml(horse.name)}" data-spelling-horse="${escapeHtml(horse.id)}" data-spelling-horse-mode="stall" />` : ""}
+          </div>
+          <div class="ss-stall-bars"></div>
+          <div class="ss-stall-door"><span class="ss-stall-plate">No. ${index + 1}</span></div>
+          <div class="ss-stall-empty">Out roaming</div>
+        </div>
+      </div>
+    `;
+  }).join("");
+  const roamingMarkup = ownedHorses
+    .filter((horse) => horse.state.roaming)
+    .map((horse) => `
+      <img
+        class="ss-horse ss-horse--roaming"
+        src="${escapeHtml(horse.image)}"
+        alt="${escapeHtml(horse.name)}"
+        data-spelling-horse="${escapeHtml(horse.id)}"
+        data-spelling-horse-mode="roaming"
+        style="left:${escapeHtml(String(horse.state.left))}px;top:${escapeHtml(String(horse.state.top))}px;"
+      />
+    `)
+    .join("");
+
+  return `
+    <section class="ss-stable-card ss-stable-card--full">
+      <div class="ss-paddock-frame pf-frame" data-spelling-paddock-frame="true">
+        <div class="ss-paddock-stage" data-spelling-paddock-stage="true">
+          <div class="ss-paddock-callout">Tap a horse from the stalls to bring it into the paddock, then drag it anywhere</div>
+          ${roamingMarkup}
+        </div>
+        <div class="ss-stalls-panel">
+        <div class="ss-stalls-head">
+          <h4>The stalls</h4>
+          <span>${escapeHtml(roamingCount ? `${roamingCount} roaming in the paddock · tap a horse to bring it back` : "Every earned horse appears below · tap a horse to send it out · tap it again in the paddock to bring it back")}</span>
+        </div>
+        ${roamingCount ? '<div class="spelling-stage-actions spelling-stage-actions--compact"><button type="button" class="ghost-button ghost-button--small" data-spelling-return-all-stalls="true">Return all to stalls</button></div>' : ""}
+          <div class="ss-stall-grid-wrap">
+            <div class="ss-stall-grid">${stallMarkup}</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function buildSpellingSurfaceTabs(activeTab) {
+  const tabs = [
+    { id: "session", label: "Session" },
+    { id: "paddock", label: "Paddock" },
+    { id: "progress", label: "Progress" }
+  ];
+
+  return `
+    <div class="ss-surface-tabs" role="tablist" aria-label="Spelling views">
+      ${tabs
         .map(
-          ([id, label]) => `
+          (tab) => `
             <button
               type="button"
-              class="spelling-surface-tab${id === activeTab ? " is-active" : ""}"
-              data-spelling-home-tab="${id}"
+              class="ss-surface-tab${tab.id === activeTab ? " is-active" : ""}"
+              data-spelling-home-tab="${tab.id}"
             >
-              ${escapeHtml(label)}
+              ${escapeHtml(tab.label)}
             </button>
           `
         )
@@ -4073,600 +8272,615 @@ function buildSpellingSurfaceTabs(activeTab) {
   `;
 }
 
-function formatSignedPercentage(value) {
-  if (value === null || value === undefined || Number.isNaN(value)) {
-    return "Pending";
-  }
-  return `${value > 0 ? "+" : ""}${Math.round(value)}%`;
-}
-
-function checkSpellingAssessmentStage(subject, stageId) {
-  const spelling = getSubjectSpellingState(subject);
-  const activity = spelling.activities[stageId];
-  if (!activity || !activity.answers) {
-    return;
-  }
-
-  const results = buildSpellingAssessmentResults(activity.answers);
-  const allCorrect = results.every((result) => result.correct);
-  activity.results = results;
-  activity.checked = true;
-  activity.completed = true;
-  activity.attempts.push({
-    id: createId(),
-    savedAt: new Date().toISOString(),
-    results
-  });
-  recordSpellingWordHistory(subject, stageId, results.map((result) => result.word));
-
-  if (stageId === "jump") {
-    const averageAccuracy = getSpellingAssessmentAverageAccuracy(activity);
-    spelling.coachMessage = allCorrect
-      ? `${SPELLING_UNIT_SEED.horseName} says: strong baseline. Now choose stage 2, 3, or 4 and train the words that slipped.`
-      : `${SPELLING_UNIT_SEED.horseName} says: baseline captured at ${averageAccuracy}%. Train stages 2 to 4, then repeat stage 5 and compare the lift.`;
-  } else if (stageId === "sentence") {
-    const baselineAverage = getSpellingAssessmentAverageAccuracy(spelling.activities.jump);
-    const stageFiveAverage = getSpellingAssessmentAverageAccuracy(activity);
-    const improvement = stageFiveAverage - baselineAverage;
-    spelling.coachMessage = allCorrect
-      ? `${SPELLING_UNIT_SEED.horseName} says: stage 5 matched the full word list cleanly. Final improvement: ${formatSignedPercentage(improvement)}.`
-      : `${SPELLING_UNIT_SEED.horseName} says: stage 5 is checked. Compare the words below, then reset stage 5 to try again if needed.`;
-  }
-
-  spelling.selectedStageId = getRecommendedSpellingStageId(spelling);
-  persistSubjects();
-}
-
-function buildSpellingLevelRail(stageIndex) {
+function buildSpellingSessionProgressCard(
+  subject,
+  spelling,
+  currentStageId = getSpellingStageId(subject),
+  subtitle = "Earn 5 ribbons to win a horse."
+) {
+  const completionMap = getSpellingStageCompletionMap(subject);
   return `
-    <section class="spelling-level-rail" aria-label="Horse levels">
-      ${SPELLING_STAGE_ORDER
-        .map(
-          (levelId, index) => `
-            <article class="spelling-level${index <= stageIndex ? " is-active" : ""}${index === stageIndex ? " is-current" : ""}">
-              <span class="spelling-level__step">${index + 1}</span>
-              <strong>${escapeHtml(SPELLING_STAGE_LABELS[levelId])}</strong>
-            </article>
-          `
-        )
-        .join("")}
+    <section class="ss-side-card">
+      <p class="eyebrow">Set progress</p>
+      <h4>${escapeHtml(subtitle)}</h4>
+      <div class="ss-progress-list">
+        ${SPELLING_STAGE_ORDER
+          .map((stageId, index) => {
+            const isComplete = completionMap[stageId];
+            const isCurrent = !isComplete && currentStageId === stageId;
+            const isOpenable = canOpenSpellingStage(subject, stageId);
+            const status = isCurrent ? "In progress" : isOpenable ? "Ready" : "Locked";
+            return `
+              <button
+                type="button"
+                class="ss-progress-row${isComplete ? " is-complete" : isCurrent ? " is-current" : ""}"
+                data-spelling-open-stage="${escapeHtml(stageId)}"
+                ${isOpenable ? "" : "disabled"}
+              >
+                <span class="ss-progress-token">${isComplete ? "✓" : index + 1}</span>
+                <div class="ss-progress-copy">
+                  <strong>${escapeHtml(SPELLING_STAGE_LABELS[stageId])}</strong>
+                  ${isComplete ? '<span class="ss-progress-ribbon" aria-label="Ribbon earned"><span class="ss-progress-ribbon__straps"></span><span class="ss-progress-ribbon__medal"></span></span>' : `<span>${escapeHtml(status)}</span>`}
+                </div>
+              </button>
+            `;
+          })
+          .join("")}
+      </div>
     </section>
   `;
 }
 
-function buildSpellingActivitySnapshotCards(spelling) {
-  const activityCards = SPELLING_ACTIVITY_ORDER.map((stageId) => ({
-    eyebrow: SPELLING_STAGE_DETAILS[stageId].label,
-    title: SPELLING_STAGE_DETAILS[stageId].title,
-    completed: Boolean(spelling.activities[stageId]?.completed),
-    note: SPELLING_STAGE_DETAILS[stageId].note
-  }));
+function buildSpellingStableMiniCard(spelling) {
+  const owned = getSpellingOwnedHorseMeta(spelling);
+  return `
+    <section class="ss-side-card">
+      <div class="ss-side-card__head">
+        <h4>Your stable</h4>
+        <span>${escapeHtml(`${owned.length} / ${SPELLING_PADDOCK_HORSES.length}`)}</span>
+      </div>
+      <div class="ss-stable-mini-scroll">
+        <div class="ss-stable-mini-grid">
+          ${owned.length
+            ? owned
+                .map(
+                  (horse) => `
+                    <article class="ss-stable-mini-card">
+                      <div class="ss-stable-mini-art">
+                        <img src="${escapeHtml(horse.image)}" alt="${escapeHtml(horse.label)}" />
+                      </div>
+                      <strong>${escapeHtml(horse.label)}</strong>
+                    </article>
+                  `
+                )
+                .join("")
+            : '<p class="ss-stage-copy">Finish a full set to add your first horse.</p>'}
+        </div>
+      </div>
+    </section>
+  `;
+}
 
-  return activityCards
-    .map(
-      (card) => `
-        <article class="spelling-card">
-          <div class="spelling-card__header">
-            <div>
-              <p class="eyebrow">${escapeHtml(card.eyebrow)}</p>
-              <h4>${escapeHtml(card.title)}</h4>
-            </div>
-            <span class="spelling-card__status${card.completed ? " is-complete" : ""}">${card.completed ? "Ribbon earned" : "In training"}</span>
-          </div>
-          <p>${escapeHtml(card.note)}</p>
+function buildSpellingInstanceOverviewCard(spelling) {
+  const overview = getSpellingInstanceOverview(spelling);
+  return `
+    <section class="ss-side-card">
+      <p class="eyebrow">Instance overview</p>
+      <h4>Completed five-stage runs</h4>
+      <div class="ss-focus-row">
+        <article class="ss-focus-card">
+          <strong>${escapeHtml(String(overview.instanceCount))}</strong>
+          <span>instances logged</span>
         </article>
-      `
-    )
-    .join("");
-}
-
-function buildSpellingSessionStageSelector(spelling) {
-  const unlockedStages = new Set(getUnlockedSpellingStageIds(spelling));
-  return `
-    <section class="spelling-stage-selector" aria-label="Session stages">
-      ${SPELLING_ACTIVITY_ORDER.map((stageId) => {
-        const stage = SPELLING_STAGE_DETAILS[stageId];
-        const completed = Boolean(spelling.activities[stageId]?.completed);
-        const unlocked = unlockedStages.has(stageId);
-        const current = spelling.selectedStageId === stageId;
-        const statusLabel = completed ? "Done" : unlocked ? "Ready" : "Locked";
-        return `
-          <button
-            type="button"
-            class="spelling-stage-button${current ? " is-current" : ""}${completed ? " is-complete" : ""}"
-            data-spelling-stage-select="${stageId}"
-            ${unlocked ? "" : "disabled"}
-          >
-            <span class="spelling-stage-button__meta">${escapeHtml(stage.label)}</span>
-            <strong>${escapeHtml(stage.title)}</strong>
-            <span class="spelling-stage-button__status">${escapeHtml(statusLabel)}</span>
-          </button>
-        `;
-      }).join("")}
+        <article class="ss-focus-card">
+          <strong>${escapeHtml(String(overview.uniqueWordCount))}</strong>
+          <span>unique words covered</span>
+        </article>
+        <article class="ss-focus-card">
+          <strong>${escapeHtml(`${overview.averageStageFiveAccuracy}%`)}</strong>
+          <span>average stage 5 accuracy</span>
+        </article>
+      </div>
     </section>
   `;
 }
 
-function buildSpellingAssessmentComparison(spelling) {
-  const baselineAverage = getSpellingAssessmentAverageAccuracy(spelling.activities.jump);
-  const stageFiveAverage = getSpellingAssessmentAverageAccuracy(spelling.activities.sentence);
-  const improvement = stageFiveAverage - baselineAverage;
-  const improvedWordCount = (spelling.activities.sentence.results || []).filter((stageFiveResult) => {
-    const baseline = (spelling.activities.jump.results || []).find(
-      (baselineResult) => normalizeSpellingWord(baselineResult.word) === normalizeSpellingWord(stageFiveResult.word)
-    );
-    return baseline && stageFiveResult.accuracy > baseline.accuracy;
-  }).length;
+function buildSpellingOneRibbonCard() {
+  return `
+    <section class="ss-side-card ss-side-card--accent">
+      <p class="eyebrow">Two stages to go</p>
+      <h4>Finish tenses, then the final spelling check, to win a new horse for your stable.</h4>
+    </section>
+  `;
+}
+
+function buildSpellingStageSidebar(subject, spelling, stageId) {
+  if (stageId === "diagnostic") {
+    return `
+      ${buildSpellingSessionProgressCard(subject, spelling, stageId)}
+      ${buildSpellingStableMiniCard(spelling)}
+    `;
+  }
+
+  if (stageId === "looks-right") {
+    return `
+      ${buildSpellingSessionProgressCard(subject, spelling, stageId)}
+      ${buildSpellingReviewBacklogCard(spelling)}
+    `;
+  }
+
+  if (stageId === "word-families") {
+    return `
+      ${buildSpellingSessionProgressCard(subject, spelling, stageId)}
+      ${buildSpellingOneRibbonCard()}
+    `;
+  }
+
+  if (stageId === "tense-transfer") {
+    return `
+      ${buildSpellingSessionProgressCard(subject, spelling, stageId, "One final check — then a new horse.")}
+      ${buildSpellingHorsePreviewCard(spelling)}
+    `;
+  }
 
   return `
-    <div class="spelling-comparison-strip">
-      <article class="spelling-surface-stat">
-        <span>Stage 1 average</span>
-        <strong>${escapeHtml(`${baselineAverage}%`)}</strong>
+    ${buildSpellingSessionProgressCard(subject, spelling, stageId, "Last ribbon — then a new horse.")}
+    ${buildSpellingHorsePreviewCard(spelling)}
+  `;
+}
+
+function buildSpellingReviewBacklogCard(spelling) {
+  const words = (getSpellingFollowUpWords(spelling).length ? getSpellingFollowUpWords(spelling) : getSpellingAttemptWords(spelling)).slice(0, 3);
+  return `
+    <section class="ss-side-card">
+      <p class="eyebrow">Review backlog</p>
+      <h4>Words coming back soon</h4>
+      <div class="ss-backlog-list">
+        ${words
+          .map((entry, index) => `
+            <article class="ss-backlog-row">
+              <strong>${escapeHtml(entry.word)}</strong>
+              <span>${escapeHtml(index === 0 ? "due now" : SPELLING_UNIT_SEED.reviewDays[Math.min(index, SPELLING_UNIT_SEED.reviewDays.length - 1)])}</span>
+            </article>
+          `)
+          .join("")}
+      </div>
+    </section>
+  `;
+}
+
+function buildSpellingHorsePreviewCard(spelling) {
+  const nextHorse = SPELLING_PADDOCK_HORSES[getSpellingVisibleHorseCount(spelling)] || null;
+  if (!nextHorse) {
+    return `
+      <section class="ss-side-card">
+        <p class="eyebrow">Stable full</p>
+        <h4>All horses unlocked</h4>
+        <p class="ss-stage-copy">Keep finishing sessions to strengthen review, even though the stable is already complete.</p>
+      </section>
+    `;
+  }
+
+  return `
+    <section class="ss-side-card ss-side-card--horse-preview">
+      <div class="ss-horse-preview">
+        <img src="${escapeHtml(nextHorse.image)}" alt="${escapeHtml(nextHorse.name)}" />
+      </div>
+      <strong>${escapeHtml(`${nextHorse.name} is waiting`)}</strong>
+      <span>${escapeHtml(`Earn the 5th ribbon to add this ${nextHorse.label} to your stable.`)}</span>
+    </section>
+  `;
+}
+
+function buildSpellingHomeOverview(subject, spelling) {
+  const currentStageId = getSpellingStageId(subject);
+  const currentStageLabel = SPELLING_STAGE_LABELS[currentStageId] || "Diagnostic";
+  const attemptComplete = isSpellingAttemptComplete(subject);
+  const isFreshSession = !attemptComplete && !spelling.diagnostic.completed && !Object.keys(spelling.diagnostic.responses || {}).length;
+  const ownedHorseCount = getSpellingVisibleHorseCount(spelling);
+  const latestHorseMeta = getSpellingPaddockHorseMeta(spelling.lastUnlockedHorseId || spelling.paddockHorses[spelling.paddockHorses.length - 1]);
+  return `
+    <section class="ss-home-stack">
+      <article class="ss-stage-panel">
+        <div class="ss-stage-panel__head">
+          <div>
+            <p class="eyebrow">Spelling Stables</p>
+            <h4>${escapeHtml(attemptComplete ? "Set complete" : isFreshSession ? "Ready to begin a new set" : `Continue with ${currentStageLabel}`)}</h4>
+          </div>
+          <span class="ss-stage-badge">${escapeHtml(`${ownedHorseCount} / ${SPELLING_PADDOCK_HORSES.length} horses`)}</span>
+        </div>
+        <p class="ss-stage-copy">${escapeHtml(attemptComplete ? `All five stages are complete.${latestHorseMeta ? ` ${latestHorseMeta.name} is now in the stable.` : ""} Review the finished set or start a fresh one when you are ready.` : SPELLING_UNIT_SEED.intro)}</p>
+        <div class="ss-stage-actions">
+          <button type="button" class="primary-button primary-button--dark" data-spelling-begin-session="true">${escapeHtml(attemptComplete ? "Review completed set" : isFreshSession ? "Start spelling session" : `Continue to ${currentStageLabel}`)}</button>
+          ${attemptComplete ? '<button type="button" class="ghost-button ghost-button--small" data-spelling-reset-unit="true">Start next set</button>' : ""}
+        </div>
       </article>
-      <article class="spelling-surface-stat">
-        <span>Stage 5 average</span>
-        <strong>${escapeHtml(`${stageFiveAverage}%`)}</strong>
-      </article>
-      <article class="spelling-surface-stat">
-        <span>Improvement</span>
-        <strong>${escapeHtml(formatSignedPercentage(improvement))}</strong>
-      </article>
-      <article class="spelling-surface-stat">
-        <span>Words improved</span>
-        <strong>${escapeHtml(String(improvedWordCount))}</strong>
-      </article>
+      ${buildSpellingSessionProgressCard(subject, spelling, currentStageId)}
+    </section>
+  `;
+}
+
+function buildSpellingStableHome(subject, spelling) {
+  return `
+    <div class="ss-home-panel ss-home-panel--stable">
+      <div class="ss-main">
+        ${buildSpellingPaddockMarkup(spelling)}
+      </div>
     </div>
   `;
 }
 
-function buildSpellingAssessmentStageCard(spelling, stageId) {
-  const activity = spelling.activities[stageId];
-  const stage = SPELLING_STAGE_DETAILS[stageId];
-  const resultLookup = new Map((activity.results || []).map((result) => [normalizeSpellingWord(result.word), result]));
-  const checked = Boolean(activity.checked);
-  const averageAccuracy = getSpellingAssessmentAverageAccuracy(activity);
-  const attemptCount = Array.isArray(activity.attempts) ? activity.attempts.length : 0;
-
+function buildSpellingProgressHome(subject, spelling) {
+  const instanceRows = getSpellingCompletedInstanceRows(spelling);
+  const overview = getSpellingInstanceOverview(spelling);
+  const wordProgressRows = getSpellingWordProgressRows(spelling);
   return `
-    <article class="spelling-card spelling-card--wide">
-      <div class="spelling-card__header">
-        <div>
-          <p class="eyebrow">${escapeHtml(stage.label)}</p>
-          <h4>${escapeHtml(stage.title)}</h4>
-        </div>
-        <span class="spelling-card__status${activity.completed ? " is-complete" : ""}">${activity.completed ? "Complete" : "In training"}</span>
-      </div>
-      <p>${escapeHtml(stage.note)}</p>
-      <div class="spelling-assessment-grid">
-        ${SPELLING_ASSESSMENT_WORDS.map((word) => {
-          const result = resultLookup.get(normalizeSpellingWord(word)) || null;
-          return `
-            <label class="spelling-assessment-row${result?.correct ? " is-complete" : checked ? " is-checked" : ""}">
-              <span class="spelling-assessment-row__word">${escapeHtml(word)}</span>
-              <input
-                type="text"
-                class="spelling-assessment-input"
-                value="${escapeHtml(activity.answers?.[word] || "")}"
-                data-spelling-assessment-input="${stageId}"
-                data-spelling-word="${word}"
-                placeholder="Type the spelling"
-              />
-              <span class="spelling-assessment-row__score">${checked && result ? `${result.accuracy}%` : "Not checked"}</span>
-            </label>
-          `;
-        }).join("")}
-      </div>
-      <div class="spelling-card__footer">
-        <span class="spelling-card__note">${escapeHtml(checked ? `${averageAccuracy}% average across ${SPELLING_ASSESSMENT_WORDS.length} words.` : `${SPELLING_ASSESSMENT_WORDS.length} words in the check.`)}</span>
-        <div class="spelling-card__actions">
-          <span class="spelling-card__attempts">${escapeHtml(`${attemptCount} attempt${attemptCount === 1 ? "" : "s"} saved`)}</span>
-          <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="${stageId}">Clear</button>
-          <button type="button" class="primary-button primary-button--dark" data-spelling-check-assessment="${stageId}">Check ${escapeHtml(stage.label)}</button>
-        </div>
-      </div>
-      ${stageId === "sentence" && activity.checked && spelling.activities.jump.checked ? buildSpellingAssessmentComparison(spelling) : ""}
-    </article>
-  `;
-}
-
-function buildSpellingTagStageCard(spelling) {
-  return `
-    <article class="spelling-card spelling-card--wide">
-      <div class="spelling-card__header">
-        <div>
-          <p class="eyebrow">${escapeHtml(SPELLING_STAGE_DETAILS.tag.label)}</p>
-          <h4>${escapeHtml(SPELLING_STAGE_DETAILS.tag.title)}</h4>
-        </div>
-        <span class="spelling-card__status${spelling.activities.tag.completed ? " is-complete" : ""}">${spelling.activities.tag.completed ? "Complete" : "In training"}</span>
-      </div>
-      <p>${escapeHtml(SPELLING_STAGE_DETAILS.tag.note)}</p>
-      <div class="spelling-tag-row">
-        <div class="spelling-tag-word">s q <span class="spelling-tag-slot" data-spelling-dropzone="true" data-spelling-activity="tag" data-spelling-drop="letter">${spelling.activities.tag.letter ? escapeHtml(spelling.activities.tag.letter) : "?"}</span> a r e</div>
-        <div class="spelling-bank spelling-bank--tight">
-          ${SPELLING_UNIT_SEED.tagChoices
-            .map(
-              (letter) => `
-                <button type="button" class="spelling-drag spelling-drag--letter" draggable="true" data-spelling-drag="true" data-spelling-activity="tag" data-spelling-value="${letter}">
-                  ${letter}
-                </button>
-              `
-            )
-            .join("")}
-        </div>
-      </div>
-      <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="tag">Reset activity</button>
-    </article>
-  `;
-}
-
-function buildSpellingSortStageCard(spelling) {
-  const sortBankWords = getSpellingSortBankWords(spelling);
-  return `
-    <article class="spelling-card spelling-card--wide">
-      <div class="spelling-card__header">
-        <div>
-          <p class="eyebrow">${escapeHtml(SPELLING_STAGE_DETAILS.sort.label)}</p>
-          <h4>${escapeHtml(SPELLING_STAGE_DETAILS.sort.title)}</h4>
-        </div>
-        <span class="spelling-card__status${spelling.activities.sort.completed ? " is-complete" : ""}">${spelling.activities.sort.completed ? "Complete" : "In training"}</span>
-      </div>
-      <p>${escapeHtml(SPELLING_STAGE_DETAILS.sort.note)}</p>
-      <div class="spelling-bank">
-        ${sortBankWords
-          .map(
-            (word) => `
-              <button type="button" class="spelling-drag" draggable="true" data-spelling-drag="true" data-spelling-activity="sort" data-spelling-value="${word}">
-                ${word}
-              </button>
-            `
-          )
-          .join("") || '<span class="spelling-bank__done">All words sorted.</span>'}
-      </div>
-      <div class="spelling-bucket-grid">
-        ${["air", "are", "ear"]
-          .map(
-            (bucket) => `
-              <div class="spelling-bucket" data-spelling-dropzone="true" data-spelling-activity="sort" data-spelling-drop="${bucket}">
-                <strong>${bucket.toUpperCase()}</strong>
-                <div class="spelling-bucket__words">
-                  ${(spelling.activities.sort[bucket] || [])
-                    .map((word) => `<span class="spelling-chip spelling-chip--placed">${escapeHtml(word)}</span>`)
-                    .join("") || '<span class="spelling-bucket__hint">Drop words here</span>'}
-                </div>
-              </div>
-            `
-          )
-          .join("")}
-      </div>
-      <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="sort">Reset activity</button>
-    </article>
-  `;
-}
-
-function buildSpellingFamilyStageCard(spelling) {
-  const familyBankWords = getSpellingFamilyBankWords(spelling);
-  return `
-    <article class="spelling-card spelling-card--wide">
-      <div class="spelling-card__header">
-        <div>
-          <p class="eyebrow">${escapeHtml(SPELLING_STAGE_DETAILS.family.label)}</p>
-          <h4>${escapeHtml(SPELLING_STAGE_DETAILS.family.title)}</h4>
-        </div>
-        <span class="spelling-card__status${spelling.activities.family.completed ? " is-complete" : ""}">${spelling.activities.family.completed ? "Complete" : "In training"}</span>
-      </div>
-      <p>${escapeHtml(SPELLING_STAGE_DETAILS.family.note)}</p>
-      <div class="spelling-bank">
-        ${familyBankWords
-          .map(
-            (word) => `
-              <button type="button" class="spelling-drag" draggable="true" data-spelling-drag="true" data-spelling-activity="family" data-spelling-value="${word}">
-                ${word}
-              </button>
-            `
-          )
-          .join("") || '<span class="spelling-bank__done">Family complete.</span>'}
-      </div>
-      <div class="spelling-family-row">
-        ${SPELLING_UNIT_SEED.familyOrder
-          .map(
-            (word, index) => `
-              <div class="spelling-family-slot" data-spelling-dropzone="true" data-spelling-activity="family" data-spelling-drop="${index}">
-                <span class="spelling-family-slot__label">${index === 0 ? "Base" : `Step ${index + 1}`}</span>
-                ${spelling.activities.family.slots[index]
-                  ? `<strong>${escapeHtml(spelling.activities.family.slots[index])}</strong>`
-                  : '<span class="spelling-family-slot__hint">Drop family word</span>'}
-              </div>
-            `
-          )
-          .join("")}
-      </div>
-      <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="family">Reset activity</button>
-    </article>
-  `;
-}
-
-function buildSpellingActiveStageCard(spelling) {
-  const stageId = spelling.selectedStageId;
-  if (stageId === "jump" || stageId === "sentence") {
-    return buildSpellingAssessmentStageCard(spelling, stageId);
-  }
-  if (stageId === "tag") {
-    return buildSpellingTagStageCard(spelling);
-  }
-  if (stageId === "sort") {
-    return buildSpellingSortStageCard(spelling);
-  }
-  return buildSpellingFamilyStageCard(spelling);
-}
-
-function buildSpellingSessionHome(subject, spelling, masteryPercent, completedCount, totalCount, stageIndex) {
-  const activeStage = SPELLING_STAGE_DETAILS[spelling.selectedStageId];
-  return `
-    <section class="spelling-home-stack">
-      <article class="spelling-hero">
-        <div class="spelling-hero__copy">
-          <p class="eyebrow">Spelling Stables</p>
-          <div class="spelling-hero__title-row">
-            <h3>${escapeHtml(SPELLING_UNIT_SEED.title)}</h3>
-            <span class="spelling-hero__stage">${escapeHtml(getSpellingStageLabel(subject))}</span>
-          </div>
-          <p>${escapeHtml(SPELLING_UNIT_SEED.intro)}</p>
-          <div class="spelling-hero__chips">
-            <span class="spelling-chip spelling-chip--static">Active stage: ${escapeHtml(activeStage.label)}</span>
-            <span class="spelling-chip spelling-chip--static">Pattern: ${escapeHtml(SPELLING_UNIT_SEED.focusPattern)}</span>
-            <span class="spelling-chip spelling-chip--static">Horse: ${escapeHtml(SPELLING_UNIT_SEED.horseName)}</span>
-          </div>
-        </div>
-        <div class="spelling-hero__stats">
-          <div class="spelling-progress-ring" style="--spelling-progress:${getSpellingMasteryRatio(subject)}">
-            <strong>${escapeHtml(String(masteryPercent))}%</strong>
-            <span>mastery</span>
-          </div>
-          <div class="spelling-progress-copy">
-            <strong>${escapeHtml(`${completedCount}/${totalCount} ribbons earned`)}</strong>
-            <span>${escapeHtml(getSpellingPendingActivityCount(subject) ? "Select the next stage and keep training." : "All stages are complete. Open Progress for the final comparison.")}</span>
-          </div>
-          <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-unit="true">Reset lesson</button>
-        </div>
-      </article>
-
-      <section class="spelling-toolbar">
-        <div class="spelling-toolbar__group">
-          <span class="spelling-toolbar__label">Font</span>
-          <div class="spelling-choice-row">
-            ${[
-              ["lexend", "Lexend"],
-              ["atkinson", "Atkinson"],
-              ["study", "PaperPanda"]
-            ]
-              .map(
-                ([value, label]) => `
-                  <button type="button" class="spelling-choice${spelling.preferences.font === value ? " is-active" : ""}" data-spelling-set-font="${value}">
-                    ${label}
-                  </button>
-                `
-              )
-              .join("")}
-          </div>
-        </div>
-        <div class="spelling-toolbar__group">
-          <span class="spelling-toolbar__label">Spacing</span>
-          <div class="spelling-choice-row">
-            ${[
-              ["standard", "Standard"],
-              ["wide", "Wide"]
-            ]
-              .map(
-                ([value, label]) => `
-                  <button type="button" class="spelling-choice${spelling.preferences.spacing === value ? " is-active" : ""}" data-spelling-set-spacing="${value}">
-                    ${label}
-                  </button>
-                `
-              )
-              .join("")}
-          </div>
-        </div>
-        <div class="spelling-toolbar__group">
-          <span class="spelling-toolbar__label">Colour</span>
-          <div class="spelling-choice-row">
-            ${[
-              ["cream", "Warm cream"],
-              ["mist", "Soft mist"]
-            ]
-              .map(
-                ([value, label]) => `
-                  <button type="button" class="spelling-choice${spelling.preferences.tint === value ? " is-active" : ""}" data-spelling-set-tint="${value}">
-                    ${label}
-                  </button>
-                `
-              )
-              .join("")}
-          </div>
-        </div>
-      </section>
-
-      ${buildSpellingLevelRail(stageIndex)}
-      ${buildSpellingSessionStageSelector(spelling)}
-
-      <article class="spelling-coach-card">
-        <span class="spelling-coach-card__icon">🐴</span>
-        <div>
-          <strong>${escapeHtml(`${SPELLING_UNIT_SEED.horseName} says`)}</strong>
-          <p>${escapeHtml(spelling.coachMessage)}</p>
-        </div>
-      </article>
-
-      <section class="spelling-grid">
-        ${buildSpellingActiveStageCard(spelling)}
-      </section>
-    </section>
-  `;
-}
-
-function buildSpellingPaddockHome(subject, spelling, masteryPercent, completedCount, totalCount, stageIndex) {
-  const pendingCount = Math.max(0, totalCount - completedCount);
-  return `
-    <section class="spelling-home-stack">
-      <article class="spelling-hero">
-        <div class="spelling-hero__copy">
-          <p class="eyebrow">Spelling Stables</p>
-          <div class="spelling-hero__title-row">
-            <h3>${escapeHtml(`${SPELLING_UNIT_SEED.horseName}'s paddock`)}</h3>
-            <span class="spelling-hero__stage">${escapeHtml(getSpellingStageLabel(subject))}</span>
-          </div>
-          <p>The top navigation went missing with the old header. This view restores the paddock summary without changing the current lesson flow.</p>
-          <div class="spelling-hero__chips">
-            <span class="spelling-chip spelling-chip--static">Horse: ${escapeHtml(SPELLING_UNIT_SEED.horseName)}</span>
-            <span class="spelling-chip spelling-chip--static">Pattern: ${escapeHtml(SPELLING_UNIT_SEED.focusPattern)}</span>
-            <span class="spelling-chip spelling-chip--static">Current lesson: ${escapeHtml(SPELLING_UNIT_SEED.title)}</span>
-          </div>
-        </div>
-        <div class="spelling-hero__stats">
-          <div class="spelling-progress-ring" style="--spelling-progress:${getSpellingMasteryRatio(subject)}">
-            <strong>${escapeHtml(String(masteryPercent))}%</strong>
-            <span>mastery</span>
-          </div>
-          <div class="spelling-progress-copy">
-            <strong>${escapeHtml(`${completedCount}/${totalCount} ribbons earned`)}</strong>
-            <span>${escapeHtml(pendingCount ? `${pendingCount} stations still in training.` : "All stations cleared for the final retest.")}</span>
-          </div>
-        </div>
-      </article>
-
-      ${buildSpellingLevelRail(stageIndex)}
-
-      <section class="spelling-grid">
-        <article class="spelling-card">
-          <div class="spelling-card__header">
+    <div class="ss-home-panel">
+      <div class="ss-main">
+        <article class="ss-stage-panel">
+          <div class="ss-stage-panel__head">
             <div>
-              <p class="eyebrow">Paddock board</p>
-              <h4>Where Dusty is sitting</h4>
+              <p class="eyebrow">Progress</p>
+              <h4>Completed spelling instances</h4>
             </div>
-            <span class="spelling-card__status${pendingCount === 0 ? " is-complete" : ""}">${pendingCount === 0 ? "Ready for stage 5" : "Still training"}</span>
+            <span class="ss-stage-badge">${escapeHtml(`${overview.instanceCount} logged`)}</span>
           </div>
-          <p>Each completed station moves Dusty up the rail. Use Session to keep training, then come back here for a quick status check.</p>
-          <div class="spelling-surface-stat-grid">
-            <article class="spelling-surface-stat">
-              <span>Current level</span>
-              <strong>${escapeHtml(getSpellingStageLabel(subject))}</strong>
-            </article>
-            <article class="spelling-surface-stat">
-              <span>Ribbons</span>
-              <strong>${escapeHtml(String(completedCount))}</strong>
-            </article>
-            <article class="spelling-surface-stat">
-              <span>Next move</span>
-              <strong>${escapeHtml(pendingCount ? "Finish a stage" : "Open progress")}</strong>
-            </article>
+          <p class="ss-stage-copy">
+            ${escapeHtml(
+              instanceRows.length
+                ? "Each instance is one full five-stage spelling run. Review each completed set and every word checked in that run."
+                : "Finish one full five-stage spelling instance to start the progress log."
+            )}
+          </p>
+          <div class="ss-instance-list">
+            ${instanceRows.length
+              ? instanceRows
+                  .map((instanceRow) => `
+                    <article class="ss-instance-card">
+                      <div class="ss-instance-card__head">
+                        <div>
+                          <strong>${escapeHtml(`Instance ${instanceRow.instanceNumber}`)}</strong>
+                          <span>${escapeHtml(instanceRow.completedLabel)}</span>
+                        </div>
+                        <span class="ss-stage-badge">${escapeHtml(`${instanceRow.overallScorePercent}% overall`)}</span>
+                      </div>
+                      <p class="ss-stage-copy">${escapeHtml(`10 words · Stage 1: ${instanceRow.stageOneCorrect}/10 · Stage 5: ${instanceRow.stageFiveCorrect}/10 · Avg change: ${instanceRow.improvement > 0 ? "+" : ""}${instanceRow.improvement}%`)}</p>
+                      <div class="ss-review-list">
+                        ${instanceRow.wordResults
+                          .map((result) => {
+                            const improvement = result.stageFiveAccuracy - result.stageOneAccuracy;
+                            const ratingClass = result.stageFiveAccuracy >= 80 ? "is-correct" : result.stageFiveAccuracy >= 50 ? "" : "is-incorrect";
+                            return `
+                              <article class="ss-review-row ${ratingClass}">
+                                <div>
+                                  <strong>${escapeHtml(result.word)}</strong>
+                                  <span>${escapeHtml(`Stage 1: ${result.stageOneAccuracy}% · Stage 5: ${result.stageFiveAccuracy}% · Change: ${improvement > 0 ? "+" : ""}${improvement}%`)}</span>
+                                  <span>${escapeHtml(`Stage 1 attempt: ${result.stageOneAttempt || "No answer"} · Stage 5 attempt: ${result.stageFiveAttempt || "No answer"}`)}</span>
+                                </div>
+                                <span class="ss-review-mark">${escapeHtml(`${result.stageFiveAccuracy}%`)}</span>
+                              </article>
+                            `;
+                          })
+                          .join("")}
+                      </div>
+                    </article>
+                  `)
+                  .join("")
+              : '<p class="ss-stage-copy">No completed instances yet.</p>'}
           </div>
         </article>
-
-        <article class="spelling-card">
-          <div class="spelling-card__header">
+        <article class="ss-stage-panel">
+          <div class="ss-stage-panel__head">
             <div>
-              <p class="eyebrow">Stalls</p>
-              <h4>What is parked in this set</h4>
+              <p class="eyebrow">Word accuracy</p>
+              <h4>All words used across completed instances</h4>
             </div>
-            <span class="spelling-card__status">Lesson map</span>
+            <span class="ss-stage-badge">${escapeHtml(`${overview.loggedWordCount} logged words`)}</span>
           </div>
-          <p>This set keeps the same AIR pattern visible across baseline checking, targeted practice, and the final retest.</p>
-          <div class="spelling-hero__chips">
-            <span class="spelling-chip spelling-chip--static">Target word: ${escapeHtml(SPELLING_UNIT_SEED.targetWord)}</span>
-            ${SPELLING_UNIT_SEED.familyOrder.map((word) => `<span class="spelling-chip spelling-chip--static">${escapeHtml(word)}</span>`).join("")}
+          <div class="ss-review-list">
+            ${wordProgressRows.length
+              ? wordProgressRows
+                  .map((row) => `
+                    <article class="ss-review-row ${escapeHtml(row.ratingClass)}">
+                      <div>
+                        <strong>${escapeHtml(row.word)}</strong>
+                        <span>${escapeHtml(`${row.attempts} instance${row.attempts === 1 ? "" : "s"} · Stage 5 accuracy: ${row.stageFiveAccuracy}% · Change: ${row.improvement > 0 ? "+" : ""}${row.improvement}%`)}</span>
+                        <span>${escapeHtml(`Latest stage 1: ${row.stageOneAttempt} · Latest stage 5: ${row.stageFiveAttempt}`)}</span>
+                      </div>
+                      <span class="ss-review-mark">${escapeHtml(row.rating)}</span>
+                    </article>
+                  `)
+                  .join("")
+              : '<p class="ss-stage-copy">Complete stage 5 to start building per-word progress history.</p>'}
           </div>
         </article>
-
-        <article class="spelling-card spelling-card--wide">
-          <div class="spelling-card__header">
-            <div>
-              <p class="eyebrow">Coach note</p>
-              <h4>Next cue from ${escapeHtml(SPELLING_UNIT_SEED.horseName)}</h4>
-            </div>
-            <span class="spelling-card__status">Live state</span>
-          </div>
-          <p>${escapeHtml(spelling.coachMessage)}</p>
-          <div class="spelling-skill-list">
-            <span class="spelling-skill${spelling.activities.jump.completed ? " is-strong" : ""}">Baseline check</span>
-            <span class="spelling-skill${spelling.activities.sort.completed ? " is-strong" : ""}">Pattern sorting</span>
-            <span class="spelling-skill${spelling.activities.family.completed ? " is-strong" : ""}">Word family growth</span>
-            <span class="spelling-skill${spelling.activities.sentence.completed ? " is-strong" : ""}">Final retest</span>
-          </div>
-        </article>
-      </section>
-    </section>
+      </div>
+      <aside class="ss-side">
+        ${buildSpellingInstanceOverviewCard(spelling)}
+        ${buildSpellingHorsePreviewCard(spelling)}
+      </aside>
+    </div>
   `;
 }
 
-function buildSpellingProgressHome(subject, spelling, masteryPercent, completedCount, totalCount) {
-  const pendingCount = Math.max(0, totalCount - completedCount);
-  const progressEntries = getSpellingProgressEntries(subject);
-  const stageFiveAverage = getSpellingAssessmentAverageAccuracy(spelling.activities.sentence);
-  const baselineAverage = getSpellingAssessmentAverageAccuracy(spelling.activities.jump);
-  return `
-    <section class="spelling-home-stack">
-      <article class="spelling-card spelling-card--wide">
-        <div class="spelling-card__header">
-          <div>
-            <p class="eyebrow">Progress</p>
-            <h4>Lesson completion snapshot</h4>
-          </div>
-          <span class="spelling-card__status${pendingCount === 0 ? " is-complete" : ""}">${pendingCount === 0 ? "Complete set" : "In progress"}</span>
-        </div>
-        <p>This progress view now keeps every word used across lesson attempts and anchors the final scores to stage 5 rather than only the current screen state.</p>
-        <div class="spelling-surface-stat-grid">
-          <article class="spelling-surface-stat">
-            <span>Mastery</span>
-            <strong>${escapeHtml(`${masteryPercent}%`)}</strong>
-          </article>
-          <article class="spelling-surface-stat">
-            <span>Ribbons earned</span>
-            <strong>${escapeHtml(`${completedCount}/${totalCount}`)}</strong>
-          </article>
-          <article class="spelling-surface-stat">
-            <span>Remaining</span>
-            <strong>${escapeHtml(String(pendingCount))}</strong>
-          </article>
-          <article class="spelling-surface-stat">
-            <span>Current level</span>
-            <strong>${escapeHtml(getSpellingStageLabel(subject))}</strong>
-          </article>
-          <article class="spelling-surface-stat">
-            <span>Stage 1 average</span>
-            <strong>${escapeHtml(`${baselineAverage}%`)}</strong>
-          </article>
-          <article class="spelling-surface-stat">
-            <span>Stage 5 average</span>
-            <strong>${spelling.activities.sentence.checked ? escapeHtml(`${stageFiveAverage}%`) : "Pending"}</strong>
-          </article>
-        </div>
-      </article>
+function playSpellingFlashcardSentence(subject, entry, card) {
+  const exposureLimit = getSpellingFlashcardExposureLimit(entry.id);
+  const sentenceIndex = Math.min(card.exposureIndex, exposureLimit - 1, (entry.familySentences || []).length - 1);
+  const familyWord = entry.familyWords[sentenceIndex];
+  const sentence = entry.familySentences[sentenceIndex];
+  if (!sentence || !familyWord) {
+    return;
+  }
 
-      <section class="spelling-grid">
-        ${buildSpellingActivitySnapshotCards(spelling)}
-      </section>
+  card.isShowingSentence = true;
+  persistSubjects();
+  render();
 
-      <section class="spelling-progress-list">
-        ${progressEntries
-          .map(
-            (entry) => `
-              <article class="spelling-progress-word">
-                <div>
-                  <strong>${escapeHtml(entry.word)}</strong>
-                  <span>${escapeHtml(`${entry.attempts} recorded attempt${entry.attempts === 1 ? "" : "s"}`)}</span>
-                </div>
-                <div class="spelling-progress-word__metrics">
-                  <span>Stage 1: ${entry.baselineAccuracy === null ? "Pending" : `${entry.baselineAccuracy}%`}</span>
-                  <span>Stage 5: ${entry.stageFiveAccuracy === null ? "Pending" : `${entry.stageFiveAccuracy}%`}</span>
-                  <span>Change: ${entry.improvement === null ? "Pending" : formatSignedPercentage(entry.improvement)}</span>
-                </div>
-              </article>
-            `
-          )
-          .join("")}
-      </section>
-    </section>
-  `;
+  void speakTextWithOpenAi(sentence, {
+    context: `spelling:flashcard:${entry.id}:${sentenceIndex}`,
+    statusMessages: {
+      preparing: "Preparing spelling sentence...",
+      playing: "Reading family sentence...",
+      error: "Spelling sentence audio failed."
+    },
+    onFinished: () => {
+      const freshSpelling = getSubjectSpellingState(subject);
+      const freshCard = ensureSpellingFlashcardCard(freshSpelling, entry.id);
+      freshCard.isShowingSentence = false;
+      freshCard.exposureIndex = Math.min(exposureLimit, freshCard.exposureIndex + 1);
+      freshSpelling.coachMessage = freshCard.exposureIndex >= exposureLimit
+        ? `Now type ${entry.word} from memory.`
+        : `Sentence ${freshCard.exposureIndex + 1} of ${exposureLimit} is ready for ${entry.word}.`;
+      persistSubjects();
+      render();
+    }
+  })
+    .then(() => {
+      render();
+    })
+    .catch((error) => {
+      console.error("Spelling flashcard sentence failed.", error);
+      const freshSpelling = getSubjectSpellingState(subject);
+      const freshCard = ensureSpellingFlashcardCard(freshSpelling, entry.id);
+      freshCard.isShowingSentence = false;
+      persistSubjects();
+      render();
+    });
+}
+
+function revealSpellingFlashcardSentence(subject, wordId) {
+  const spelling = getSubjectSpellingState(subject);
+  const entry = SPELLING_INTERVENTION_LIBRARY[wordId];
+  if (!entry) {
+    return;
+  }
+  const card = ensureSpellingFlashcardCard(spelling, wordId);
+  if (card.completed || card.isShowingSentence || card.exposureIndex >= getSpellingFlashcardExposureLimit(wordId)) {
+    return;
+  }
+  spelling.flashcards.currentWordId = wordId;
+  playSpellingFlashcardSentence(subject, entry, card);
+}
+
+function submitSpellingFlashcardRecall(subject, wordId, typedValueOverride = null) {
+  const spelling = getSubjectSpellingState(subject);
+  const entry = SPELLING_INTERVENTION_LIBRARY[wordId];
+  if (!entry) {
+    return;
+  }
+  const card = ensureSpellingFlashcardCard(spelling, wordId);
+  const typedValue = String(
+    typedValueOverride !== null && typedValueOverride !== undefined ? typedValueOverride : card.typedValue || ""
+  ).trim();
+  card.checked = true;
+  card.typedValue = typedValue;
+  card.completed = false;
+  card.awaitingAdvance = false;
+  const isCorrect = normalizeSpellingAttempt(typedValue) === normalizeSpellingAttempt(entry.word);
+  card.feedbackKind = isCorrect ? "correct" : "incorrect";
+  card.feedbackMessage = buildSpellingRecallFeedback(entry, typedValue, isCorrect);
+  card.awaitingAdvance = true;
+  spelling.coachMessage = isCorrect
+    ? `${entry.word} is correct. Review the feedback, then continue.`
+    : `Review the correction for ${entry.word}, then continue to the next word.`;
+  persistSubjects();
+}
+
+function advanceSpellingFlashcardWord(subject, wordId) {
+  const spelling = getSubjectSpellingState(subject);
+  const entry = SPELLING_INTERVENTION_LIBRARY[wordId];
+  if (!entry) {
+    return;
+  }
+  const card = ensureSpellingFlashcardCard(spelling, wordId);
+  if (!card.awaitingAdvance) {
+    return;
+  }
+  card.completed = true;
+  card.awaitingAdvance = false;
+  const flashcardWords = getSpellingFlashcardWords(spelling);
+  const nextWord = flashcardWords.find((item) => !ensureSpellingFlashcardCard(spelling, item.id).completed);
+  spelling.flashcards.currentWordId = nextWord?.id || "";
+  spelling.flashcards.completed = isSpellingFlashcardsComplete(spelling);
+  if (spelling.flashcards.completed) {
+    celebrateSpellingStage(subject, "word-families", "Stage 3 complete. The word-family sentence loop is secure.");
+    return;
+  }
+  spelling.coachMessage = `${entry.word} is secure. The next keyword is ready.`;
+  persistSubjects();
+}
+
+function checkSpellingTenseTransfer(subject, wordId) {
+  const spelling = getSubjectSpellingState(subject);
+  const entry = SPELLING_INTERVENTION_LIBRARY[wordId];
+  if (!entry) {
+    return;
+  }
+  const answer = ensureSpellingTenseAnswer(spelling, wordId);
+  answer.checked = true;
+  answer.completed = false;
+  answer.awaitingAdvance = false;
+  answer.lastCheckedAt = new Date().toISOString();
+  const prompt = getSpellingTensePrompt(spelling, entry);
+
+  if (!answer.selectedTense) {
+    answer.feedbackKind = "incorrect";
+    answer.feedbackMessage = "Choose past, present, or future before checking.";
+    spelling.coachMessage = "Choose the tense before checking this word.";
+    persistSubjects();
+    return;
+  }
+
+  const isCorrect = answer.selectedTense === prompt.tenseId;
+  answer.feedbackKind = isCorrect ? "correct" : "incorrect";
+  answer.feedbackMessage = isCorrect
+    ? `Correct. ${prompt.wordForm} is ${prompt.tenseId} tense in this sentence.`
+    : `Incorrect. ${prompt.wordForm} is ${prompt.tenseId} tense in this sentence, not ${answer.selectedTense}.`;
+  answer.awaitingAdvance = true;
+  spelling.coachMessage = isCorrect
+    ? `${entry.word} is correct. The horse moves one step closer to the stable.`
+    : `Review the correction for ${entry.word}, then continue to the next word.`;
+  persistSubjects();
+}
+
+function selectSpellingTenseOption(subject, wordId, optionValue) {
+  const spelling = getSubjectSpellingState(subject);
+  if (!SPELLING_INTERVENTION_LIBRARY[wordId]) {
+    return;
+  }
+  const normalizedValue = String(optionValue || "").trim();
+  if (!SPELLING_TENSE_IDS.includes(normalizedValue)) {
+    return;
+  }
+  const answer = ensureSpellingTenseAnswer(spelling, wordId);
+  answer.selectedTense = normalizedValue;
+  answer.checked = false;
+  answer.awaitingAdvance = false;
+  answer.feedbackKind = "";
+  answer.feedbackMessage = "";
+  spelling.coachMessage = `${normalizedValue} selected. Check the sentence when you are ready.`;
+  persistSubjects();
+}
+
+function advanceSpellingTenseTransfer(subject, wordId) {
+  const spelling = getSubjectSpellingState(subject);
+  const entry = SPELLING_INTERVENTION_LIBRARY[wordId];
+  if (!entry) {
+    return;
+  }
+  const answer = ensureSpellingTenseAnswer(spelling, wordId);
+  if (!answer.awaitingAdvance) {
+    return;
+  }
+  answer.completed = true;
+  answer.awaitingAdvance = false;
+  const followUpWords = getSpellingFollowUpWords(spelling);
+  const nextWord = followUpWords.find((item) => !ensureSpellingTenseAnswer(spelling, item.id).completed);
+  spelling.tenseTransfer.currentWordId = nextWord?.id || "";
+  spelling.tenseTransfer.completed = isSpellingTenseTransferComplete(spelling);
+  if (spelling.tenseTransfer.completed) {
+    celebrateSpellingStage(
+      subject,
+      "tense-transfer",
+      "Stage 4 complete. The final spelling check is ready so you can compare the two dictation rounds."
+    );
+    return;
+  }
+  spelling.coachMessage = `${entry.word} is secure. The next tense word is ready.`;
+  persistSubjects();
+}
+
+function getSpellingChallengeCurrentItem(spelling) {
+  return spelling.challenge.items[spelling.challenge.currentIndex] || null;
+}
+
+function getSpellingChallengeItemEntry(item) {
+  return item ? SPELLING_INTERVENTION_LIBRARY[item.wordId] || null : null;
+}
+
+function getSpellingChallengeLooksRightOptions(entry) {
+  const sentence = getSpellingLooksRightSentence(entry);
+  return [
+    {
+      value: entry.word,
+      markup: buildSpellingLooksRightChoiceSentence(sentence, entry.word, entry.lookRightChoiceCorrect || entry.articulation)
+    },
+    {
+      value: entry.lookRightWrong,
+      markup: buildSpellingLooksRightChoiceSentence(sentence, entry.word, entry.lookRightChoiceWrong || entry.lookRightWrong)
+    }
+  ];
+}
+
+function buildSpellingChallengeMissingLetterPrompt(entry, missingIndex) {
+  const index = Math.max(0, Math.min(entry.word.length - 1, missingIndex));
+  return `${escapeHtml(entry.word.slice(0, index))}<span class="spelling-inline-target">_</span>${escapeHtml(entry.word.slice(index + 1))}`;
+}
+
+function speakSpellingChallengeWord(item, entry) {
+  if (!item || !entry) {
+    return;
+  }
+  void speakTextWithOpenAi(`Spell the word ${entry.word}. ${getSpellingLooksRightSentence(entry)}`, {
+    context: `spelling:challenge:${item.id}`,
+    statusMessages: {
+      preparing: "Preparing spelling audio...",
+      playing: "Reading spelling word...",
+      error: "Spelling audio failed."
+    }
+  })
+    .then(() => {
+      render();
+    })
+    .catch((error) => {
+      console.error("Spelling challenge audio failed.", error);
+      render();
+    });
+}
+
+function advanceSpellingChallenge(spelling, successMessage) {
+  spelling.challenge.currentIndex += 1;
+  spelling.challenge.checked = false;
+  spelling.challenge.inputValue = "";
+  if (spelling.challenge.currentIndex >= spelling.challenge.items.length) {
+    spelling.challenge.completed = true;
+    spelling.challenge.active = false;
+    spelling.challenge.lastCompletedWeekKey = spelling.challenge.weekKey;
+    spelling.coachMessage = "Weekly spelling challenge complete.";
+    return;
+  }
+  spelling.coachMessage = successMessage;
+}
+
+function submitSpellingChallengeInput(subject) {
+  const spelling = getSubjectSpellingState(subject);
+  const item = getSpellingChallengeCurrentItem(spelling);
+  const entry = getSpellingChallengeItemEntry(item);
+  if (!item || !entry) {
+    return;
+  }
+  const typedValue = String(spelling.challenge.inputValue || "").trim();
+  spelling.challenge.checked = true;
+  if (!typedValue) {
+    spelling.coachMessage = "Type an answer before continuing.";
+    persistSubjects();
+    return;
+  }
+
+  let isCorrect = false;
+  if (item.mode === "dictation") {
+    isCorrect = normalizeSpellingAttempt(typedValue) === normalizeSpellingAttempt(entry.word);
+  } else if (item.mode === "root-word") {
+    isCorrect = normalizeSpellingAttempt(typedValue) === normalizeSpellingAttempt(entry.word);
+  } else if (item.mode === "missing-letter") {
+    isCorrect = typedValue.trim().toLowerCase() === entry.word[item.missingIndex].toLowerCase();
+  }
+
+  if (!isCorrect) {
+    spelling.coachMessage = `Retry ${entry.word}.`;
+    persistSubjects();
+    return;
+  }
+
+  advanceSpellingChallenge(spelling, `${entry.word} is correct. Next challenge word ready.`);
+  persistSubjects();
+}
+
+function selectSpellingChallengeLooksRight(subject, value) {
+  const spelling = getSubjectSpellingState(subject);
+  const item = getSpellingChallengeCurrentItem(spelling);
+  const entry = getSpellingChallengeItemEntry(item);
+  if (!item || !entry) {
+    return;
+  }
+  spelling.challenge.checked = true;
+  if (value !== entry.word) {
+    spelling.coachMessage = `Look again at ${entry.word}.`;
+    persistSubjects();
+    return;
+  }
+  advanceSpellingChallenge(spelling, `${entry.word} is correct. Next challenge word ready.`);
+  persistSubjects();
 }
 
 function normalizeManualWatchItemsAcrossSubjects() {
@@ -4699,9 +8913,31 @@ function normalizeManualWatchItemsAcrossSubjects() {
 
 function buildResolvedSubjectsFromStore(account, storedSubjects) {
   if (Array.isArray(storedSubjects)) {
+    const storedSubjectsById = new Map();
+    const extraSubjects = [];
+
+    storedSubjects.forEach((subject, index) => {
+      const hydratedSubject = hydrateStoredSubject(subject, index);
+      if (!hydratedSubject.id) {
+        return;
+      }
+
+      const isSeededSubject = subjectTemplateSeed.some((seededSubject) => seededSubject.id === hydratedSubject.id);
+      if (isSeededSubject) {
+        storedSubjectsById.set(hydratedSubject.id, hydratedSubject);
+        return;
+      }
+
+      extraSubjects.push(hydratedSubject);
+    });
+
+    const resolvedSubjects = subjectTemplateSeed.map((seededSubject, index) =>
+      storedSubjectsById.get(seededSubject.id) || hydrateStoredSubject({ id: seededSubject.id }, index)
+    );
+
     return mergeLegacyGroupedDocuments(
       removeLegacySeededDocuments(
-        removeLegacySeededAssessments(storedSubjects.map(hydrateStoredSubject))
+        removeLegacySeededAssessments([...resolvedSubjects, ...extraSubjects])
       )
     );
   }
@@ -4719,8 +8955,17 @@ function getStoredSubjectsForAccount(account) {
   return buildResolvedSubjectsFromStore(account, storedSubjectsMap[accountKey]);
 }
 
-function createCloudSyncFallbackSubjects(subjects) {
-  return createQuotaFallbackSubjects(subjects);
+async function getMergedStoredSubjectsForAccount(account, primarySubjects = null) {
+  const accountKey = normaliseAccountKey(account?.email);
+  const storedSubjectsMap = loadStoredSubjectsMap();
+  const indexedDbSubjects = accountKey
+    ? await getSubjectsSnapshotRecord(accountKey).catch((error) => {
+        console.error("IndexedDB subject snapshot could not be restored.", error);
+        return null;
+      })
+    : null;
+
+  return mergeAvailableSubjectSources(indexedDbSubjects, storedSubjectsMap[accountKey], primarySubjects);
 }
 
 function buildCloudAccountSettingsPayload() {
@@ -4763,36 +9008,28 @@ function applyCloudAccountSettings(settings) {
 }
 
 async function registerCloudAccountWithFallback({ name, email, password, grade, subjects, settings }) {
-  const subjectCandidates = [
-    createPersistableSubjects(subjects),
-    createCloudSyncFallbackSubjects(subjects),
-    createInitialSubjectsForAccount({ name, email, grade })
-  ];
-
-  let lastError = null;
-  for (const candidateSubjects of subjectCandidates) {
-    try {
-      return await requestApi("/api/auth/register", {
-        name,
-        email,
-        password,
-        grade,
-        subjects: candidateSubjects,
-        settings
-      });
-    } catch (error) {
-      lastError = error;
-      const shouldRetryWithSmallerPayload =
-        error instanceof Error &&
-        (error.status === 413 ||
-          /too large|payload|entity too large|request entity/i.test(error.message || ""));
-      if (!shouldRetryWithSmallerPayload) {
-        throw error;
-      }
+  try {
+    return await requestApi("/api/auth/register", {
+      name,
+      email,
+      password,
+      grade,
+      subjects: createPersistableSubjects(subjects),
+      settings
+    });
+  } catch (error) {
+    const payloadTooLarge =
+      error instanceof Error &&
+      (error.status === 413 || /too large|payload|entity too large|request entity/i.test(error.message || ""));
+    if (payloadTooLarge) {
+      const nextError = new Error(
+        "Your uploaded documents are too large to sync to the shared account in one request right now. They remain saved on this device."
+      );
+      nextError.status = 413;
+      throw nextError;
     }
+    throw error;
   }
-
-  throw lastError || new Error("Account creation failed.");
 }
 
 function queueRemoteSettingsPersist(settingsSnapshot) {
@@ -4831,14 +9068,70 @@ function queueRemoteSettingsPersist(settingsSnapshot) {
   })();
 }
 
-function queueRemoteSubjectsPersist(subjectsSnapshot) {
-  if (!state.authToken) {
-    return;
+function createRemoteSubjectsSyncError(error) {
+  const payloadTooLarge =
+    error instanceof Error &&
+    (error.status === 413 || /too large|payload|entity too large|request entity/i.test(error.message || ""));
+  if (payloadTooLarge) {
+    const nextError = new Error(
+      "PaperPanda saved these documents on this device, but the shared account copy is still too large to sync in one request right now."
+    );
+    nextError.status = 413;
+    return nextError;
   }
 
-  remoteSubjectsSaveQueuedSnapshot = subjectsSnapshot;
+  if (error instanceof Error && String(error.message || "").trim()) {
+    return error;
+  }
+
+  return new Error("PaperPanda could not sync these documents to the shared account just now.");
+}
+
+function updateRemoteSubjectsSaveWaiters() {
+  const hasPendingSync = remoteSubjectsSaveInFlight || Boolean(remoteSubjectsSaveQueuedSnapshot);
+  remoteSubjectsSaveWaiters = remoteSubjectsSaveWaiters.filter((waiter) => {
+    if (waiter.sequence <= remoteSubjectsCommittedSequence) {
+      waiter.resolve();
+      return false;
+    }
+
+    if (!hasPendingSync && waiter.sequence <= remoteSubjectsFailedSequence) {
+      waiter.reject(remoteSubjectsLastError || new Error("PaperPanda could not sync these documents to the shared account."));
+      return false;
+    }
+
+    return true;
+  });
+}
+
+function waitForRemoteSubjectsPersist(sequence = remoteSubjectsSaveSequence) {
+  if (!state.authToken || !sequence || sequence <= remoteSubjectsCommittedSequence) {
+    return Promise.resolve();
+  }
+
+  const hasPendingSync = remoteSubjectsSaveInFlight || Boolean(remoteSubjectsSaveQueuedSnapshot);
+  if (!hasPendingSync && sequence <= remoteSubjectsFailedSequence) {
+    return Promise.reject(remoteSubjectsLastError || new Error("PaperPanda could not sync these documents to the shared account."));
+  }
+
+  return new Promise((resolve, reject) => {
+    remoteSubjectsSaveWaiters.push({ sequence, resolve, reject });
+  });
+}
+
+function queueRemoteSubjectsPersist(subjectsSnapshot) {
+  if (!state.authToken) {
+    return 0;
+  }
+
+  const sequence = remoteSubjectsSaveSequence + 1;
+  remoteSubjectsSaveSequence = sequence;
+  remoteSubjectsSaveQueuedSnapshot = {
+    sequence,
+    subjects: subjectsSnapshot
+  };
   if (remoteSubjectsSaveInFlight) {
-    return;
+    return sequence;
   }
 
   remoteSubjectsSaveInFlight = true;
@@ -4847,90 +9140,68 @@ function queueRemoteSubjectsPersist(subjectsSnapshot) {
       const snapshot = remoteSubjectsSaveQueuedSnapshot;
       remoteSubjectsSaveQueuedSnapshot = null;
       try {
-        try {
-          await requestApi(
-            "/api/account/subjects",
-            { subjects: snapshot },
-            false,
-            {
-              headers: {
-                ...buildAuthHeaders()
-              },
-              method: "PUT"
-            }
-          );
-        } catch (primaryError) {
-          const shouldRetryWithFallback =
-            primaryError instanceof Error &&
-            (primaryError.status === 413 ||
-              /too large|payload|entity too large|request entity/i.test(primaryError.message || ""));
-          if (!shouldRetryWithFallback) {
-            throw primaryError;
+        await requestApi(
+          "/api/account/subjects",
+          { subjects: snapshot.subjects },
+          false,
+          {
+            headers: {
+              ...buildAuthHeaders()
+            },
+            method: "PUT"
           }
-
-          await requestApi(
-            "/api/account/subjects",
-            { subjects: createCloudSyncFallbackSubjects(state.subjects) },
-            false,
-            {
-              headers: {
-                ...buildAuthHeaders()
-              },
-              method: "PUT"
-            }
-          );
-          if (elements?.uploadStatus) {
-            elements.uploadStatus.textContent =
-              "Your account was synced with a lighter cloud copy so it can still open across devices.";
-          }
+        );
+        remoteSubjectsCommittedSequence = Math.max(remoteSubjectsCommittedSequence, snapshot.sequence);
+        if (remoteSubjectsCommittedSequence >= remoteSubjectsFailedSequence) {
+          remoteSubjectsLastError = null;
         }
       } catch (error) {
-        console.error("Remote subject sync failed.", error);
+        remoteSubjectsFailedSequence = Math.max(remoteSubjectsFailedSequence, snapshot.sequence);
+        remoteSubjectsLastError = createRemoteSubjectsSyncError(error);
+        console.error("Remote subject sync failed.", remoteSubjectsLastError);
         if (elements?.uploadStatus) {
-          elements.uploadStatus.textContent =
-            "Your changes were saved on this device, but PaperPanda could not sync them to the shared account just now.";
+          elements.uploadStatus.textContent = remoteSubjectsLastError.message;
         }
       }
+      updateRemoteSubjectsSaveWaiters();
     }
 
     remoteSubjectsSaveInFlight = false;
+    updateRemoteSubjectsSaveWaiters();
   })();
+
+  return sequence;
 }
 
 function persistSubjects({ skipRemoteSync = false } = {}) {
   if (!state.currentUserEmail) {
-    return;
+    return 0;
   }
 
   const accountKey = normaliseAccountKey(state.currentUserEmail);
   const storedSubjectsMap = loadStoredSubjectsMap();
   const persistableSubjects = createPersistableSubjects(state.subjects);
-
-  try {
-    storedSubjectsMap[accountKey] = persistableSubjects;
-    saveStoredSubjectsMap(storedSubjectsMap);
-  } catch (primaryError) {
-    try {
-      storedSubjectsMap[accountKey] = createQuotaFallbackSubjects(state.subjects);
-      saveStoredSubjectsMap(storedSubjectsMap);
-      if (elements?.uploadStatus) {
-        elements.uploadStatus.textContent =
-          "Large document previews will stay available in this session, but only a lighter saved version will persist after refresh.";
-      }
-    } catch (fallbackError) {
-      console.error("Subject store quota fallback failed.", fallbackError);
-      if (elements?.uploadStatus) {
-        elements.uploadStatus.textContent =
-          "Browser storage is full. Your latest changes will stay available until refresh, but they could not be saved persistently.";
-      }
-    }
+  queueIndexedDbSubjectsPersist(accountKey, persistableSubjects);
+  const persistResult = saveStoredSubjectsMapForAccount(storedSubjectsMap, accountKey, state.subjects);
+  if (persistResult === "fallback" && elements?.uploadStatus) {
+    elements.uploadStatus.textContent =
+      "PaperPanda kept a lighter browser backup, but the full document copy is still saved on this device.";
+  } else if (persistResult === "pruned-fallback" && elements?.uploadStatus) {
+    elements.uploadStatus.textContent =
+      "This device cleared older browser backups to free space. Your current account still has a full on-device copy.";
+  } else if (persistResult === "failed" && elements?.uploadStatus) {
+    elements.uploadStatus.textContent =
+      "Browser storage is full. PaperPanda could not refresh the lightweight browser backup, but the on-device document cache was still updated.";
   }
 
   if (!skipRemoteSync) {
-    queueRemoteSubjectsPersist(persistableSubjects);
+    const sequence = queueRemoteSubjectsPersist(persistableSubjects);
+    syncPreviewPersistence();
+    return sequence;
   }
 
   syncPreviewPersistence();
+  return 0;
 }
 
 function persistSettings({ skipRemoteSync = false } = {}) {
@@ -4983,6 +9254,7 @@ function normaliseDocument(documentRecord) {
     ...documentRecord,
     workNotes: documentRecord.workNotes || "",
     externalWorkspace: normaliseExternalWorkspace(documentRecord.externalWorkspace),
+    revisionArchived: Boolean(documentRecord.revisionArchived),
     reviewed: Boolean(documentRecord.reviewed),
     reviewMode: documentRecord.reviewMode || "",
     pages: Array.isArray(documentRecord.pages)
@@ -4994,6 +9266,7 @@ function normaliseDocument(documentRecord) {
       : [],
     studyOverview: String(documentRecord.studyOverview || "").trim(),
     studyPlanStatus: String(documentRecord.studyPlanStatus || "idle"),
+    studyPlanVersion: Math.max(0, Number(documentRecord.studyPlanVersion || 0) || 0),
     studySections: Array.isArray(documentRecord.studySections)
       ? documentRecord.studySections.map(normaliseStudySection).filter((section) => section.sectionText)
       : [],
@@ -5037,17 +9310,23 @@ function restoreSubjectsForAccount(account, subjectsOverride = null, { skipRemot
   }
 
   const storedSubjectsMap = loadStoredSubjectsMap();
-  const resolvedSubjects = buildResolvedSubjectsFromStore(account, subjectsOverride ?? storedSubjectsMap[accountKey]);
+  const mergedSubjectsSource = mergeSubjectSources(subjectsOverride, storedSubjectsMap[accountKey]);
+  const resolvedSubjects = buildResolvedSubjectsFromStore(
+    account,
+    mergedSubjectsSource || subjectsOverride || storedSubjectsMap[accountKey]
+  );
   state.subjects = resolvedSubjects;
-  storedSubjectsMap[accountKey] = createPersistableSubjects(state.subjects);
-  saveStoredSubjectsMap(storedSubjectsMap);
+  saveStoredSubjectsMapForAccount(storedSubjectsMap, accountKey, state.subjects);
 
   if (!state.subjects.some((subject) => subject.id === state.selectedSubjectId)) {
     state.selectedSubjectId = state.subjects[0]?.id || "";
   }
   normalizeManualWatchItemsAcrossSubjects();
   const selectedSubject = state.subjects.find((subject) => subject.id === state.selectedSubjectId);
-  const firstDocumentId = getVisibleSubjectDocuments(selectedSubject || { documents: [] })[0]?.id || null;
+  const firstDocumentId =
+    getReaderDocuments(selectedSubject || { documents: [] })[0]?.id ||
+    getRevisionReaderDocuments(selectedSubject || { documents: [] })[0]?.id ||
+    null;
   state.selectedDocumentId = firstDocumentId;
   state.askDocumentId = firstDocumentId;
   state.selectedDocumentIds = [];
@@ -5083,9 +9362,10 @@ async function restoreSessionUser() {
         }
       });
       state.authToken = savedToken;
+      const mergedSubjects = await getMergedStoredSubjectsForAccount(session.account, session.subjects);
       applyAuthenticatedAccount(session.account, {
         token: savedToken,
-        subjects: session.subjects,
+        subjects: mergedSubjects,
         settings: session.settings,
         skipRemoteSync: true
       });
@@ -5109,20 +9389,21 @@ async function restoreSessionUser() {
     return;
   }
 
-  try {
-    let payload;
     try {
-      payload = await registerCloudAccountWithFallback({
-        name: account.name,
-        email: account.email,
-        password: account.password,
-        grade: normaliseGrade(account.grade),
-        subjects: getStoredSubjectsForAccount(account),
-        settings: buildCloudAccountSettingsPayload()
-      });
-    } catch (registerError) {
-      if (!(registerError instanceof Error) || registerError.status !== 409) {
-        throw registerError;
+      const durableLegacySubjects = await getMergedStoredSubjectsForAccount(account, getStoredSubjectsForAccount(account));
+      let payload;
+      try {
+        payload = await registerCloudAccountWithFallback({
+          name: account.name,
+          email: account.email,
+          password: account.password,
+          grade: normaliseGrade(account.grade),
+          subjects: durableLegacySubjects || getStoredSubjectsForAccount(account),
+          settings: buildCloudAccountSettingsPayload()
+        });
+      } catch (registerError) {
+        if (!(registerError instanceof Error) || registerError.status !== 409) {
+          throw registerError;
       }
       payload = await requestApi("/api/auth/signin", {
         email: account.email,
@@ -5133,7 +9414,7 @@ async function restoreSessionUser() {
     state.authToken = payload.token || "";
     applyAuthenticatedAccount(payload.account, {
       token: payload.token || "",
-      subjects: getStoredSubjectsForAccount(account),
+      subjects: durableLegacySubjects || getStoredSubjectsForAccount(account),
       settings: payload.settings,
       skipRemoteSync: false
     });
@@ -5297,15 +9578,10 @@ function renderAiConnectionState() {
   }
 }
 
-function setFocusMode(on) {
-  state.focusMode = Boolean(on);
-  state.focusArea = null;
-  state.focusAskOpen = false;
-  window.localStorage.setItem(FOCUS_MODE_STORAGE_KEY, state.focusMode ? "on" : "off");
-  render();
-}
-
 function openDashboard(nextView = "home") {
+  setAuthPending(false);
+  state.authViewOpen = false;
+  state.focusAskOpen = false;
   elements.landingPanel.classList.add("hidden");
   elements.appShell.classList.remove("hidden");
   elements.welcomeHeading.textContent = "";
@@ -5334,6 +9610,8 @@ function resetRevisionState() {
 }
 
 function showLanding() {
+  setAuthPending(false);
+  state.authViewOpen = true;
   stopListening();
   stopAskMicrophone({ preserveStatus: true });
   closeUpcomingModal();
@@ -5383,6 +9661,17 @@ function getAllHomeworkBundles() {
 
 function getAllDocumentBundles(subject) {
   return getDocumentGroupsFromDocuments(getReaderDocuments(subject));
+}
+
+function getAllRevisionDocumentBundles(subject) {
+  return getDocumentGroupsFromDocuments(getRevisionReaderDocuments(subject));
+}
+
+function getSelectableDocumentsForTable(subject) {
+  return [
+    ...getReaderDocuments(subject || { documents: [] }),
+    ...(isRevisionSectionExpanded(subject) ? getRevisionReaderDocuments(subject || { documents: [] }) : [])
+  ];
 }
 
 function getUnreadDocumentMetrics() {
@@ -5523,7 +9812,7 @@ function openAssessmentTaskFromEntry(entry) {
   }
   state.selectedSubjectId = entry.subject.id;
   state.activeSubjectTab = "assessments";
-  state.focusArea = state.focusMode ? "assessments" : null;
+  state.focusArea = null;
   openTaskView({ kind: "assessment", id: entry.assessment.id });
 }
 
@@ -5533,7 +9822,7 @@ function openHomeworkTaskForSubject(subject, bundle) {
   }
   state.selectedSubjectId = subject.id;
   state.activeSubjectTab = "homework";
-  state.focusArea = state.focusMode ? "homework" : null;
+  state.focusArea = null;
   openTaskView({ kind: "homework", id: bundle.id });
 }
 
@@ -5565,16 +9854,30 @@ function speakAssessmentEntry(entry, { context = null } = {}) {
 }
 
 function handleFocusAskLaunch() {
-  if (state.currentView === "subjects" && state.focusMode && state.focusAskOpen) {
+  const subject = getSelectedSubject();
+  const spellingFocus = shouldUseSpellingFocusUi(subject);
+
+  if (spellingFocus && state.focusAskOpen) {
     closeFocusAskPopup({ stopMic: true });
     return;
   }
 
-  if (state.currentView !== "subjects" || state.focusMode) {
+  if (spellingFocus) {
+    state.focusAskOpen = true;
+    render();
+    requestAnimationFrame(() => {
+      focusAskComposer();
+      startAskMicrophone();
+    });
+    return;
+  }
+
+  if (state.currentView !== "subjects") {
     state.currentView = "subjects";
     state.activeSubjectTab = state.activeSubjectTab || "reader";
+    resetSubjectWorkspaceView();
+    state.focusAskOpen = false;
     state.focusArea = null;
-    state.focusAskOpen = true;
     render();
     requestAnimationFrame(() => {
       focusAskComposer();
@@ -5727,19 +10030,25 @@ function renderOverview() {
   }
 
   if (elements.homeAskPrompt) {
-    elements.homeAskPrompt.textContent = continueBundle
-      ? `Good morning. Want me to start with ${continueBundle.title} or your homework?`
-      : "Good morning. Upload some notes and I can help you read or simplify them.";
+    elements.homeAskPrompt.textContent = nextEntry
+      ? `Good morning. Want help choosing a subject or getting ready for ${nextEntry.assessment.componentTask || nextEntry.assessment.title}?`
+      : "Good morning. Want help choosing a subject or getting started with your notes?";
   }
 
   renderUpcomingModal();
 }
 
 function renderCurrentView() {
+  if (state.currentView !== "subjects") {
+    state.focusAskOpen = false;
+  }
   elements.appBrandTag.textContent = "";
   elements.welcomeHeading.textContent = "";
-  elements.appShell.classList.toggle("hidden", state.currentView === "task" || state.currentView === "revision");
-  elements.appShell.classList.toggle("focus-mode", state.focusMode);
+  elements.landingPanel.classList.toggle("hidden", !state.authViewOpen);
+  elements.appShell.classList.toggle(
+    "hidden",
+    state.authViewOpen || state.currentView === "task" || state.currentView === "revision"
+  );
   elements.homeView.classList.toggle("hidden", state.currentView !== "home");
   elements.settingsView.classList.toggle("hidden", state.currentView !== "settings");
   elements.subjectsView.classList.toggle("hidden", state.currentView !== "subjects");
@@ -5748,10 +10057,6 @@ function renderCurrentView() {
   elements.navHomeButton.classList.toggle("is-active", state.currentView === "home");
   elements.navSubjectsButton.classList.toggle("is-active", state.currentView === "subjects");
   elements.navSettingsButton.classList.toggle("is-active", state.currentView === "settings");
-  if (elements.focusModeToggle) {
-    elements.focusModeToggle.classList.toggle("is-on", state.focusMode);
-    elements.focusModeToggle.setAttribute("aria-pressed", String(state.focusMode));
-  }
 }
 
 function clipText(value, maxLength = 9000) {
@@ -5875,15 +10180,27 @@ async function requestApi(endpoint, payload, expectBlob = false, options = {}) {
     "Content-Type": "application/json",
     ...(options.headers || {})
   };
+  const rawTimeoutMs = Number(options.timeoutMs);
+  const timeoutMs = Number.isFinite(rawTimeoutMs) && rawTimeoutMs > 0 ? Math.max(1_000, rawTimeoutMs) : 0;
+  const abortController = timeoutMs ? new AbortController() : null;
+  const timeoutHandle = abortController ? setTimeout(() => abortController.abort(), timeoutMs) : null;
   let response;
   try {
     response = await window.fetch(`${API_BASE_URL}${endpoint}`, {
       method: options.method || "POST",
       headers,
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal: abortController?.signal
     });
   } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(options.timeoutMessage || "The request timed out.");
+    }
     throw error instanceof Error ? error : new Error("Backend request failed.");
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
   }
 
   if (!response.ok) {
@@ -5931,12 +10248,41 @@ async function requestApiFormData(endpoint, formData) {
 }
 
 async function requestDocumentStudyPlan(documentRecord, subject) {
+  const pageExcerpts = Array.isArray(documentRecord?.pages)
+    ? documentRecord.pages
+        .map((page, index) => ({
+          pageNumber: Number(page?.pageNumber || index + 1) || index + 1,
+          text: getDocumentPageText(page)
+        }))
+        .filter((page) => page.text)
+        .reduce((result, page) => {
+          const usedChars = result.reduce((total, entry) => total + entry.text.length + 24, 0);
+          if (result.length >= 90 || usedChars >= 24000) {
+            return result;
+          }
+          const remainingChars = 24000 - usedChars;
+          if (remainingChars < 160) {
+            return result;
+          }
+          const clippedText = clipText(page.text, Math.min(320, remainingChars - 24));
+          if (!clippedText) {
+            return result;
+          }
+          result.push({
+            pageNumber: page.pageNumber,
+            text: clippedText
+          });
+          return result;
+        }, [])
+    : [];
+
   return requestApi("/api/document/study-plan", {
     subjectName: subject.name,
     title: documentRecord.title,
     type: documentRecord.type,
     pageCount: Array.isArray(documentRecord.pages) ? documentRecord.pages.length : 0,
-    content: clipText(documentRecord.content || "", 18000)
+    content: clipText(documentRecord.content || "", pageExcerpts.length ? 5000 : 24000),
+    pageExcerpts
   });
 }
 
@@ -5973,23 +10319,154 @@ async function requestAskAnswer(question, subject, document) {
 }
 
 function getLatestAskAnswer() {
-  const subject = getSelectedSubject();
-  const history = subject ? getTodayAskHistory(subject) : [];
+  const selectedSubject = getSelectedSubject();
+  if (state.askLatestAnswer && selectedSubject?.id === state.askLatestSubjectId) {
+    return String(state.askLatestAnswer).trim();
+  }
+  const history = selectedSubject ? getTodayAskHistory(selectedSubject) : [];
   return history.length ? String(history[history.length - 1].answer || "").trim() : "";
 }
 
-function getAskIdleMessage() {
-  return "Write a question, then choose Listen to response.";
+function getSubjectLandingAskVisibleAnswer() {
+  return String(state.subjectLandingAskAnswer || "").trim();
+}
+
+function getAskIdleStatus(surface = getActiveAskSurface()) {
+  return surface?.kind === "landing"
+    ? "Write a question, then choose Listen to response."
+    : "Write a question, then choose Listen to response.";
+}
+
+function getAskReadyStatus() {
+  return "Panda's response is ready. Choose Listen to response to replay it.";
+}
+
+function getAskConfirmTranscriptStatus() {
+  return "Check the transcript, then choose Listen to response.";
+}
+
+function getStoredAskAnswer(surface = getActiveAskSurface()) {
+  return surface?.kind === "landing"
+    ? getSubjectLandingAskVisibleAnswer()
+    : getLatestAskAnswer();
+}
+
+function getLastAskedQuestion(surface = getActiveAskSurface()) {
+  const selectedSubject = getSelectedSubject();
+  return surface?.kind === "landing"
+    ? String(state.subjectLandingAskLastQuestion || "").trim()
+    : selectedSubject?.id === state.askLatestSubjectId
+      ? String(state.askLatestQuestion || "").trim()
+      : "";
+}
+
+function setAskSurfaceStatus(surface, message) {
+  const nextMessage = String(message || "").trim() || getAskIdleStatus(surface);
+  if (surface?.response) {
+    surface.response.textContent = nextMessage;
+  }
+  if (surface?.kind === "landing") {
+    state.subjectLandingAskStatus = nextMessage;
+    return;
+  }
+  state.askStatusSubjectId = getSelectedSubject()?.id || "";
+  state.askStatus = nextMessage;
+}
+
+function storeAskAnswerForSurface(surface, question, answer) {
+  const trimmedQuestion = String(question || "").trim();
+  const trimmedAnswer = String(answer || "").trim();
+  if (surface?.kind === "landing") {
+    state.subjectLandingAskLastQuestion = trimmedQuestion;
+    state.subjectLandingAskAnswer = trimmedAnswer;
+    state.subjectLandingAskStatus = getAskReadyStatus();
+    return;
+  }
+  state.askLatestSubjectId = getSelectedSubject()?.id || "";
+  state.askLatestQuestion = trimmedQuestion;
+  state.askLatestAnswer = trimmedAnswer;
+  state.askStatusSubjectId = state.askLatestSubjectId;
+  state.askStatus = getAskReadyStatus();
+}
+
+function canReplayStoredAskAnswer(surface, question) {
+  const trimmedQuestion = String(question || "").trim();
+  const storedAnswer = getStoredAskAnswer(surface);
+  if (!storedAnswer) {
+    return false;
+  }
+  if (!trimmedQuestion) {
+    return true;
+  }
+  return trimmedQuestion === getLastAskedQuestion(surface);
+}
+
+function isAskPlaybackTextPlayable(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return false;
+  }
+
+  const normalised = text.toLowerCase();
+  if (
+    normalised === "ask panda about the current document here." ||
+    normalised === "ask a question about the selected subject or document." ||
+    normalised === "ask a question first so there is an ai response to play back." ||
+    normalised === "write a question first so the ai can focus on what you need help with." ||
+    normalised === "write a question first so panda knows what to answer." ||
+    normalised === "thinking..." ||
+    normalised === "listening for your question..." ||
+    normalised === "check the transcript, then choose listen to response." ||
+    normalised === "preparing panda's answer..." ||
+    normalised === "playing panda's answer..." ||
+    normalised === "panda's response is ready. choose listen to response to replay it."
+  ) {
+    return false;
+  }
+
+  return !normalised.startsWith("ask ai failed:") && !normalised.startsWith("listen failed:");
+}
+
+function getAskPlaybackText(surface = getActiveAskSurface()) {
+  const surfaceText = surface?.kind === "landing"
+    ? getSubjectLandingAskVisibleAnswer() || surface?.response?.textContent || ""
+    : getLatestAskAnswer() || surface?.response?.textContent || "";
+  if (isAskPlaybackTextPlayable(surfaceText)) {
+    return String(surfaceText).trim();
+  }
+
+  const fallbackText = getStoredAskAnswer(surface);
+  return isAskPlaybackTextPlayable(fallbackText) ? String(fallbackText).trim() : "";
+}
+
+function resetSubjectLandingAskState() {
+  state.subjectLandingAskOpen = false;
+  state.subjectLandingAskDraft = "";
+  state.subjectLandingAskStatus = "";
+  state.subjectLandingAskAnswer = "";
+  state.subjectLandingAskLastQuestion = "";
+}
+
+function closeSubjectLandingAsk({ stopAudio = true } = {}) {
+  if (state.askMicActive) {
+    stopAskMicrophone({ preserveStatus: false });
+  }
+  if (stopAudio && state.askResponseSpeaking) {
+    stopListening();
+  }
+  resetSubjectLandingAskState();
 }
 
 function renderAskVoiceControls() {
-  if (elements.askMicButton) {
-    elements.askMicButton.textContent = state.askMicActive ? "Stop microphone" : "Use microphone";
-  }
-  if (elements.askListenButton) {
-    elements.askListenButton.textContent = state.askResponseSpeaking ? "Stop" : "Listen to response";
-    elements.askListenButton.disabled = false;
-  }
+  getAskSurfaces().forEach((surface) => {
+    if (surface.micButton) {
+      surface.micButton.textContent = state.askMicActive ? "Stop microphone" : "Use microphone";
+    }
+    if (surface.listenButton) {
+      surface.listenButton.textContent = state.askResponseSpeaking ? "Stop" : "Listen to response";
+      surface.listenButton.disabled = false;
+    }
+  });
 }
 
 function getSpeechRecognitionConstructor() {
@@ -5997,6 +10474,7 @@ function getSpeechRecognitionConstructor() {
 }
 
 function stopAskMicrophone({ preserveStatus = false } = {}) {
+  const activeSurface = getActiveAskSurface();
   if (currentSpeechRecognition) {
     currentSpeechRecognition.onresult = null;
     currentSpeechRecognition.onerror = null;
@@ -6005,16 +10483,17 @@ function stopAskMicrophone({ preserveStatus = false } = {}) {
     currentSpeechRecognition = null;
   }
   state.askMicActive = false;
-  if (!preserveStatus && elements.askResponse.textContent === "Listening for your question...") {
-    elements.askResponse.textContent = getLatestAskAnswer() || getAskIdleMessage();
+  if (!preserveStatus && activeSurface?.response?.textContent === "Listening for your question...") {
+    setAskSurfaceStatus(activeSurface, getStoredAskAnswer(activeSurface) ? getAskReadyStatus() : getAskIdleStatus(activeSurface));
   }
   renderAskVoiceControls();
 }
 
 function startAskMicrophone() {
+  const activeSurface = getActiveAskSurface();
   const SpeechRecognitionConstructor = getSpeechRecognitionConstructor();
   if (!SpeechRecognitionConstructor) {
-    elements.askResponse.textContent = "Microphone input is not available in this browser.";
+    setAskSurfaceStatus(activeSurface, "Microphone input is not available in this browser.");
     renderAskVoiceControls();
     return;
   }
@@ -6026,7 +10505,7 @@ function startAskMicrophone() {
   recognition.interimResults = true;
   recognition.continuous = false;
   state.askMicActive = true;
-  elements.askResponse.textContent = "Listening for your question...";
+  setAskSurfaceStatus(activeSurface, "Listening for your question...");
   renderAskVoiceControls();
 
   recognition.onresult = (event) => {
@@ -6034,9 +10513,14 @@ function startAskMicrophone() {
       .map((result) => result[0]?.transcript || "")
       .join(" ")
       .trim();
-    elements.askInput.value = transcript;
+    if (activeSurface?.input) {
+      activeSurface.input.value = transcript;
+    }
+    if (activeSurface?.kind === "landing") {
+      state.subjectLandingAskDraft = transcript;
+    }
     if (event.results?.[event.results.length - 1]?.isFinal && transcript) {
-      elements.askResponse.textContent = "Check the transcript, then choose Listen to response.";
+      setAskSurfaceStatus(activeSurface, getAskConfirmTranscriptStatus());
       stopAskMicrophone({ preserveStatus: true });
     }
   };
@@ -6044,10 +10528,10 @@ function startAskMicrophone() {
   recognition.onerror = (event) => {
     state.askMicActive = false;
     currentSpeechRecognition = null;
-    elements.askResponse.textContent =
-      event?.error === "not-allowed"
-        ? "Microphone permission was denied."
-        : "Voice input failed. Try again or type your question.";
+    const message = event?.error === "not-allowed"
+      ? "Microphone permission was denied."
+      : "Voice input failed. Try again or type your question.";
+    setAskSurfaceStatus(activeSurface, message);
     renderAskVoiceControls();
   };
 
@@ -6060,7 +10544,7 @@ function startAskMicrophone() {
   recognition.start();
 }
 
-async function speakTextWithOpenAi(text, { context = "document", documentId = null, statusMessages = {}, onChunkStart = null, onFinished = null, chunksOverride = null } = {}) {
+async function speakTextWithOpenAi(text, { context = "document", documentId = null, statusMessages = {}, onChunkStart = null, onFinished = null, chunksOverride = null, onStatusChange = null, statusElement = null } = {}) {
   stopListening();
   const textToRead = normaliseSpeechText(text);
   if (!textToRead) {
@@ -6074,7 +10558,15 @@ async function speakTextWithOpenAi(text, { context = "document", documentId = nu
   state.askResponseSpeaking = context === "ask";
   renderDocuments();
   renderAskVoiceControls();
-  elements.askResponse.textContent = statusMessages.preparing || "Preparing audio...";
+  if (statusElement) {
+    statusElement.textContent = statusMessages.preparing || "Preparing audio...";
+  } else if (elements.askResponse) {
+    elements.askResponse.textContent = statusMessages.preparing || "Preparing audio...";
+  }
+  if (typeof onStatusChange === "function") {
+    onStatusChange("pending", statusMessages.preparing || "Preparing audio...");
+  }
+  await ensureAiSpeechPlaybackReady();
 
   const chunks = Array.isArray(chunksOverride) && chunksOverride.length
     ? chunksOverride.map((chunk) => normaliseSpeechText(chunk)).filter(Boolean)
@@ -6092,31 +10584,11 @@ async function speakTextWithOpenAi(text, { context = "document", documentId = nu
       onChunkStart(chunks[chunkIndex], chunkIndex);
     }
 
-    const speechBlob = await requestApi("/api/speak", { text: chunks[chunkIndex] }, true);
-
-    if (currentListenSessionId !== listenSessionId) {
-      return;
-    }
-
-    if (currentAudioObjectUrl) {
-      URL.revokeObjectURL(currentAudioObjectUrl);
-    }
-    currentAudioObjectUrl = URL.createObjectURL(speechBlob);
-    currentAudioPlayback = new Audio(currentAudioObjectUrl);
-    currentAudioPlayback.onerror = () => {
-      stopListening();
-      elements.askResponse.textContent = statusMessages.error || "AI voice playback failed.";
-    };
-    await currentAudioPlayback.play();
-    elements.askResponse.textContent = statusMessages.playing || "Reading...";
-
-    await new Promise((resolve, reject) => {
-      if (!currentAudioPlayback) {
-        resolve();
-        return;
-      }
-      currentAudioPlayback.onended = () => resolve();
-      currentAudioPlayback.onerror = () => reject(new Error(statusMessages.error || "AI voice playback failed."));
+    await playSpeechChunk(chunks[chunkIndex], {
+      listenSessionId,
+      statusMessages,
+      onStatusChange,
+      statusElement
     });
   }
 
@@ -6127,9 +10599,196 @@ async function speakTextWithOpenAi(text, { context = "document", documentId = nu
   renderDocuments();
 }
 
+function getAiSpeechPlaybackContext() {
+  const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
+  if (typeof AudioContextConstructor !== "function") {
+    return null;
+  }
+  if (!aiSpeechPlaybackContext) {
+    aiSpeechPlaybackContext = new AudioContextConstructor();
+  }
+  return aiSpeechPlaybackContext;
+}
+
+async function ensureAiSpeechPlaybackReady() {
+  const audioContext = getAiSpeechPlaybackContext();
+  if (!audioContext) {
+    await primeAiSpeechPlaybackElement();
+    return;
+  }
+
+  if (audioContext.state === "suspended") {
+    await audioContext.resume();
+  }
+  await primeAiSpeechPlaybackElement();
+}
+
+function ensureAiSpeechPlaybackElement() {
+  if (currentAudioPlayback && currentAudioPlayback instanceof HTMLAudioElement) {
+    return currentAudioPlayback;
+  }
+
+  const playbackElement = document.createElement("audio");
+  playbackElement.preload = "auto";
+  playbackElement.playsInline = true;
+  playbackElement.setAttribute("aria-hidden", "true");
+  playbackElement.style.position = "fixed";
+  playbackElement.style.width = "0";
+  playbackElement.style.height = "0";
+  playbackElement.style.opacity = "0";
+  playbackElement.style.pointerEvents = "none";
+  playbackElement.style.inset = "auto";
+  document.body.appendChild(playbackElement);
+  currentAudioPlayback = playbackElement;
+  return playbackElement;
+}
+
+async function primeAiSpeechPlaybackElement() {
+  if (aiSpeechPlaybackPrimed) {
+    return;
+  }
+
+  const playbackElement = ensureAiSpeechPlaybackElement();
+  playbackElement.muted = true;
+  playbackElement.src = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
+  try {
+    await playbackElement.play();
+  } catch (error) {
+    console.warn("AI audio priming was blocked.", error);
+  }
+  playbackElement.pause();
+  playbackElement.currentTime = 0;
+  playbackElement.removeAttribute("src");
+  playbackElement.load();
+  playbackElement.muted = false;
+  aiSpeechPlaybackPrimed = true;
+}
+
+async function playSpeechBlobThroughAudioElement(speechBlob, { statusMessages = {}, onStatusChange = null, statusElement = null } = {}) {
+  const playbackElement = ensureAiSpeechPlaybackElement();
+  if (currentAudioObjectUrl) {
+    URL.revokeObjectURL(currentAudioObjectUrl);
+  }
+  currentAudioObjectUrl = URL.createObjectURL(speechBlob);
+  playbackElement.pause();
+  playbackElement.onended = null;
+  playbackElement.onerror = null;
+  playbackElement.src = currentAudioObjectUrl;
+  playbackElement.load();
+
+  await new Promise((resolve, reject) => {
+    const handleReady = () => {
+      playbackElement.removeEventListener("canplay", handleReady);
+      playbackElement.removeEventListener("error", handleError);
+      resolve();
+    };
+    const handleError = () => {
+      playbackElement.removeEventListener("canplay", handleReady);
+      playbackElement.removeEventListener("error", handleError);
+      reject(new Error(statusMessages.error || "AI voice playback failed."));
+    };
+
+    if (playbackElement.readyState >= 2) {
+      resolve();
+      return;
+    }
+
+    playbackElement.addEventListener("canplay", handleReady, { once: true });
+    playbackElement.addEventListener("error", handleError, { once: true });
+  });
+
+  await playbackElement.play();
+  if (statusElement) {
+    statusElement.textContent = statusMessages.playing || "Reading...";
+  } else if (elements.askResponse) {
+    elements.askResponse.textContent = statusMessages.playing || "Reading...";
+  }
+  if (typeof onStatusChange === "function") {
+    onStatusChange("playing", statusMessages.playing || "Reading...");
+  }
+
+  await new Promise((resolve, reject) => {
+    playbackElement.onended = () => resolve();
+    playbackElement.onerror = () => reject(new Error(statusMessages.error || "AI voice playback failed."));
+  });
+}
+
+async function playSpeechChunk(chunkText, { listenSessionId, statusMessages = {}, onStatusChange = null, statusElement = null } = {}) {
+  const speechBlob = await requestApi("/api/speak", { text: chunkText }, true);
+
+  if (currentListenSessionId !== listenSessionId) {
+    return;
+  }
+
+  try {
+    await playSpeechBlobThroughAudioElement(speechBlob, { statusMessages, onStatusChange, statusElement });
+    return;
+  } catch (error) {
+    console.warn("DOM audio playback failed, retrying with AudioContext.", error);
+  }
+
+  const audioContext = getAiSpeechPlaybackContext();
+  if (!audioContext) {
+    throw new Error(statusMessages.error || "AI voice playback failed.");
+  }
+
+  const speechData = await speechBlob.arrayBuffer();
+  if (currentListenSessionId !== listenSessionId) {
+    return;
+  }
+
+  if (audioContext.state === "suspended") {
+    await audioContext.resume();
+  }
+
+  const decodedBuffer = await audioContext.decodeAudioData(speechData.slice(0));
+  if (currentListenSessionId !== listenSessionId) {
+    return;
+  }
+
+  await new Promise((resolve, reject) => {
+    const source = audioContext.createBufferSource();
+    currentAudioBufferSource = source;
+    source.buffer = decodedBuffer;
+    source.connect(audioContext.destination);
+    source.onended = () => {
+      if (currentAudioBufferSource === source) {
+        currentAudioBufferSource = null;
+      }
+      resolve();
+    };
+
+    try {
+      if (statusElement) {
+        statusElement.textContent = statusMessages.playing || "Reading...";
+      } else if (elements.askResponse) {
+        elements.askResponse.textContent = statusMessages.playing || "Reading...";
+      }
+      if (typeof onStatusChange === "function") {
+        onStatusChange("playing", statusMessages.playing || "Reading...");
+      }
+      source.start(0);
+    } catch (error) {
+      if (currentAudioBufferSource === source) {
+        currentAudioBufferSource = null;
+      }
+      reject(error);
+    }
+  });
+}
+
 function currentDateKey() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+function currentWeekKey(date = new Date()) {
+  const weekDate = new Date(date);
+  const day = weekDate.getDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  weekDate.setHours(0, 0, 0, 0);
+  weekDate.setDate(weekDate.getDate() + mondayOffset);
+  return `${weekDate.getFullYear()}-${String(weekDate.getMonth() + 1).padStart(2, "0")}-${String(weekDate.getDate()).padStart(2, "0")}`;
 }
 
 function formatHeroDate(date = new Date()) {
@@ -6203,9 +10862,66 @@ function getSubjectTabCounts(subject) {
     reader: getReaderDocuments(subject).length,
     homework: getSubjectHomeworkBundles(subject).length,
     spelling: getSpellingPendingActivityCount(subject),
+    writing: getSubjectWritingPendingSectionCount(subject),
     watch: getSubjectWatchLinks(subject).length,
     assessments: getActiveSubjectAssessments(subject).length
   };
+}
+
+function getAvailableSubjectTabs(subject) {
+  return subject?.id === "spelling"
+    ? ["spelling"]
+    : subject?.id === "english"
+      ? ["reader", "writing", "homework", "watch", "assessments"]
+      : ["reader", "homework", "watch", "assessments"];
+}
+
+function getPreferredSubjectTab(subject) {
+  const counts = getSubjectTabCounts(subject);
+  if (
+    subject?.id === "spelling" &&
+    counts.spelling &&
+    !counts.reader &&
+    !counts.homework &&
+    !counts.watch &&
+    !counts.assessments
+  ) {
+    return "spelling";
+  }
+
+  return getAvailableSubjectTabs(subject)[0] || "reader";
+}
+
+function shouldShowSubjectLanding(subject = getSelectedSubject()) {
+  return Boolean(
+    subject &&
+    state.currentView === "subjects" &&
+    (!state.subjectWorkspaceExpanded || state.subjectWorkspaceExpandedSubjectId !== subject.id)
+  );
+}
+
+function resetSubjectWorkspaceView() {
+  state.subjectWorkspaceExpanded = false;
+  state.subjectWorkspaceExpandedSubjectId = "";
+  state.subjectWorkspaceReturnLandingSubjectId = "";
+  state.subjectLandingOpenDocumentId = "";
+  state.subjectLandingView = "simple";
+  state.subjectLandingPieceIndex = 0;
+  state.subjectLandingSubjectMenuOpen = false;
+  closeSubjectLandingAsk();
+}
+
+function expandSubjectWorkspace(tab = null) {
+  const subject = getSelectedSubject();
+  const availableTabs = getAvailableSubjectTabs(subject);
+  if (tab && availableTabs.includes(tab)) {
+    state.activeSubjectTab = tab;
+  }
+  state.subjectWorkspaceExpanded = true;
+  state.subjectWorkspaceExpandedSubjectId = subject?.id || "";
+  state.focusAskOpen = false;
+  state.focusArea = null;
+  render();
 }
 
 function getHomeFocusSubjectStatus(subject) {
@@ -6214,12 +10930,20 @@ function getHomeFocusSubjectStatus(subject) {
     (bundle) => getTextCompletionRatio(bundle.workNotes, 350) < 1
   ).length;
   const activeAssessmentCount = getActiveSubjectAssessments(subject).length;
-  const waitingCount = unreadCount + remainingHomeworkCount + activeAssessmentCount;
+  const spellingPendingCount = getSpellingPendingActivityCount(subject);
+  const waitingCount = unreadCount + remainingHomeworkCount + activeAssessmentCount + spellingPendingCount;
+  const summary = spellingPendingCount && waitingCount === spellingPendingCount
+    ? `${spellingPendingCount} spelling ${spellingPendingCount === 1 ? "stage" : "stages"}`
+    : spellingPendingCount
+      ? `${waitingCount} to do · ${spellingPendingCount} spelling stage${spellingPendingCount === 1 ? "" : "s"}`
+      : waitingCount
+        ? `${waitingCount} to do`
+        : "Nothing due";
 
   return {
     waitingCount,
     hasWaiting: waitingCount > 0,
-    summary: waitingCount ? `${waitingCount} to do` : "Nothing due"
+    summary
   };
 }
 
@@ -6258,13 +10982,14 @@ function getSubjectHeroCopy(subject, tab) {
   }
 
   if (tab === "spelling") {
+    const stageId = getSpellingStageId(subject);
     return {
-      big: `${spellingPending} ${spellingPending === 1 ? "stable" : "stables"}`,
-      rest: subject.id === "english"
+      big: `${spellingPending} ${spellingPending === 1 ? "stage" : "stages"}`,
+      rest: subject.id === "spelling"
         ? spellingPending
-          ? `left in ${SPELLING_UNIT_SEED.title} — build the pattern before memorising the word.`
+          ? `left in ${SPELLING_UNIT_SEED.title} — current focus: ${SPELLING_STAGE_LABELS[stageId].toLowerCase()}.`
           : ""
-        : "ready in English when you want focused spelling practice."
+        : "ready in the Practice subject when you want focused pattern practice."
     };
   }
 
@@ -6314,12 +11039,13 @@ function renderHomeHero() {
   const unreadDocumentMetrics = getUnreadDocumentMetrics();
   const homeworkMetrics = getHomeworkMetrics();
   const assessmentMetrics = getAssessmentProgressMetrics();
-  const totalThings = unreadDocumentMetrics.unread + homeworkMetrics.remaining + assessmentMetrics.upcoming;
+  const spellingThings = state.subjects.reduce((total, subject) => total + getSpellingPendingActivityCount(subject), 0);
+  const totalThings = unreadDocumentMetrics.unread + homeworkMetrics.remaining + assessmentMetrics.upcoming + spellingThings;
   const nextEntry = getNextAssessmentEntry();
   const daysUntil = nextEntry?.dueDateObject ? getDaysUntilDate(nextEntry.dueDateObject) : 0;
 
   elements.homeHeroDate.textContent = formatHeroDate();
-  if (state.focusMode && state.currentView === "home") {
+  if (shouldUseHomeFocusUi()) {
     elements.homeHeroTitle.innerHTML = `Hey ${escapeHtml(state.studentName || "there")}. <span>👋</span>`;
     elements.homeHeroSubtitle.textContent = "Here's what's due next. Then pick a subject to jump in.";
     return;
@@ -6334,13 +11060,6 @@ function renderHomeHero() {
 function renderSubjectsHero() {
   const subject = getSelectedSubject();
   if (!subject) {
-    return;
-  }
-
-  if (state.focusMode && state.currentView === "subjects" && !state.focusArea) {
-    elements.subjectsHeroDate.textContent = formatHeroDate();
-    elements.subjectsHeroTitle.innerHTML = `Hey ${escapeHtml(state.studentName || "there")}. <span>👋</span>`;
-    elements.subjectsHeroSubtitle.textContent = "Pick one card to start. Everything else can wait.";
     return;
   }
 
@@ -6361,39 +11080,21 @@ function renderSubjectList() {
   const homeSubjectTileMarkup = state.subjects
     .map((subject, index) => {
       const focusStatus = getHomeFocusSubjectStatus(subject);
-      const counts = getSubjectTabCounts(subject);
-      if (state.focusMode) {
-        return `
-          <button
-            type="button"
-            class="focus-home-subject-card${subject.id === state.selectedSubjectId ? " focus-home-subject-card--active" : ""}"
-            data-subject-id="${subject.id}"
-            style="--focus-subject-code-bg:${escapeHtml(getSubjectTileCodeBackground(subject, index))}; --focus-subject-dot:${escapeHtml(getSubjectTileOutlineColor(subject, index))}"
-          >
-            <span class="focus-home-subject-card__code">${escapeHtml(getSubjectShortCode(subject.name))}</span>
-            <span class="focus-home-subject-card__copy">
-              <strong>${escapeHtml(subject.name)}</strong>
-              <span class="focus-home-subject-card__pill${focusStatus.hasWaiting ? " focus-home-subject-card__pill--active" : ""}">
-                ${escapeHtml(focusStatus.summary)}
-              </span>
-            </span>
-            ${focusStatus.hasWaiting ? '<span class="focus-home-subject-card__dot" aria-hidden="true"></span>' : ""}
-          </button>
-        `;
-      }
       return `
         <button
           type="button"
-          class="subject-tile subject-tile--home${subject.id === state.selectedSubjectId ? " subject-tile--home-active" : ""}"
+          class="focus-home-subject-card${subject.id === state.selectedSubjectId ? " focus-home-subject-card--active" : ""}"
           data-subject-id="${subject.id}"
-          style="--subject-outline:${escapeHtml(getSubjectTileOutlineColor(subject, index))}; --subject-code-bg:${escapeHtml(getSubjectTileCodeBackground(subject, index))}"
+          style="--focus-subject-code-bg:${escapeHtml(getSubjectTileCodeBackground(subject, index))}; --focus-subject-dot:${escapeHtml(getSubjectTileOutlineColor(subject, index))}"
         >
-          <span class="subject-tile__code">${getSubjectTileCodeMarkup(subject)}</span>
-          <span class="subject-tile__title">${escapeHtml(subject.name)}</span>
-          <span class="subject-tile__meta">
-            <span>${escapeHtml(`${counts.reader} notes`)}</span>
-            <span>${escapeHtml(`${counts.homework} HW`)}</span>
+          <span class="focus-home-subject-card__code">${escapeHtml(getSubjectShortCode(subject.name))}</span>
+          <span class="focus-home-subject-card__copy">
+            <strong>${escapeHtml(subject.name)}</strong>
+            <span class="focus-home-subject-card__pill${focusStatus.hasWaiting ? " focus-home-subject-card__pill--active" : ""}">
+              ${escapeHtml(focusStatus.summary)}
+            </span>
           </span>
+          ${focusStatus.hasWaiting ? '<span class="focus-home-subject-card__dot" aria-hidden="true"></span>' : ""}
         </button>
       `;
     })
@@ -6409,6 +11110,7 @@ function renderSubjectList() {
       >
         <span class="subject-tile__code">${getSubjectTileCodeMarkup(subject)}</span>
         <span class="subject-tile__title">${escapeHtml(subject.name)}</span>
+        ${getSubjectTabCounts(subject).spelling ? `<span class="subject-tile__mini-chip">Aa Spelling</span>` : ""}
       </button>
     `)
     .join("");
@@ -6426,24 +11128,13 @@ function renderSubjectList() {
       if (!subject) {
         return;
       }
-
-      state.selectedSubjectId = subject.id;
-      state.activeSubjectTab = "reader";
-      state.focusArea = null;
-      state.selectedDocumentIds = [];
-      state.expandedDocumentGroups = {};
-      state.watchExpanded = false;
-      state.documentsExpanded = false;
-      state.taskAskResponse = "";
-      state.taskAskStatus = "";
-      state.currentView = button.closest("#home-view") ? "subjects" : state.currentView;
-      render();
+      selectSubjectForSubjectsView(subject.id, { returnToHome: false });
     });
   });
 }
 
 function renderDocumentBulkActions(subject) {
-  const documentIds = getVisibleSubjectDocuments(subject).map((documentRecord) => documentRecord.id);
+  const documentIds = getSelectableDocumentsForTable(subject).map((documentRecord) => documentRecord.id);
   state.selectedDocumentIds = state.selectedDocumentIds.filter((documentId) => documentIds.includes(documentId));
   const allSelected = Boolean(documentIds.length) && state.selectedDocumentIds.length === documentIds.length;
   elements.documentsSelectAllButton.disabled = !documentIds.length;
@@ -6454,20 +11145,25 @@ function renderDocumentBulkActions(subject) {
 function renderAskContext() {
   const subject = getSelectedSubject();
   const askDocument = getAskDocument();
-  const history = subject ? getTodayAskHistory(subject) : [];
-  const historyMarkup = history.length
-    ? history
-        .map(
-          (entry) =>
-            `Q: ${entry.question}\nA: ${entry.answer}`
-        )
-        .join("\n\n")
-    : "";
-  elements.askContext.textContent = askDocument
-    ? `Asking about: ${askDocument.title}`
-    : "No document selected for Ask yet.";
-  elements.askResponse.textContent =
-    historyMarkup || "Ask a question about the selected subject or document.";
+  if (elements.askContext) {
+    elements.askContext.textContent = askDocument
+      ? `Asking about: ${askDocument.title}`
+      : "No document selected for Ask yet.";
+  }
+  if (elements.askResponse) {
+    const dockStatus = subject && state.askStatusSubjectId === subject.id ? state.askStatus : "";
+    elements.askResponse.textContent = dockStatus || (subject ? getAskIdleStatus(getDockAskSurface()) : "Pick a subject to start Ask Panda.");
+  }
+  const landingSurface = getSubjectLandingAskSurface();
+  if (landingSurface?.context) {
+    landingSurface.context.textContent = askDocument
+      ? `Asking about: ${askDocument.title}`
+      : "No document selected for Ask yet.";
+  }
+  if (landingSurface?.response) {
+    const landingResponse = state.subjectLandingAskStatus || getAskIdleStatus(landingSurface);
+    landingSurface.response.textContent = landingResponse;
+  }
   renderAskVoiceControls();
 }
 
@@ -6558,7 +11254,7 @@ function openSavedRevisionTest(savedTestId) {
 function getReaderToolbarMarkup() {
   const selectedDocument = getSelectedDocument();
   const selectedIndex = getSelectedDocumentIndex();
-  const documentCount = getVisibleSubjectDocuments(getSelectedSubject() || { documents: [] }).length || 0;
+  const documentCount = getAllReaderDocuments(getSelectedSubject() || { documents: [] }).length || 0;
   const hasDocument = Boolean(selectedDocument);
   const pageCount = getDocumentPages(selectedDocument).length;
   const pageIndex = getCurrentDocumentPageIndex(selectedDocument);
@@ -6576,7 +11272,7 @@ function getReaderToolbarMarkup() {
   `;
 }
 
-function renderDocumentGroupRows(group, { reviewedSection = false } = {}) {
+function renderDocumentGroupRows(group, { reviewedSection = false, revisionSection = false } = {}) {
   const isExpanded = Boolean(state.expandedDocumentGroups[group.id]);
   const visibleDocuments =
     group.isPageGroup && !isExpanded ? [group.documents[0]] : group.documents;
@@ -6594,7 +11290,7 @@ function renderDocumentGroupRows(group, { reviewedSection = false } = {}) {
   return visibleDocuments
     .map(
       (document, index) => `
-        <tr class="${document.id === state.selectedDocumentId ? "is-selected" : ""}${state.selectedDocumentIds.includes(document.id) ? " is-bulk-selected" : ""}${reviewedSection ? " documents-row--reviewed" : ""}">
+        <tr class="${document.id === state.selectedDocumentId ? "is-selected" : ""}${state.selectedDocumentIds.includes(document.id) ? " is-bulk-selected" : ""}${reviewedSection ? " documents-row--reviewed" : ""}${revisionSection ? " documents-row--revision" : ""}">
           ${
             index === 0
               ? `<td rowspan="${visibleDocuments.length}">
@@ -6631,12 +11327,25 @@ function renderDocumentGroupRows(group, { reviewedSection = false } = {}) {
             </label>
           </td>
           <td>
+            <label class="document-review-toggle document-review-toggle--revision">
+              <input
+                type="checkbox"
+                data-document-revision-id="${document.id}"
+                ${document.revisionArchived ? "checked" : ""}
+              />
+              <span>${document.revisionArchived ? "In revision" : "Add to revision"}</span>
+            </label>
+          </td>
+          <td>
             <div class="table-actions">
               <button type="button" class="table-action" data-action="read" data-document-id="${document.id}">Read</button>
               <button type="button" class="table-action" data-action="listen" data-document-id="${document.id}">
                 ${state.listeningDocumentId === document.id ? "Stop" : "Listen"}
               </button>
               <button type="button" class="table-action" data-action="ask" data-document-id="${document.id}">Ask</button>
+              <button type="button" class="table-action" data-action="revision" data-document-id="${document.id}">
+                ${document.revisionArchived ? "Remove from revision" : "Add to revision"}
+              </button>
               <button type="button" class="table-action table-action--danger" data-action="delete" data-document-id="${document.id}">Delete</button>
             </div>
           </td>
@@ -6652,12 +11361,15 @@ function renderDocuments() {
     return;
   }
 
-  const sortedDocuments = getVisibleSubjectDocuments(subject);
+  const sortedDocuments = getReaderDocuments(subject);
+  const revisionDocuments = getRevisionReaderDocuments(subject);
+  const allReaderDocuments = [...sortedDocuments, ...revisionDocuments];
+  const revisionSectionExpanded = isRevisionSectionExpanded(subject);
 
-  if (!sortedDocuments.length) {
+  if (!allReaderDocuments.length) {
     elements.documentsBody.innerHTML = `
       <tr>
-        <td colspan="6">
+        <td colspan="7">
           <div class="empty-state">
             No documents uploaded for this subject yet. Add worksheets, rubrics, or weekly notes.
           </div>
@@ -6675,38 +11387,57 @@ function renderDocuments() {
 
   const unreadDocuments = sortedDocuments.filter((document) => !document.reviewed);
   const reviewedDocuments = sortedDocuments.filter((document) => document.reviewed);
+  const revisionGroups = getDocumentGroupsFromDocuments(revisionDocuments);
   const unreadGroups = getDocumentGroupsFromDocuments(unreadDocuments);
   const reviewedGroups = getDocumentGroupsFromDocuments(reviewedDocuments);
 
-  if (!sortedDocuments.find((doc) => doc.id === state.selectedDocumentId)) {
-    state.selectedDocumentId = sortedDocuments[0].id;
+  if (!allReaderDocuments.find((doc) => doc.id === state.selectedDocumentId)) {
+    state.selectedDocumentId = sortedDocuments[0]?.id || revisionDocuments[0]?.id || null;
   }
 
-  if (!sortedDocuments.find((doc) => doc.id === state.askDocumentId)) {
-    state.askDocumentId = sortedDocuments[0].id;
+  if (!allReaderDocuments.find((doc) => doc.id === state.askDocumentId)) {
+    state.askDocumentId = sortedDocuments[0]?.id || revisionDocuments[0]?.id || null;
   }
 
   const visibleUnreadGroups = state.documentsExpanded ? unreadGroups : unreadGroups.slice(0, 6);
-  const combinedGroupMap = new Map([...visibleUnreadGroups, ...reviewedGroups].map((group) => [group.id, group]));
+  const combinedGroupMap = new Map(
+    [...visibleUnreadGroups, ...reviewedGroups, ...(revisionSectionExpanded ? revisionGroups : [])]
+      .map((group) => [group.id, group])
+  );
   const rowsMarkup = [
     `
       <tr class="documents-section-row">
-        <td colspan="6">Newly uploaded</td>
+        <td colspan="7">Newly uploaded</td>
       </tr>
     `,
     visibleUnreadGroups.length
       ? visibleUnreadGroups.map((group) => renderDocumentGroupRows(group)).join("")
       : `
         <tr class="documents-empty-row">
-          <td colspan="6"><div class="empty-state">No new documents waiting to be read.</div></td>
+          <td colspan="7"><div class="empty-state">No new documents waiting to be read.</div></td>
         </tr>
       `,
     reviewedGroups.length
       ? `
         <tr class="documents-section-row documents-section-row--reviewed">
-          <td colspan="6">Read / listened</td>
+          <td colspan="7">Read / listened</td>
         </tr>
         ${reviewedGroups.map((group) => renderDocumentGroupRows(group, { reviewedSection: true })).join("")}
+      `
+      : "",
+    revisionGroups.length
+      ? `
+        <tr class="documents-section-row documents-section-row--revision">
+          <td colspan="7">
+            <button type="button" class="documents-folder-toggle" data-documents-revision-toggle="true" aria-expanded="${revisionSectionExpanded ? "true" : "false"}">
+              <span>Revision</span>
+              <span>${escapeHtml(`${revisionGroups.length} item${revisionGroups.length === 1 ? "" : "s"}`)}</span>
+            </button>
+          </td>
+        </tr>
+        ${revisionSectionExpanded
+          ? revisionGroups.map((group) => renderDocumentGroupRows(group, { revisionSection: true })).join("")
+          : ""}
       `
       : ""
   ].join("");
@@ -6770,6 +11501,25 @@ function renderDocuments() {
     });
   });
 
+  elements.documentsBody.querySelectorAll("[data-document-revision-id]").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      const documentRecord = subject.documents.find((doc) => doc.id === checkbox.dataset.documentRevisionId);
+      if (!documentRecord) {
+        return;
+      }
+      setDocumentRevisionArchivedState(subject, [documentRecord.id], checkbox.checked);
+      renderDocuments();
+      renderReader();
+      renderSubjectsHero();
+      renderDockContext();
+    });
+  });
+
+  elements.documentsBody.querySelector("[data-documents-revision-toggle]")?.addEventListener("click", () => {
+    state.documentsRevisionExpanded = !state.documentsRevisionExpanded;
+    renderDocuments();
+  });
+
   elements.documentsBody.querySelectorAll("[data-action]").forEach((button) => {
     button.addEventListener("click", () => {
       const documentRecord = subject.documents.find((doc) => doc.id === button.dataset.documentId);
@@ -6796,6 +11546,15 @@ function renderDocuments() {
         renderAskContext();
         elements.askResponse.textContent = "Ask a question about the selected document.";
         focusAskComposer();
+      }
+
+      if (button.dataset.action === "revision") {
+        setDocumentRevisionArchivedState(subject, [documentRecord.id], !documentRecord.revisionArchived);
+        renderDocuments();
+        renderReader();
+        renderSubjectsHero();
+        renderDockContext();
+        return;
       }
 
       if (button.dataset.action === "delete") {
@@ -7016,7 +11775,7 @@ function renderReader() {
   }
 
   if (isWholeStudyDocument(selectedDocument)) {
-    if (selectedDocument.studyPlanStatus === "idle" && subject) {
+    if (subject && !hasCurrentDocumentStudyPlan(selectedDocument)) {
       void ensureDocumentStudyPlan(selectedDocument, subject);
     }
 
@@ -7335,12 +12094,22 @@ function stopListening() {
   if ("speechSynthesis" in window) {
     window.speechSynthesis.cancel();
   }
+  if (currentAudioBufferSource) {
+    currentAudioBufferSource.onended = null;
+    currentAudioBufferSource.disconnect();
+    try {
+      currentAudioBufferSource.stop(0);
+    } catch (error) {
+      console.debug("Audio buffer source was already stopped.", error);
+    }
+    currentAudioBufferSource = null;
+  }
   if (currentAudioPlayback) {
     currentAudioPlayback.onended = null;
     currentAudioPlayback.onerror = null;
     currentAudioPlayback.pause();
-    currentAudioPlayback.src = "";
-    currentAudioPlayback = null;
+    currentAudioPlayback.removeAttribute("src");
+    currentAudioPlayback.load();
   }
   if (currentAudioObjectUrl) {
     URL.revokeObjectURL(currentAudioObjectUrl);
@@ -7419,10 +12188,10 @@ function deleteDocuments(documentIds) {
   subject.assessments = subject.assessments.filter((assessment) => assessment.linkedDocumentIds.length || !assessment.autoCreated);
   state.selectedDocumentIds = state.selectedDocumentIds.filter((documentId) => !uniqueDocumentIds.includes(documentId));
   if (uniqueDocumentIds.includes(state.selectedDocumentId)) {
-    state.selectedDocumentId = getVisibleSubjectDocuments(subject)[0]?.id || null;
+    state.selectedDocumentId = getReaderDocuments(subject)[0]?.id || getRevisionReaderDocuments(subject)[0]?.id || null;
   }
   if (uniqueDocumentIds.includes(state.askDocumentId)) {
-    state.askDocumentId = getVisibleSubjectDocuments(subject)[0]?.id || null;
+    state.askDocumentId = getReaderDocuments(subject)[0]?.id || getRevisionReaderDocuments(subject)[0]?.id || null;
   }
   syncAutoWatchForSubject(subject);
   persistSubjects();
@@ -9482,6 +14251,846 @@ function renderUpcomingModal() {
   attachUpcomingAssessmentHandlers();
 }
 
+function buildWritingStoryTitle(openingAnswers = {}) {
+  const who = String(openingAnswers.who || "").trim();
+  const where = String(openingAnswers.where || "").trim().toLowerCase();
+  if (where.includes("lighthouse")) {
+    return "The Lighthouse Door";
+  }
+  if (who) {
+    return `${who.split(/\s+/).filter(Boolean)[0]} and the Hidden Path`;
+  }
+  return "My Picture Book";
+}
+
+function buildWritingOpeningSentence(openingAnswers = {}) {
+  const who = String(openingAnswers.who || "").trim();
+  const where = String(openingAnswers.where || "").trim();
+  const want = String(openingAnswers.want || "").trim();
+  return `${who || "Someone"} stood in ${where || "a strange place"}, hoping to ${want || "discover something important"}.`;
+}
+
+function getWritingCompletedSectionCount(writing) {
+  return (writing.sections || []).filter((section) => section.completed).length;
+}
+
+function getSubjectWritingPendingSectionCount(subject) {
+  const writing = getSubjectWritingState(subject);
+  if (!writing.enabled) {
+    return 0;
+  }
+  return Math.max(0, WRITING_STUDIO_SECTION_COUNT - getWritingCompletedSectionCount(writing));
+}
+
+function getWritingCurrentSection(writing) {
+  return writing.sections[writing.currentSectionIndex] || writing.sections[0] || null;
+}
+
+function getWritingCompletedSections(writing) {
+  return (writing.sections || []).filter((section) => section.completed && String(section.text || "").trim());
+}
+
+function syncWritingBookPreviewToSection(writing, sectionId = "") {
+  const completedSections = getWritingCompletedSections(writing);
+  const nextPreviewIndex = completedSections.findIndex((section) => section.id === sectionId);
+  writing.bookPreviewIndex = Math.max(0, nextPreviewIndex >= 0 ? nextPreviewIndex : Number(writing.bookPreviewIndex || 0));
+  return completedSections;
+}
+
+function buildWritingSectionSuggestion(writing, sectionIndex) {
+  const currentSection = writing.sections[sectionIndex];
+  const previousSection = sectionIndex > 0 ? writing.sections[sectionIndex - 1] : null;
+  const who = String(writing.openingAnswers.who || "your character").trim();
+  if (sectionIndex === 0) {
+    return `Start by showing ${who} in the setting and hint at what they want.`;
+  }
+  const excerpt = String(previousSection?.text || "").trim();
+  const lastSentence = excerpt.split(/(?<=[.!?])\s+/).filter(Boolean).slice(-1)[0] || excerpt;
+  return lastSentence
+    ? `Use what happened before, then add the next step. For example: ${clipText(lastSentence, 90)}`
+    : currentSection?.hint || WRITING_STUDIO_SECTION_HINTS[sectionIndex] || WRITING_STUDIO_SECTION_HINTS[0];
+}
+
+function buildWritingIllustrationOption(section, option) {
+  return {
+    id: `${section.id}-illustration-${option.styleId || option.label}-${Math.abs(option.prompt.split("").reduce((total, character) => total + character.charCodeAt(0), 0))}`,
+    prompt: option.prompt,
+    imageUrl: "",
+    label: option.label,
+    description: option.description,
+    styleId: option.styleId || "",
+    styleLabel: option.styleLabel || option.label,
+    styleBrief: option.styleBrief || option.description
+  };
+}
+
+function getExpectedWritingIllustrationCount(writing, sectionIndex) {
+  if (sectionIndex === 0) {
+    return WRITING_STUDIO_STYLE_VARIANTS.length;
+  }
+  return writing.illustrationStyle?.label && writing.illustrationStyle?.brief ? 2 : WRITING_STUDIO_STYLE_VARIANTS.length;
+}
+
+function hasCurrentWritingStyleVariantSet(options) {
+  if (!Array.isArray(options) || options.length !== WRITING_STUDIO_STYLE_VARIANTS.length) {
+    return false;
+  }
+  const optionStyleIds = new Set(options.map((option) => String(option?.styleId || "")));
+  return WRITING_STUDIO_STYLE_VARIANTS.every((style) => optionStyleIds.has(style.id));
+}
+
+function shouldRefreshWritingIllustrationOptions(writing, sectionIndex, section) {
+  const options = Array.isArray(section?.illustrationOptions) ? section.illustrationOptions : [];
+  if (!options.length) {
+    return true;
+  }
+  if (options.length !== getExpectedWritingIllustrationCount(writing, sectionIndex)) {
+    return true;
+  }
+  if (sectionIndex === 0 && !hasCurrentWritingStyleVariantSet(options)) {
+    return true;
+  }
+  return false;
+}
+
+function hasCompleteWritingIllustrationImages(writing, sectionIndex, section) {
+  if (shouldRefreshWritingIllustrationOptions(writing, sectionIndex, section)) {
+    return false;
+  }
+  const options = Array.isArray(section?.illustrationOptions) ? section.illustrationOptions : [];
+  return options.every((option) => String(option?.imageUrl || "").trim());
+}
+
+function buildWritingIllustrationStyleSelection(section, option) {
+  if (!option) {
+    return null;
+  }
+  return {
+    styleId: String(option.styleId || ""),
+    label: String(option.styleLabel || option.label || "").trim(),
+    brief: String(option.styleBrief || option.description || "").trim(),
+    prompt: String(option.prompt || "").trim(),
+    imageUrl: String(option.imageUrl || "").trim(),
+    sourceSectionId: String(section?.id || "")
+  };
+}
+
+function buildWritingIllustrationOptions(writing, sectionIndex) {
+  const section = writing.sections[sectionIndex];
+  const baseText = String(section?.text || "").trim() || buildWritingSectionSuggestion(writing, sectionIndex);
+  const focusWord = String(writing.openingAnswers.who || "the character").trim();
+  const sceneSummary = clipText(baseText.toLowerCase(), 72);
+
+  if (sectionIndex === 0) {
+    return WRITING_STUDIO_STYLE_VARIANTS.map((style) =>
+      buildWritingIllustrationOption(section, {
+        label: style.label,
+        description: style.description,
+        styleId: style.id,
+        styleLabel: style.label,
+        styleBrief: style.description,
+        prompt: `${style.promptLead} Make the composition and materials unmistakably different from the other style options. Show ${focusWord} as ${sceneSummary}`
+      })
+    );
+  }
+
+  const lockedStyle = writing.illustrationStyle;
+  if (lockedStyle?.label && lockedStyle?.brief) {
+    return [
+      {
+        label: `${lockedStyle.label} · wide scene`,
+        description: "Keep the same book style with a wider view of the setting.",
+        styleId: lockedStyle.styleId,
+        styleLabel: lockedStyle.label,
+        styleBrief: lockedStyle.brief,
+        prompt: `Keep the exact established ${lockedStyle.label.toLowerCase()} picture-book look. ${lockedStyle.brief} Show a wide scene of ${focusWord} as ${sceneSummary}`
+      },
+      {
+        label: `${lockedStyle.label} · character focus`,
+        description: "Keep the same book style with a closer character moment.",
+        styleId: lockedStyle.styleId,
+        styleLabel: lockedStyle.label,
+        styleBrief: lockedStyle.brief,
+        prompt: `Keep the exact established ${lockedStyle.label.toLowerCase()} picture-book look. ${lockedStyle.brief} Show a close character-focused moment of ${focusWord} as ${sceneSummary}`
+      }
+    ].map((option) => buildWritingIllustrationOption(section, option));
+  }
+
+  return WRITING_STUDIO_STYLE_VARIANTS.map((style) =>
+    buildWritingIllustrationOption(section, {
+      label: style.label,
+      description: style.description,
+      styleId: style.id,
+      styleLabel: style.label,
+      styleBrief: style.description,
+      prompt: `${style.promptLead} Show ${focusWord} as ${sceneSummary}`
+    })
+  );
+}
+
+function ensureWritingIllustrationOptions(writing, sectionIndex, { force = false } = {}) {
+  const section = writing.sections[sectionIndex];
+  if (!section) {
+    return [];
+  }
+  if (
+    !force
+    && Array.isArray(section.illustrationOptions)
+    && section.illustrationOptions.length
+    && !shouldRefreshWritingIllustrationOptions(writing, sectionIndex, section)
+  ) {
+    if (!section.illustrationOptions.some((option) => option.id === section.selectedIllustrationId)) {
+      section.selectedIllustrationId = section.illustrationOptions[0]?.id || "";
+    }
+    return section.illustrationOptions;
+  }
+  section.illustrationOptions = buildWritingIllustrationOptions(writing, sectionIndex);
+  if (!section.illustrationOptions.some((option) => option.id === section.selectedIllustrationId)) {
+    section.selectedIllustrationId = section.illustrationOptions[0]?.id || "";
+  }
+  return section.illustrationOptions;
+}
+
+function hasWritingIllustrationImages(section) {
+  return Array.isArray(section?.illustrationOptions) && section.illustrationOptions.some((option) => String(option?.imageUrl || "").trim());
+}
+
+function getWritingSuggestionForText(text) {
+  const source = String(text || "");
+  for (const [wrong, correct] of Object.entries(WRITING_STUDIO_TYPOS)) {
+    const match = source.match(new RegExp(`\\b${escapeRegex(wrong)}\\b`, "i"));
+    if (match && match.index !== undefined) {
+      return { wrong: match[0], correct, message: `Did you mean “${correct}”?` };
+    }
+  }
+  const grammarMatch = source.match(/\ba ([aeiou][a-z]*)/i);
+  if (grammarMatch) {
+    return { wrong: grammarMatch[0], correct: `an ${grammarMatch[1]}`, message: `This should be “an ${grammarMatch[1]}”.` };
+  }
+  return null;
+}
+
+function updateWritingSuggestionState(writing, section) {
+  if (!section) {
+    writing.activeSuggestion = null;
+    return;
+  }
+  const suggestion = getWritingSuggestionForText(section.text);
+  writing.activeSuggestion = suggestion ? { sectionId: section.id, ...suggestion } : null;
+}
+
+function updateWritingOpeningAnswer(subject, field, value) {
+  const writing = getSubjectWritingState(subject);
+  if (!["who", "where", "want"].includes(String(field || ""))) {
+    return;
+  }
+  writing.openingAnswers[field] = String(value || "");
+  persistSubjects({ skipRemoteSync: true });
+}
+
+function startWritingStory(subject) {
+  const writing = getSubjectWritingState(subject);
+  const who = String(writing.openingAnswers.who || "").trim();
+  const where = String(writing.openingAnswers.where || "").trim();
+  const want = String(writing.openingAnswers.want || "").trim();
+  if (!who || !where || !want) {
+    writing.coachMessage = "Answer all three story questions before you start writing.";
+    persistSubjects();
+    return;
+  }
+  writing.storyTitle = buildWritingStoryTitle(writing.openingAnswers);
+  writing.currentSectionIndex = 0;
+  writing.bookPreviewIndex = 0;
+  writing.returnToBookAfterIllustration = false;
+  writing.illustrationStyle = null;
+  writing.view = "write";
+  writing.illustrationError = "";
+  writing.isGeneratingIllustrations = false;
+  const firstSection = writing.sections[0];
+  firstSection.text = firstSection.text || buildWritingOpeningSentence(writing.openingAnswers);
+  updateWritingSuggestionState(writing, firstSection);
+  writing.coachMessage = "Your opening line is ready. Shape it into the first section, then continue to illustration.";
+  persistSubjects();
+}
+
+function updateWritingSectionText(subject, value) {
+  const writing = getSubjectWritingState(subject);
+  const section = getWritingCurrentSection(writing);
+  if (!section) {
+    return;
+  }
+  section.text = String(value || "");
+  updateWritingSuggestionState(writing, section);
+  persistSubjects({ skipRemoteSync: true });
+}
+
+function applyWritingSuggestion(subject) {
+  const writing = getSubjectWritingState(subject);
+  const section = getWritingCurrentSection(writing);
+  const suggestion = writing.activeSuggestion;
+  if (!section || !suggestion || suggestion.sectionId !== section.id) {
+    return;
+  }
+  section.text = String(section.text || "").replace(suggestion.wrong, suggestion.correct);
+  updateWritingSuggestionState(writing, section);
+  writing.coachMessage = `${suggestion.correct} has been applied.`;
+  persistSubjects();
+}
+
+function dismissWritingSuggestion(subject) {
+  const writing = getSubjectWritingState(subject);
+  writing.activeSuggestion = null;
+  persistSubjects({ skipRemoteSync: true });
+}
+
+function openWritingSection(subject, sectionIndex, view = "write", { returnToBook = false, preserveReturnToBook = false } = {}) {
+  const writing = getSubjectWritingState(subject);
+  const nextIndex = Math.max(0, Math.min(WRITING_STUDIO_SECTION_COUNT - 1, Number(sectionIndex || 0) || 0));
+  writing.currentSectionIndex = nextIndex;
+  if (view === "book") {
+    writing.bookPreviewIndex = nextIndex;
+    writing.view = "book";
+    writing.returnToBookAfterIllustration = false;
+  } else if (view === "illustrate") {
+    writing.view = "illustrate";
+    writing.returnToBookAfterIllustration = preserveReturnToBook ? Boolean(writing.returnToBookAfterIllustration) : Boolean(returnToBook);
+  } else {
+    writing.view = "write";
+    writing.returnToBookAfterIllustration = preserveReturnToBook ? Boolean(writing.returnToBookAfterIllustration) : Boolean(returnToBook);
+    updateWritingSuggestionState(writing, getWritingCurrentSection(writing));
+  }
+  writing.illustrationError = "";
+  persistSubjects({ skipRemoteSync: true });
+}
+
+function moveWritingSection(subject, direction, view = "write") {
+  const writing = getSubjectWritingState(subject);
+  const nextIndex = Math.max(
+    0,
+    Math.min(WRITING_STUDIO_SECTION_COUNT - 1, Number(writing.currentSectionIndex || 0) + Number(direction || 0))
+  );
+  openWritingSection(subject, nextIndex, view, { preserveReturnToBook: true });
+}
+
+function returnWritingToBook(subject) {
+  const writing = getSubjectWritingState(subject);
+  const currentSection = getWritingCurrentSection(writing);
+  syncWritingBookPreviewToSection(writing, currentSection?.id || "");
+  writing.view = "book";
+  writing.returnToBookAfterIllustration = false;
+  persistSubjects({ skipRemoteSync: true });
+}
+
+async function loadWritingIllustrations(subject, { force = false } = {}) {
+  const writing = getSubjectWritingState(subject);
+  const section = getWritingCurrentSection(writing);
+  if (!section || !String(section.text || "").trim()) {
+    writing.illustrationError = "Write this section before generating illustrations.";
+    persistSubjects();
+    return [];
+  }
+  const baseOptions = ensureWritingIllustrationOptions(writing, writing.currentSectionIndex, { force });
+  if (!force && hasCompleteWritingIllustrationImages(writing, writing.currentSectionIndex, section)) {
+    return section.illustrationOptions;
+  }
+  writing.isGeneratingIllustrations = true;
+  writing.illustrationError = "";
+  writing.view = "illustrate";
+  writing.coachMessage = "Generating illustration options for this section...";
+  persistSubjects({ skipRemoteSync: true });
+
+  const previousSection = writing.currentSectionIndex > 0 ? writing.sections[writing.currentSectionIndex - 1] : null;
+  try {
+    const payload = await requestApi("/api/writing/illustrations", {
+      storyTitle: writing.storyTitle,
+      sectionNumber: section.number,
+      sectionText: section.text,
+      openingAnswers: writing.openingAnswers,
+      previousSectionText: previousSection?.text || "",
+      prompts: baseOptions.map((option) => option.prompt),
+      styleGuide: writing.illustrationStyle && writing.currentSectionIndex > 0
+        ? {
+            label: writing.illustrationStyle.label,
+            brief: writing.illustrationStyle.brief,
+            prompt: writing.illustrationStyle.prompt
+          }
+        : null
+    }, false, {
+      timeoutMs: 70_000,
+      timeoutMessage: "Illustration generation took too long. Try again."
+    });
+    const generatedOptions = Array.isArray(payload?.options) ? payload.options : [];
+    section.illustrationOptions = baseOptions.map((option, index) => ({
+      ...option,
+      imageUrl: String(generatedOptions[index]?.imageUrl || "")
+    }));
+    const generatedCount = section.illustrationOptions.filter((option) => String(option.imageUrl || "").trim()).length;
+    if (!section.illustrationOptions.some((option) => option.id === section.selectedIllustrationId)) {
+      section.selectedIllustrationId = section.illustrationOptions[0]?.id || "";
+    }
+    if (generatedCount) {
+      writing.illustrationError = payload?.partialFailure ? String(payload.error || "Some illustration options could not be generated.") : "";
+      writing.coachMessage = generatedCount === section.illustrationOptions.length
+        ? (writing.currentSectionIndex === 0
+          ? "Choose the look you want for the whole book."
+          : "Pick the picture that matches your section best.")
+        : "Some pictures are ready. You can choose one now or try generating again.";
+    } else {
+      writing.illustrationError = String(payload?.error || "Illustrations could not be generated.");
+      writing.coachMessage = "Illustration generation failed. Try again in a moment.";
+    }
+  } catch (error) {
+    writing.illustrationError = error instanceof Error ? error.message : "Illustrations could not be generated.";
+    writing.coachMessage = "Illustration generation failed. Try again in a moment.";
+  } finally {
+    writing.isGeneratingIllustrations = false;
+    persistSubjects();
+  }
+
+  return section.illustrationOptions;
+}
+
+async function continueWritingToIllustration(subject) {
+  const writing = getSubjectWritingState(subject);
+  const section = getWritingCurrentSection(writing);
+  if (!section || !String(section.text || "").trim()) {
+    writing.coachMessage = "Write today’s section before choosing an illustration.";
+    persistSubjects();
+    return;
+  }
+  writing.view = "illustrate";
+  persistSubjects({ skipRemoteSync: true });
+  await loadWritingIllustrations(subject, { force: !hasCompleteWritingIllustrationImages(writing, writing.currentSectionIndex, section) });
+}
+
+async function rerollWritingIllustrations(subject) {
+  await loadWritingIllustrations(subject, { force: true });
+}
+
+function selectWritingIllustration(subject, illustrationId) {
+  const writing = getSubjectWritingState(subject);
+  const section = getWritingCurrentSection(writing);
+  if (!section) {
+    return;
+  }
+  section.selectedIllustrationId = String(illustrationId || "");
+  persistSubjects({ skipRemoteSync: true });
+}
+
+function acceptWritingIllustration(subject) {
+  const writing = getSubjectWritingState(subject);
+  const section = getWritingCurrentSection(writing);
+  if (!section) {
+    return;
+  }
+  ensureWritingIllustrationOptions(writing, writing.currentSectionIndex);
+  if (!section.selectedIllustrationId) {
+    section.selectedIllustrationId = section.illustrationOptions[0]?.id || "";
+  }
+  const selectedOption = section.illustrationOptions.find((option) => option.id === section.selectedIllustrationId) || section.illustrationOptions[0] || null;
+  if ((section.number === 1 || !writing.illustrationStyle) && selectedOption) {
+    writing.illustrationStyle = buildWritingIllustrationStyleSelection(section, selectedOption);
+  }
+  const wasCompleted = Boolean(section.completed);
+  section.completed = true;
+  if (wasCompleted && writing.returnToBookAfterIllustration) {
+    syncWritingBookPreviewToSection(writing, section.id);
+    writing.view = "book";
+    writing.returnToBookAfterIllustration = false;
+    writing.coachMessage = `Section ${section.number} has been updated in your book.`;
+  } else if (wasCompleted) {
+    writing.view = "write";
+    writing.returnToBookAfterIllustration = false;
+    updateWritingSuggestionState(writing, section);
+    writing.coachMessage = `Section ${section.number} has been updated.`;
+  } else if (writing.currentSectionIndex >= WRITING_STUDIO_SECTION_COUNT - 1) {
+    syncWritingBookPreviewToSection(writing, section.id);
+    writing.view = "book";
+    writing.returnToBookAfterIllustration = false;
+    writing.coachMessage = "Your picture book is ready to preview and save as a PDF.";
+  } else {
+    writing.currentSectionIndex += 1;
+    writing.view = "write";
+    writing.returnToBookAfterIllustration = false;
+    updateWritingSuggestionState(writing, getWritingCurrentSection(writing));
+    writing.coachMessage = writing.illustrationStyle?.label
+      ? `Section ${writing.currentSectionIndex + 1} is ready. Keep building the story in your ${writing.illustrationStyle.label.toLowerCase()} look.`
+      : `Section ${writing.currentSectionIndex + 1} is ready. Build on what happened before.`;
+  }
+  persistSubjects();
+}
+
+function getSpellingWordProgressRows(spelling) {
+  const aggregateByWordId = new Map();
+  const appendWordResult = (result) => {
+    const wordId = String(result?.wordId || "");
+    const word = String(result?.word || "");
+    if (!wordId || !word) {
+      return;
+    }
+    if (!aggregateByWordId.has(wordId)) {
+      aggregateByWordId.set(wordId, {
+        word,
+        attempts: 0,
+        stageOneAttempt: "No answer",
+        stageFiveAttempt: "Not rechecked",
+        stageOneAccuracies: [],
+        stageFiveAccuracies: [],
+        improvements: []
+      });
+    }
+    const entry = aggregateByWordId.get(wordId);
+    entry.attempts += 1;
+    entry.stageOneAttempt = String(result.stageOneAttempt || entry.stageOneAttempt || "No answer");
+    entry.stageFiveAttempt = String(result.stageFiveAttempt || entry.stageFiveAttempt || "Not rechecked");
+    entry.stageOneAccuracies.push(Math.max(0, Math.min(100, Number(result.stageOneAccuracy || 0) || 0)));
+    entry.stageFiveAccuracies.push(Math.max(0, Math.min(100, Number(result.stageFiveAccuracy || 0) || 0)));
+    entry.improvements.push(
+      Math.max(0, Math.min(100, Number(result.stageFiveAccuracy || 0) || 0)) -
+        Math.max(0, Math.min(100, Number(result.stageOneAccuracy || 0) || 0))
+    );
+  };
+
+  (spelling.completedAttempts || []).forEach((attempt) => {
+    (attempt.wordResults || []).forEach(appendWordResult);
+  });
+
+  return Array.from(aggregateByWordId.values())
+    .map((entry) => {
+      const stageFiveAccuracy = entry.stageFiveAccuracies.length
+        ? Math.round(entry.stageFiveAccuracies.reduce((sum, value) => sum + value, 0) / entry.stageFiveAccuracies.length)
+        : 0;
+      const stageOneAccuracy = entry.stageOneAccuracies.length
+        ? Math.round(entry.stageOneAccuracies.reduce((sum, value) => sum + value, 0) / entry.stageOneAccuracies.length)
+        : 0;
+      const improvement = entry.improvements.length
+        ? Math.round(entry.improvements.reduce((sum, value) => sum + value, 0) / entry.improvements.length)
+        : 0;
+      return {
+        word: entry.word,
+        attempts: entry.attempts,
+        stageOneAttempt: entry.stageOneAttempt,
+        stageFiveAttempt: entry.stageFiveAttempt,
+        stageOneAccuracy,
+        stageFiveAccuracy,
+        improvement,
+        rating: `${stageFiveAccuracy}%`,
+        ratingClass: stageFiveAccuracy >= 80 ? "is-correct" : stageFiveAccuracy >= 50 ? "" : "is-incorrect"
+      };
+    })
+    .sort((left, right) => left.word.localeCompare(right.word));
+}
+
+function getSpellingCompletedInstanceRows(spelling) {
+  return (spelling.completedAttempts || [])
+    .map((attempt, index) => {
+      const completedAt = String(attempt?.completedAt || "");
+      const completedAtDate = completedAt ? new Date(completedAt) : null;
+      const wordResults = Array.isArray(attempt.wordResults)
+        ? attempt.wordResults
+            .map((result) => ({
+              wordId: String(result?.wordId || ""),
+              word: String(result?.word || ""),
+              stageOneAttempt: String(result?.stageOneAttempt || "No answer"),
+              stageFiveAttempt: String(result?.stageFiveAttempt || "No answer"),
+              stageOneAccuracy: Math.max(0, Math.min(100, Number(result?.stageOneAccuracy || 0) || 0)),
+              stageFiveAccuracy: Math.max(0, Math.min(100, Number(result?.stageFiveAccuracy || 0) || 0))
+            }))
+            .filter((result) => result.wordId && result.word)
+        : [];
+      const stageOneAverage = wordResults.length
+        ? Math.round(wordResults.reduce((sum, result) => sum + result.stageOneAccuracy, 0) / wordResults.length)
+        : 0;
+      const stageFiveAverage = wordResults.length
+        ? Math.round(wordResults.reduce((sum, result) => sum + result.stageFiveAccuracy, 0) / wordResults.length)
+        : 0;
+      const derivedStageOneCorrect = wordResults.filter((result) => result.stageOneAccuracy === 100).length;
+      const derivedStageFiveCorrect = wordResults.filter((result) => result.stageFiveAccuracy === 100).length;
+      return {
+        attemptId: String(attempt?.attemptId || ""),
+        instanceNumber: Math.max(1, Number(attempt?.instanceNumber || index + 1) || index + 1),
+        completedAt,
+        completedLabel: completedAtDate && !Number.isNaN(completedAtDate.getTime())
+          ? new Intl.DateTimeFormat("en-AU", {
+              day: "numeric",
+              month: "short",
+              year: "numeric"
+            }).format(completedAtDate)
+          : "Saved instance",
+        wordResults,
+        stageOneCorrect: Math.max(0, Number(attempt?.stageOneCorrect || derivedStageOneCorrect) || 0),
+        stageFiveCorrect: Math.max(0, Number(attempt?.stageFiveCorrect || derivedStageFiveCorrect) || 0),
+        overallScorePercent: Math.max(0, Math.min(100, Number(attempt?.overallScorePercent || stageFiveAverage) || 0)),
+        stageOneAverage,
+        stageFiveAverage,
+        improvement: stageFiveAverage - stageOneAverage
+      };
+    })
+    .filter((instanceRow) => instanceRow.wordResults.length)
+    .sort((left, right) => {
+      const leftTime = new Date(left.completedAt || 0).getTime();
+      const rightTime = new Date(right.completedAt || 0).getTime();
+      return rightTime - leftTime || right.instanceNumber - left.instanceNumber;
+    });
+}
+
+function getSpellingInstanceOverview(spelling) {
+  const instanceRows = getSpellingCompletedInstanceRows(spelling);
+  const uniqueWordIds = new Set();
+  let loggedWordCount = 0;
+  let totalStageFiveAccuracy = 0;
+  instanceRows.forEach((instanceRow) => {
+    instanceRow.wordResults.forEach((result) => {
+      uniqueWordIds.add(result.wordId);
+      loggedWordCount += 1;
+      totalStageFiveAccuracy += result.stageFiveAccuracy;
+    });
+  });
+  return {
+    instanceCount: instanceRows.length,
+    uniqueWordCount: uniqueWordIds.size,
+    loggedWordCount,
+    averageStageFiveAccuracy: loggedWordCount ? Math.round(totalStageFiveAccuracy / loggedWordCount) : 0
+  };
+}
+
+function moveWritingBookPage(subject, direction) {
+  const writing = getSubjectWritingState(subject);
+  const completedSections = getWritingCompletedSections(writing);
+  const maxIndex = Math.max(0, completedSections.length - 1);
+  writing.bookPreviewIndex = Math.max(0, Math.min(maxIndex, Number(writing.bookPreviewIndex || 0) + Number(direction || 0)));
+  persistSubjects({ skipRemoteSync: true });
+}
+
+function editWritingBookPage(subject) {
+  const writing = getSubjectWritingState(subject);
+  const completedSections = getWritingCompletedSections(writing);
+  const previewSection = completedSections[writing.bookPreviewIndex] || completedSections[0] || null;
+  if (!previewSection) {
+    return;
+  }
+  const sectionIndex = writing.sections.findIndex((section) => section.id === previewSection.id);
+  openWritingSection(subject, sectionIndex, "write", { returnToBook: true });
+}
+
+async function changeWritingBookIllustration(subject) {
+  const writing = getSubjectWritingState(subject);
+  const completedSections = getWritingCompletedSections(writing);
+  const previewSection = completedSections[writing.bookPreviewIndex] || completedSections[0] || null;
+  if (!previewSection) {
+    return;
+  }
+  const sectionIndex = writing.sections.findIndex((section) => section.id === previewSection.id);
+  openWritingSection(subject, sectionIndex, "illustrate", { returnToBook: true });
+  await loadWritingIllustrations(subject, { force: !hasCompleteWritingIllustrationImages(writing, sectionIndex, previewSection) });
+}
+
+function speakWritingSection(subject) {
+  const writing = getSubjectWritingState(subject);
+  const section = getWritingCurrentSection(writing);
+  if (!section) {
+    return;
+  }
+  const readText = String(section.text || buildWritingSectionSuggestion(writing, writing.currentSectionIndex) || "").trim();
+  if (!readText) {
+    return;
+  }
+  void speakTextWithOpenAi(readText, {
+    context: `writing:section:${section.id}`,
+    statusMessages: {
+      preparing: "Preparing writing audio...",
+      playing: "Reading the story section...",
+      error: "Writing audio failed."
+    }
+  }).catch((error) => {
+    console.error("Writing section audio failed.", error);
+  });
+}
+
+function saveWritingBookAsPdf(subject) {
+  const writing = getSubjectWritingState(subject);
+  const completedSections = getWritingCompletedSections(writing);
+  if (!completedSections.length) {
+    return;
+  }
+  const previewWindow = window.open("", "_blank", "noopener,noreferrer,width=1100,height=900");
+  if (!previewWindow) {
+    writing.coachMessage = "Allow pop-ups to save the picture book as a PDF.";
+    persistSubjects();
+    return;
+  }
+  const pagesMarkup = completedSections
+    .map((section, index) => {
+      const selectedOption = section.illustrationOptions.find((option) => option.id === section.selectedIllustrationId) || section.illustrationOptions[0];
+      return `
+        <section class="book-page">
+          <div class="book-page__art">${selectedOption?.imageUrl ? `<img class="book-page__image" src="${escapeHtml(selectedOption.imageUrl)}" alt="${escapeHtml(selectedOption.prompt || `Illustration for page ${index + 1}`)}" />` : `<div class="book-page__placeholder">${escapeHtml(selectedOption?.prompt || `Illustration for page ${index + 1}`)}</div>`}</div>
+          <div class="book-page__text"><p class="book-page__number">Page ${index + 1} of ${completedSections.length}</p><div>${escapeHtml(section.text)}</div></div>
+        </section>
+      `;
+    })
+    .join("");
+  previewWindow.document.write(`<!doctype html><html><head><title>${escapeHtml(writing.storyTitle || WRITING_STUDIO_TAB_LABEL)}</title><style>body{font-family:Lexend,system-ui,sans-serif;margin:0;padding:32px;background:#efeaf2;color:#2e2a33}h1{margin:0 0 24px;font-size:32px}.book-page{display:flex;min-height:520px;background:#fff;border-radius:18px;overflow:hidden;box-shadow:0 18px 36px rgba(34,28,40,.12);margin:0 0 24px;page-break-after:always}.book-page__art,.book-page__text{width:50%}.book-page__art{border-right:1px dashed #d9d3df;background:#f5f2f7;padding:24px;display:flex}.book-page__image{width:100%;height:100%;object-fit:cover;border-radius:18px}.book-page__placeholder{flex:1;border:2px dashed #cfc6d7;border-radius:18px;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;color:#645d6c;line-height:1.5}.book-page__text{padding:32px 36px;font-size:24px;line-height:1.7}.book-page__number{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#645d6c;margin:0 0 18px}@media print{body{background:#fff;padding:0}.book-page{box-shadow:none;margin:0;border-radius:0}}</style></head><body><h1>${escapeHtml(writing.storyTitle || WRITING_STUDIO_TAB_LABEL)}</h1>${pagesMarkup}</body></html>`);
+  previewWindow.document.close();
+  previewWindow.focus();
+  previewWindow.print();
+}
+
+function renderWriting() {
+  const host = elements.writingSection;
+  const subject = getSelectedSubject();
+  if (!host || !subject) {
+    return;
+  }
+  const writing = getSubjectWritingState(subject);
+  if (!writing.enabled) {
+    host.innerHTML = `<section class="ws-shell"><article class="ws-card"><p class="eyebrow">Writing Studio</p><h3>Open English to build your story</h3><p class="ws-copy">Writing Studio lives in the English workspace so each section, picture choice, and book page stays with your English work.</p></article></section>`;
+    return;
+  }
+
+  const currentSection = getWritingCurrentSection(writing);
+  const completedCount = getWritingCompletedSectionCount(writing);
+  const activeSectionLabel = currentSection ? `Section ${currentSection.number}` : "Picture book";
+  const sectionProgressMarkup = `
+    <section class="writing-stream__progress">
+      ${writing.sections.map((section, index) => `
+        <button
+          type="button"
+          class="writing-stream__progress-chip${index === writing.currentSectionIndex ? " is-current" : ""}${section.completed ? " is-complete" : ""}"
+          data-writing-open-section="${index}"
+          data-writing-open-view="write"
+        >
+          <strong>${escapeHtml(`Section ${section.number}`)}</strong>
+          <span>${escapeHtml(section.completed ? "Edit" : index === writing.currentSectionIndex ? "Today" : "Later")}</span>
+        </button>
+      `).join("")}
+    </section>
+  `;
+  const summaryMarkup = `
+    <section class="writing-stream__summary">
+      <article class="writing-stream__summary-card">
+        <div class="writing-stream__summary-copy">
+          <p class="eyebrow">Writing</p>
+          <h3>${escapeHtml(writing.storyTitle || WRITING_STUDIO_TAB_LABEL)}</h3>
+          <p>${escapeHtml(`${completedCount} of ${WRITING_STUDIO_SECTION_COUNT} sections ready. Current focus: ${activeSectionLabel}.`)}</p>
+        </div>
+        <div class="writing-stream__summary-meta">
+          <span class="subject-pill">${escapeHtml(`${completedCount}/${WRITING_STUDIO_SECTION_COUNT} complete`)}</span>
+          <span class="subject-pill">${escapeHtml(writing.view === "illustrate" ? "Illustration mode" : writing.view === "book" ? "Book preview" : "Writing mode")}</span>
+        </div>
+      </article>
+      ${sectionProgressMarkup}
+    </section>
+  `;
+
+  let bodyMarkup = "";
+  if (writing.view === "begin") {
+    bodyMarkup = `
+      <article class="ws-card ws-card--main writing-stream__card">
+        <p class="eyebrow">Let’s start your story</p>
+        <p class="ws-copy">Answer three quick questions and PaperPanda will turn them into your opening line.</p>
+        <label class="ws-field"><span>Who is your story about?</span><input type="text" id="writing-answer-who" value="${escapeHtml(writing.openingAnswers.who)}" placeholder="A quiet young fox named Sol" /></label>
+        <label class="ws-field"><span>Where does it happen?</span><input type="text" id="writing-answer-where" value="${escapeHtml(writing.openingAnswers.where)}" placeholder="An old lighthouse by the sea" /></label>
+        <label class="ws-field"><span>What do they want?</span><input type="text" id="writing-answer-want" value="${escapeHtml(writing.openingAnswers.want)}" placeholder="To find the light that went out" /></label>
+        <div class="ws-actions"><button type="button" class="primary-button primary-button--dark" data-writing-start="true">Start writing →</button></div>
+      </article>
+      <article class="writing-stream__note">
+        <p class="eyebrow">How it works</p>
+        <h4>A section at a time, then one picture for that section, then it becomes your book.</h4>
+      </article>
+    `;
+  } else if (writing.view === "write" && currentSection) {
+    const previousSection = writing.currentSectionIndex > 0 ? writing.sections[writing.currentSectionIndex - 1] : null;
+    const suggestion = writing.activeSuggestion && writing.activeSuggestion.sectionId === currentSection.id ? writing.activeSuggestion : null;
+    bodyMarkup = `<article class="ws-card ws-card--main writing-stream__card"><div class="ws-card__head"><p class="eyebrow">Write today’s section</p><span class="ws-pill">${escapeHtml(`Section ${currentSection.number}`)}</span></div>${previousSection ? `<div class="ws-label">So far</div><div class="ws-quote">“${escapeHtml(previousSection.text)}”</div>` : ""}<div class="ws-hint"><span>?</span><p>${escapeHtml(buildWritingSectionSuggestion(writing, writing.currentSectionIndex))}</p></div><div class="ws-editor-head"><span>Your turn</span><div class="ws-editor-head__actions"><button type="button" class="ghost-button ghost-button--light" data-writing-read-aloud="true">Read aloud</button>${String(currentSection.text || "").trim() ? `<button type="button" class="ghost-button ghost-button--light" data-writing-open-section="${currentSection.number - 1}" data-writing-open-view="illustrate">Change illustration</button>` : ""}</div></div><div class="ws-editor-wrap"><textarea id="writing-section-editor" class="ws-editor" placeholder="Write today’s part of the story...">${escapeHtml(currentSection.text)}</textarea>${suggestion ? `<div class="ws-suggestion-pop"><div>${escapeHtml(suggestion.message)}</div><div class="ws-suggestion-pop__actions"><button type="button" class="ws-suggestion-pop__fix" data-writing-apply-suggestion="true">Yes, fix it</button><button type="button" class="ws-suggestion-pop__keep" data-writing-dismiss-suggestion="true">Keep mine</button></div></div>` : ""}</div><div class="ws-actions ws-actions--spread">${writing.returnToBookAfterIllustration ? `<button type="button" class="ghost-button ghost-button--light" data-writing-back-book="true">← Back to book</button>` : writing.currentSectionIndex > 0 ? `<button type="button" class="ghost-button ghost-button--light" data-writing-move-section="-1" data-writing-move-view="write">← Previous section</button>` : `<span></span>`}<button type="button" class="primary-button primary-button--dark" data-writing-continue-illustration="true">Continue to illustration →</button>${!writing.returnToBookAfterIllustration && writing.currentSectionIndex < WRITING_STUDIO_SECTION_COUNT - 1 ? `<button type="button" class="ghost-button ghost-button--light" data-writing-move-section="1" data-writing-move-view="write">Next section →</button>` : `<span></span>`}</div></article>`;
+  } else if (writing.view === "illustrate" && currentSection) {
+    const options = ensureWritingIllustrationOptions(writing, writing.currentSectionIndex);
+    const isChoosingBookStyle = writing.currentSectionIndex === 0;
+    const rerollLabel = isChoosingBookStyle ? "↻ Try 4 new looks" : "↻ Try 2 new pictures";
+    const styleNote = !isChoosingBookStyle && writing.illustrationStyle?.label
+      ? `<div class="ws-style-note"><strong>${escapeHtml(writing.illustrationStyle.label)}</strong><span>${escapeHtml(writing.illustrationStyle.brief)}</span></div>`
+      : "";
+    bodyMarkup = `<article class="ws-card ws-card--main writing-stream__card"><div class="ws-card__head"><div><p class="eyebrow">Choose an illustration</p><p class="ws-copy">${escapeHtml(isChoosingBookStyle ? "Pick the visual style for the whole book. Later sections will follow this look." : "Pick the picture that matches your section best.")}</p></div><span class="ws-pill">${escapeHtml(`Section ${currentSection.number}`)}</span></div>${styleNote}${writing.illustrationError ? `<div class="ws-error-note">${escapeHtml(writing.illustrationError)}</div>` : ""}<div class="ws-illustration-grid">${options.map((option) => `<button type="button" class="ws-illustration-card${option.id === currentSection.selectedIllustrationId ? " is-selected" : ""}" data-writing-select-illustration="${escapeHtml(option.id)}" ${option.imageUrl ? "" : "disabled"}>${option.imageUrl ? `<img class="ws-illustration-card__image" src="${escapeHtml(option.imageUrl)}" alt="${escapeHtml(option.label || option.prompt)}" />` : `<div class="ws-illustration-card__placeholder">${writing.isGeneratingIllustrations ? "Generating..." : "No image yet"}</div>`}<strong>${escapeHtml(option.label || option.prompt)}</strong>${option.description ? `<span>${escapeHtml(option.description)}</span>` : ""}</button>`).join("")}</div><div class="ws-actions ws-actions--spread">${writing.returnToBookAfterIllustration ? `<button type="button" class="ghost-button ghost-button--light" data-writing-back-book="true">← Back to book</button>` : writing.currentSectionIndex > 0 ? `<button type="button" class="ghost-button ghost-button--light" data-writing-move-section="-1" data-writing-move-view="write">← Previous section</button>` : `<button type="button" class="ghost-button ghost-button--light" data-writing-open-section="${currentSection.number - 1}" data-writing-open-view="write">← Back to writing</button>`}<button type="button" class="ghost-button ghost-button--light" data-writing-reroll-illustrations="true" ${writing.isGeneratingIllustrations ? "disabled" : ""}>${escapeHtml(rerollLabel)}</button><button type="button" class="primary-button primary-button--dark" data-writing-use-illustration="true" ${writing.isGeneratingIllustrations ? "disabled" : ""}>Use this picture →</button>${!writing.returnToBookAfterIllustration && writing.currentSectionIndex < WRITING_STUDIO_SECTION_COUNT - 1 ? `<button type="button" class="ghost-button ghost-button--light" data-writing-move-section="1" data-writing-move-view="write">Next section →</button>` : `<span></span>`}</div></article>`;
+  } else {
+    const completedSections = getWritingCompletedSections(writing);
+    const previewSection = completedSections[writing.bookPreviewIndex] || completedSections[0] || writing.sections[0];
+    const selectedOption = previewSection?.illustrationOptions.find((option) => option.id === previewSection.selectedIllustrationId) || previewSection?.illustrationOptions[0];
+    bodyMarkup = `<article class="ws-card ws-card--main writing-stream__card"><div class="ws-card__head"><div><p class="eyebrow">Finished · your book</p><h3>${escapeHtml(writing.storyTitle || WRITING_STUDIO_TAB_LABEL)}</h3></div><button type="button" class="ghost-button ghost-button--mint" data-writing-save-pdf="true">Save as PDF</button></div><div class="ws-book-spread"><div class="ws-book-spread__art">${selectedOption?.imageUrl ? `<img class="ws-book-spread__image" src="${escapeHtml(selectedOption.imageUrl)}" alt="${escapeHtml(selectedOption.prompt || `Illustration for page ${previewSection?.number || 1}`)}" />` : `<div class="ws-book-spread__placeholder">${escapeHtml(selectedOption?.prompt || `Illustration for page ${previewSection?.number || 1}`)}</div>`}</div><div class="ws-book-spread__text"><p class="eyebrow">${escapeHtml(`Page ${previewSection?.number || 1} of ${Math.max(1, completedSections.length)}`)}</p><div>${escapeHtml(previewSection?.text || "")}</div></div></div><div class="ws-actions ws-actions--spread"><button type="button" class="ghost-button ghost-button--light" data-writing-book-edit="true">Edit this section</button><button type="button" class="ghost-button ghost-button--light" data-writing-book-change-illustration="true">Change picture</button></div><div class="ws-book-nav"><button type="button" class="ghost-button ghost-button--light ws-book-nav__button" data-writing-book-move="-1" ${writing.bookPreviewIndex <= 0 ? "disabled" : ""}>‹</button><div class="ws-book-dots">${completedSections.map((_, index) => `<span class="ws-book-dot${index === writing.bookPreviewIndex ? " is-active" : ""}"></span>`).join("")}</div><button type="button" class="primary-button primary-button--dark ws-book-nav__button" data-writing-book-move="1" ${writing.bookPreviewIndex >= completedSections.length - 1 ? "disabled" : ""}>›</button></div></article>`;
+  }
+
+  host.innerHTML = `<section class="writing-stream">${summaryMarkup}<div class="writing-stream__body">${bodyMarkup}</div></section>`;
+  host.querySelector("#writing-answer-who")?.addEventListener("input", (event) => updateWritingOpeningAnswer(subject, "who", event.target.value));
+  host.querySelector("#writing-answer-where")?.addEventListener("input", (event) => updateWritingOpeningAnswer(subject, "where", event.target.value));
+  host.querySelector("#writing-answer-want")?.addEventListener("input", (event) => updateWritingOpeningAnswer(subject, "want", event.target.value));
+  host.querySelector("[data-writing-start]")?.addEventListener("click", () => { startWritingStory(subject); render(); });
+  host.querySelector("#writing-section-editor")?.addEventListener("input", (event) => {
+    const writingState = getSubjectWritingState(subject);
+    const previousSuggestionKey = writingState.activeSuggestion ? `${writingState.activeSuggestion.sectionId}:${writingState.activeSuggestion.wrong}:${writingState.activeSuggestion.correct}` : "";
+    updateWritingSectionText(subject, event.target.value);
+    const nextWritingState = getSubjectWritingState(subject);
+    const nextSuggestionKey = nextWritingState.activeSuggestion ? `${nextWritingState.activeSuggestion.sectionId}:${nextWritingState.activeSuggestion.wrong}:${nextWritingState.activeSuggestion.correct}` : "";
+    if (previousSuggestionKey !== nextSuggestionKey) {
+      render();
+    }
+  });
+  host.querySelector("[data-writing-read-aloud]")?.addEventListener("click", () => speakWritingSection(subject));
+  host.querySelector("[data-writing-apply-suggestion]")?.addEventListener("click", () => { applyWritingSuggestion(subject); render(); });
+  host.querySelector("[data-writing-dismiss-suggestion]")?.addEventListener("click", () => { dismissWritingSuggestion(subject); render(); });
+  host.querySelector("[data-writing-continue-illustration]")?.addEventListener("click", async () => {
+    render();
+    await continueWritingToIllustration(subject);
+    render();
+  });
+  host.querySelector("[data-writing-reroll-illustrations]")?.addEventListener("click", async () => {
+    render();
+    await rerollWritingIllustrations(subject);
+    render();
+  });
+  host.querySelectorAll("[data-writing-select-illustration]").forEach((button) => {
+    button.addEventListener("click", () => {
+      selectWritingIllustration(subject, button.dataset.writingSelectIllustration);
+      render();
+    });
+  });
+  host.querySelector("[data-writing-use-illustration]")?.addEventListener("click", () => { acceptWritingIllustration(subject); render(); });
+  host.querySelector("[data-writing-back-book]")?.addEventListener("click", () => { returnWritingToBook(subject); render(); });
+  host.querySelector("[data-writing-save-pdf]")?.addEventListener("click", () => saveWritingBookAsPdf(subject));
+  host.querySelector("[data-writing-book-edit]")?.addEventListener("click", () => { editWritingBookPage(subject); render(); });
+  host.querySelector("[data-writing-book-change-illustration]")?.addEventListener("click", async () => {
+    render();
+    await changeWritingBookIllustration(subject);
+    render();
+  });
+  host.querySelectorAll("[data-writing-open-section]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const sectionIndex = Number(button.dataset.writingOpenSection || 0);
+      const nextView = String(button.dataset.writingOpenView || "write");
+      openWritingSection(subject, sectionIndex, nextView);
+      if (nextView === "illustrate") {
+        render();
+        const nextWritingState = getSubjectWritingState(subject);
+        const nextSection = getWritingCurrentSection(nextWritingState);
+        await loadWritingIllustrations(subject, {
+          force: !hasCompleteWritingIllustrationImages(nextWritingState, nextWritingState.currentSectionIndex, nextSection)
+        });
+      }
+      render();
+    });
+  });
+  host.querySelectorAll("[data-writing-move-section]").forEach((button) => {
+    button.addEventListener("click", () => {
+      moveWritingSection(subject, Number(button.dataset.writingMoveSection || 0), String(button.dataset.writingMoveView || "write"));
+      render();
+    });
+  });
+  host.querySelectorAll("[data-writing-book-move]").forEach((button) => {
+    button.addEventListener("click", () => {
+      moveWritingBookPage(subject, Number(button.dataset.writingBookMove || 0));
+      render();
+    });
+  });
+}
+
 function renderSpelling() {
   const host = elements.spellingSection;
   const subject = getSelectedSubject();
@@ -9490,13 +15099,14 @@ function renderSpelling() {
   }
 
   const spelling = getSubjectSpellingState(subject);
+  ensureSpellingSessionState(subject);
   if (!spelling.enabled) {
     host.innerHTML = `
       <section class="spelling-shell spelling-shell--empty">
         <article class="spelling-empty-card">
           <p class="eyebrow">Spelling Stables</p>
-          <h3>Open English to train this lesson</h3>
-          <p>The first spelling vertical slice is attached to English so the pattern work, morphology, and horse theme can be tested cleanly before it spreads to other subjects.</p>
+          <h3>Open the Practice subject to train this lesson</h3>
+          <p>Spelling Stables now lives as its own subject so the horse-themed spelling practice can be selected directly from the subject list.</p>
         </article>
       </section>
     `;
@@ -9506,57 +15116,788 @@ function renderSpelling() {
   const completedCount = getSpellingCompletedActivityCount(subject);
   const totalCount = getSpellingTotalActivityCount(subject);
   const masteryPercent = Math.round(getSpellingMasteryRatio(subject) * 100);
-  const stageId = getSpellingStageId(subject);
+  const attemptComplete = isSpellingAttemptComplete(subject);
+  const currentStageId = getSpellingStageId(subject);
+  const stageId = getSpellingVisibleStageId(subject);
   const stageIndex = SPELLING_STAGE_ORDER.indexOf(stageId);
-  const homeTab = SPELLING_HOME_TABS.includes(spelling.homeTab) ? spelling.homeTab : "session";
+  const unlockedStageIndex = Math.min(completedCount, SPELLING_STAGE_ORDER.length - 1);
+  const showingCelebration = spelling.celebrationStageId === stageId;
+  const diagnosticWord = getSpellingDiagnosticCurrentWord(spelling);
+  const focusSummary = getSpellingTopFocuses(spelling, 3);
+  const followUpWords = getSpellingFollowUpWords(spelling);
+  const attemptWords = getSpellingAttemptWords(spelling);
+  const stageScoreSummary = getSpellingStageScoreSummary(spelling);
+  const overallScorePercent = getSpellingOverallScorePercent(spelling);
+  const ownedHorseMeta = getSpellingOwnedHorseMeta(spelling);
+  let homeTab = String(spelling.homeTab || "stable");
+  if (homeTab === "review") {
+    homeTab = "progress";
+  }
+  const visibleHomeTab = homeTab === "stable" ? "paddock" : homeTab;
+  const showSessionCompletionSummary = homeTab === "session"
+    && !showingCelebration
+    && spelling.repeatCheck.completed
+    && (spelling.sessionCompletionReady || attemptComplete);
+
+  if (spelling.challenge.active || (spelling.challenge.completed && spelling.challenge.lastCompletedWeekKey === currentWeekKey())) {
+    const currentChallengeItem = getSpellingChallengeCurrentItem(spelling);
+    const currentChallengeEntry = getSpellingChallengeItemEntry(currentChallengeItem);
+    const challengeProgress = `${Math.min(spelling.challenge.currentIndex + 1, spelling.challenge.items.length)} of ${spelling.challenge.items.length}`;
+    host.innerHTML = spelling.challenge.completed
+      ? `
+        <section class="spelling-shell" data-spelling-font="${escapeHtml(spelling.preferences.font)}" data-spelling-spacing="${escapeHtml(spelling.preferences.spacing)}" data-spelling-tint="${escapeHtml(spelling.preferences.tint)}">
+          <article class="spelling-stage-card spelling-stage-card--single spelling-stage-card--celebration">
+            <p class="eyebrow">Weekly challenge complete</p>
+            <div class="spelling-ribbon-badge">40 words checked</div>
+            <h4>Challenge finished</h4>
+            <p>The mixed weekly challenge is complete. A new challenge will appear after four more completed spelling attempts in the current week.</p>
+          </article>
+        </section>
+      `
+      : `
+        <section class="spelling-shell" data-spelling-font="${escapeHtml(spelling.preferences.font)}" data-spelling-spacing="${escapeHtml(spelling.preferences.spacing)}" data-spelling-tint="${escapeHtml(spelling.preferences.tint)}">
+          <article class="spelling-stage-card spelling-stage-card--single">
+            <div class="spelling-card__header">
+              <div>
+                <p class="eyebrow">Weekly spelling challenge</p>
+                <h4>40-word mixed check</h4>
+              </div>
+              <span class="spelling-card__status">Challenge live</span>
+            </div>
+            <p>These 40 prompts come from the last four completed 10-word spelling attempts this week.</p>
+            <div class="spelling-stage-meta spelling-stage-meta--single">
+              <span>Question ${escapeHtml(challengeProgress)}</span>
+              <span>${escapeHtml(currentChallengeItem ? currentChallengeItem.mode.replace("-", " ") : "Ready")}</span>
+            </div>
+            ${currentChallengeItem && currentChallengeEntry ? `
+              <article class="spelling-tense-card spelling-tense-card--single">
+                ${
+                  currentChallengeItem.mode === "looks-right"
+                    ? `
+                      <p class="spelling-comparison-card__prompt">Which sentence looks right?</p>
+                      <div class="spelling-choice-row spelling-choice-row--stacked">
+                        ${getSpellingChallengeLooksRightOptions(currentChallengeEntry).map((option) => `
+                          <button type="button" class="spelling-choice spelling-choice--sentence spelling-choice--sentence-large" data-spelling-challenge-looks-right="${escapeHtml(option.value)}">
+                            <span>${option.markup}</span>
+                          </button>
+                        `).join("")}
+                      </div>
+                    `
+                    : currentChallengeItem.mode === "dictation"
+                      ? `
+                        <div class="spelling-audio-panel">
+                          <button type="button" class="primary-button primary-button--dark" data-spelling-challenge-play="true">Play word</button>
+                          <p>Listen to the AI voice, then type the full spelling.</p>
+                        </div>
+                        <input class="reader-editor spelling-inline-input spelling-inline-input--centered" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" value="${escapeHtml(spelling.challenge.inputValue || "")}" placeholder="Type the word you hear" data-spelling-challenge-input="true" />
+                        <div class="spelling-stage-actions spelling-stage-actions--compact">
+                          <button type="button" class="primary-button primary-button--dark" data-spelling-challenge-submit="true">Check answer</button>
+                        </div>
+                      `
+                      : currentChallengeItem.mode === "root-word"
+                        ? `
+                          <p class="spelling-comparison-card__prompt">What is the root word?</p>
+                          <div class="spelling-family-sentence-card">
+                            <p><span class="spelling-inline-target">${escapeHtml(currentChallengeItem.familyWord)}</span></p>
+                          </div>
+                          <input class="reader-editor spelling-inline-input spelling-inline-input--centered" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" value="${escapeHtml(spelling.challenge.inputValue || "")}" placeholder="Type the root word" data-spelling-challenge-input="true" />
+                          <div class="spelling-stage-actions spelling-stage-actions--compact">
+                            <button type="button" class="primary-button primary-button--dark" data-spelling-challenge-submit="true">Check answer</button>
+                          </div>
+                        `
+                        : `
+                          <p class="spelling-comparison-card__prompt">Type the missing letter</p>
+                          <div class="spelling-family-sentence-card">
+                            <p>${buildSpellingChallengeMissingLetterPrompt(currentChallengeEntry, currentChallengeItem.missingIndex)}</p>
+                          </div>
+                          <input class="reader-editor spelling-inline-input spelling-inline-input--centered" type="text" maxlength="1" autocomplete="off" autocapitalize="off" spellcheck="false" value="${escapeHtml(spelling.challenge.inputValue || "")}" placeholder="Type the missing letter" data-spelling-challenge-input="true" />
+                          <div class="spelling-stage-actions spelling-stage-actions--compact">
+                            <button type="button" class="primary-button primary-button--dark" data-spelling-challenge-submit="true">Check answer</button>
+                          </div>
+                        `
+                }
+              </article>
+            ` : ""}
+          </article>
+        </section>
+      `;
+
+    if (!spelling.challenge.completed) {
+      host.querySelector("[data-spelling-challenge-play]")?.addEventListener("click", () => {
+        speakSpellingChallengeWord(currentChallengeItem, currentChallengeEntry);
+      });
+      host.querySelector("[data-spelling-challenge-input]")?.addEventListener("input", (event) => {
+        spelling.challenge.inputValue = event.target.value;
+        spelling.challenge.checked = false;
+        persistSubjects();
+      });
+      host.querySelector("[data-spelling-challenge-input]")?.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          spelling.challenge.inputValue = event.currentTarget.value;
+          submitSpellingChallengeInput(subject);
+          render();
+        }
+      });
+      host.querySelector("[data-spelling-challenge-submit]")?.addEventListener("click", () => {
+        const input = host.querySelector("[data-spelling-challenge-input]");
+        spelling.challenge.inputValue = input?.value || spelling.challenge.inputValue;
+        submitSpellingChallengeInput(subject);
+        render();
+      });
+      host.querySelectorAll("[data-spelling-challenge-looks-right]").forEach((button) => {
+        button.addEventListener("click", () => {
+          selectSpellingChallengeLooksRight(subject, button.dataset.spellingChallengeLooksRight);
+          render();
+        });
+      });
+    }
+    return;
+  }
+
+  if (homeTab !== "session" && !showingCelebration && !showSessionCompletionSummary) {
+    const homeBody = homeTab === "progress"
+      ? buildSpellingProgressHome(subject, spelling)
+      : homeTab === "session"
+        ? buildSpellingHomeOverview(subject, spelling)
+        : buildSpellingStableHome(subject, spelling);
+
+    host.innerHTML = `
+      <section class="ss-root spelling-shell" data-spelling-font="${escapeHtml(spelling.preferences.font)}" data-spelling-spacing="${escapeHtml(spelling.preferences.spacing)}" data-spelling-tint="${escapeHtml(spelling.preferences.tint)}">
+        ${buildSpellingSurfaceTabs(visibleHomeTab)}
+
+        ${homeBody}
+      </section>
+    `;
+
+    setupSpellingPaddockInteractions(subject, host);
+    bindSpellingNavigationInteractions(subject, host);
+    return;
+  }
+
+  if (stageId === "diagnostic" && !spelling.diagnostic.completed && !showingCelebration) {
+    host.innerHTML = `
+      <section class="ss-root spelling-shell" data-spelling-font="${escapeHtml(spelling.preferences.font)}" data-spelling-spacing="${escapeHtml(spelling.preferences.spacing)}" data-spelling-tint="${escapeHtml(spelling.preferences.tint)}">
+        ${buildSpellingSurfaceTabs("session")}
+        <div class="ss-layout">
+          <div class="ss-main">
+            <article class="ss-stage-panel ss-stage-panel--diagnostic">
+              <div class="ss-stage-panel__head ss-stage-panel__head--compact">
+                <p class="eyebrow">Spell what you hear</p>
+                <span class="ss-stage-counter">${escapeHtml(`Word ${Math.min(spelling.diagnostic.currentIndex + 1, attemptWords.length)} of ${attemptWords.length}`)}</span>
+              </div>
+              <div class="spelling-diagnostic-dots spelling-diagnostic-dots--large" aria-label="Diagnostic progress">
+                ${attemptWords
+                  .map((_, index) => `
+                    <span class="spelling-diagnostic-dot${index < spelling.diagnostic.currentIndex ? " is-complete" : ""}${index === spelling.diagnostic.currentIndex ? " is-current" : ""}"></span>
+                  `)
+                  .join("")}
+              </div>
+              <div class="ss-audio-actions">
+                <button type="button" class="primary-button primary-button--dark" data-spelling-play-diagnostic="true">Hear the word</button>
+                <button type="button" class="ghost-button ghost-button--light" data-spelling-play-diagnostic-sentence="true">Hear it in a sentence</button>
+              </div>
+              ${buildSpellingAudioStatusMarkup("diagnostic", getSpellingDiagnosticCurrentWord(spelling))}
+              <label class="spelling-input-label" for="spelling-diagnostic-input">Type your spelling</label>
+              <input
+                id="spelling-diagnostic-input"
+                class="reader-editor spelling-inline-input spelling-inline-input--hero"
+                type="text"
+                autocomplete="off"
+                autocapitalize="off"
+                spellcheck="false"
+                value="${escapeHtml(spelling.diagnostic.currentInput)}"
+                placeholder="Type the spelling"
+              />
+              <div class="ss-status-note ss-status-note--soft">
+                <span class="ss-status-dot"></span>
+                <p>No marking yet — spell all ten, then we look at them together.</p>
+              </div>
+              <div class="spelling-stage-actions spelling-stage-actions--footer">
+                <button type="button" class="primary-button primary-button--dark" data-spelling-submit-diagnostic="true">
+                  ${spelling.diagnostic.currentIndex >= attemptWords.length - 1 ? "Finish stage" : "Next word"}
+                </button>
+              </div>
+            </article>
+        </div>
+          <aside class="ss-side">
+            ${buildSpellingStageSidebar(subject, spelling, stageId)}
+          </aside>
+        </div>
+      </section>
+    `;
+
+    bindSpellingNavigationInteractions(subject, host);
+
+    host.querySelector("[data-spelling-play-diagnostic]")?.addEventListener("click", () => {
+      const input = host.querySelector("#spelling-diagnostic-input");
+      spelling.diagnostic.currentInput = input?.value || spelling.diagnostic.currentInput;
+      persistSubjects({ skipRemoteSync: true });
+      speakSpellingDiagnosticWord(getSpellingDiagnosticCurrentWord(getSubjectSpellingState(subject)));
+    });
+    host.querySelector("[data-spelling-play-diagnostic-sentence]")?.addEventListener("click", () => {
+      const input = host.querySelector("#spelling-diagnostic-input");
+      spelling.diagnostic.currentInput = input?.value || spelling.diagnostic.currentInput;
+      persistSubjects({ skipRemoteSync: true });
+      speakSpellingDiagnosticSentence(getSpellingDiagnosticCurrentWord(getSubjectSpellingState(subject)));
+    });
+    host.querySelector("#spelling-diagnostic-input")?.addEventListener("input", (event) => {
+      spelling.diagnostic.currentInput = event.target.value;
+      persistSubjects({ skipRemoteSync: true });
+    });
+    host.querySelector("#spelling-diagnostic-input")?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        submitSpellingDiagnosticWord(subject, event.currentTarget.value);
+        render();
+        if (!getSubjectSpellingState(subject).diagnostic.completed) {
+          speakSpellingDiagnosticWord(getSpellingDiagnosticCurrentWord(getSubjectSpellingState(subject)));
+        }
+      }
+    });
+    host.querySelector("#spelling-diagnostic-input")?.addEventListener("blur", () => {
+      persistSubjects();
+    });
+    host.querySelector("[data-spelling-submit-diagnostic]")?.addEventListener("click", () => {
+      submitSpellingDiagnosticWord(subject, host.querySelector("#spelling-diagnostic-input")?.value || "");
+      render();
+      if (!getSubjectSpellingState(subject).diagnostic.completed) {
+        speakSpellingDiagnosticWord(getSpellingDiagnosticCurrentWord(getSubjectSpellingState(subject)));
+      }
+    });
+    return;
+  }
+
+  let stageBody = "";
+
+  if (showingCelebration) {
+    const celebrationCopy = getSpellingCelebrationCopy(subject, stageId);
+    stageBody = stageId === "diagnostic"
+      ? `
+        <article class="ss-stage-panel">
+          <div class="ss-stage-panel__head">
+            <div>
+              <p class="eyebrow">${escapeHtml(celebrationCopy.eyebrow)}</p>
+              <h4>${escapeHtml(celebrationCopy.title)}</h4>
+            </div>
+            <span class="ss-stage-badge is-complete">Ribbon unlocked</span>
+          </div>
+          <p class="ss-stage-copy">${escapeHtml(celebrationCopy.body)}</p>
+          <div class="ss-stage-progress">
+            <span>${escapeHtml(`${getSpellingDiagnosticCorrectCount(spelling)} of ${attemptWords.length} correct`)}</span>
+            <span>${escapeHtml(`${getSpellingStageScorePercent(spelling, "diagnostic")}% score`)}</span>
+          </div>
+          <div class="ss-review-list">
+            ${attemptWords
+              .map((wordEntry) => {
+                const response = spelling.diagnostic.responses[wordEntry.id] || {};
+                const attempt = String(response.attempt || "");
+                const isCorrect = Boolean(response.correct);
+                return `
+                  <article class="ss-review-row${isCorrect ? " is-correct" : " is-incorrect"}">
+                    <div>
+                      <strong>${escapeHtml(wordEntry.word)}</strong>
+                      <span>${escapeHtml(attempt || "No answer typed")}</span>
+                    </div>
+                    <span class="ss-review-mark" aria-label="${isCorrect ? "Correct" : "Incorrect"}">${isCorrect ? "✓" : "✕"}</span>
+                  </article>
+                `;
+              })
+              .join("")}
+          </div>
+          <div class="spelling-stage-actions spelling-stage-actions--centered">
+            <button type="button" class="primary-button primary-button--dark" data-spelling-continue-stage="${escapeHtml(celebrationCopy.nextStageId || "")}">${escapeHtml(celebrationCopy.action)}</button>
+          </div>
+        </article>
+      `
+      : `
+        <article class="ss-stage-panel">
+          <p class="eyebrow">${escapeHtml(celebrationCopy.eyebrow)}</p>
+          <div class="spelling-ribbon-badge">Ribbon unlocked</div>
+          <h4>${escapeHtml(celebrationCopy.title)}</h4>
+          <p class="ss-stage-copy">${escapeHtml(celebrationCopy.body)}</p>
+          <div class="spelling-stage-actions spelling-stage-actions--centered">
+            <button type="button" class="primary-button primary-button--dark" data-spelling-continue-stage="${escapeHtml(celebrationCopy.nextStageId || "")}">${escapeHtml(celebrationCopy.action)}</button>
+          </div>
+        </article>
+      `;
+  } else if (stageId === "diagnostic") {
+    stageBody = `
+      <article class="ss-stage-panel">
+        <div class="ss-stage-panel__head">
+          <div>
+            <p class="eyebrow">Complete</p>
+            <h4>Stage 1 review</h4>
+          </div>
+          <span class="ss-stage-badge is-complete">Ribbon earned</span>
+        </div>
+        <p class="ss-stage-copy">The spelling challenge is complete. Review the words before moving back through earlier stages.</p>
+        <div class="ss-stage-progress">
+          <span>${escapeHtml(`${getSpellingDiagnosticCorrectCount(spelling)} of ${attemptWords.length} correct`)}</span>
+          <span>${escapeHtml(`${getSpellingStageScorePercent(spelling, "diagnostic")}% score`)}</span>
+          <span>${escapeHtml(`${focusSummary.length} focus area${focusSummary.length === 1 ? "" : "s"} identified`)}</span>
+        </div>
+        <div class="ss-review-list">
+          ${focusSummary.map((entry) => `
+            <article class="ss-review-row">
+              <div>
+                <strong>${escapeHtml(SPELLING_FOCUS_LABELS[entry.id] || entry.id)}</strong>
+                <span>${escapeHtml(`${entry.count} miss${entry.count === 1 ? "" : "es"}`)}</span>
+              </div>
+            </article>
+          `).join("")}
+        </div>
+        <div class="spelling-stage-actions">
+          <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="diagnostic">Reset stage</button>
+        </div>
+      </article>
+    `;
+  } else if (stageId === "looks-right") {
+    const currentLookWord = getSpellingLooksRightCurrentWord(spelling);
+    const answeredLookCount = followUpWords.filter((entry) => Boolean(spelling.looksRight.answers[entry.id])).length;
+    const currentLookOptions = currentLookWord ? buildSpellingLooksRightOptions(spelling, currentLookWord) : [];
+    const currentLookIndex = currentLookWord ? Math.max(0, followUpWords.findIndex((entry) => entry.id === currentLookWord.id)) : 0;
+    stageBody = spelling.looksRight.completed
+      ? `
+        <article class="ss-stage-panel">
+          <div class="ss-stage-panel__head">
+            <div>
+              <p class="eyebrow">Complete</p>
+              <h4>Stage 2 review</h4>
+            </div>
+            <span class="ss-stage-badge is-complete">Ribbon earned</span>
+          </div>
+          <p class="ss-stage-copy">You have finished the sentence check for this session.</p>
+          <div class="ss-stage-progress">
+            <span>${escapeHtml(`${stageScoreSummary["looks-right"].correct}/${stageScoreSummary["looks-right"].total} correct`)}</span>
+            <span>${escapeHtml(`${getSpellingStageScorePercent(spelling, "looks-right")}% score`)}</span>
+          </div>
+          <div class="ss-review-list">
+            ${followUpWords.map((entry) => `
+              <article class="ss-review-row${spelling.looksRight.answers[entry.id] === entry.word ? " is-correct" : " is-incorrect"}">
+                <div>
+                  <strong>${escapeHtml(entry.word)}</strong>
+                  <span>${escapeHtml(spelling.looksRight.answers[entry.id] || "No answer saved")}</span>
+                </div>
+                <span class="ss-review-mark">${spelling.looksRight.answers[entry.id] === entry.word ? "✓" : "✕"}</span>
+              </article>
+            `).join("")}
+          </div>
+          <div class="spelling-stage-actions">
+            <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="looks-right">Reset stage</button>
+          </div>
+        </article>
+      `
+      : `
+        <article class="ss-stage-panel">
+          <div class="ss-stage-panel__head ss-stage-panel__head--compact">
+            <p class="eyebrow">Which one looks right?</p>
+            <span class="ss-stage-counter">${escapeHtml(`Word ${Math.min(answeredLookCount + 1, followUpWords.length)} of ${followUpWords.length}`)}</span>
+          </div>
+          <div class="ss-stage-progress">
+            <div class="ss-dot-row" aria-label="Stage 2 progress">
+              ${buildSpellingSessionDotRow(followUpWords.length, currentLookIndex, answeredLookCount)}
+            </div>
+          </div>
+          ${currentLookWord ? `
+            <section class="ss-looks-card">
+              <p class="ss-stage-copy ss-stage-copy--lead">You heard <strong>${escapeHtml(currentLookWord.articulation || currentLookWord.word)}</strong>. Trust your eye — which spelling looks familiar?</p>
+              <button type="button" class="ghost-button ghost-button--light ss-hear-again-button" data-spelling-play-looks-right="${currentLookWord.id}">Hear it again</button>
+              <div class="ss-choice-grid">
+                ${currentLookOptions
+                  .map(
+                    (option) => `
+                      <button
+                        type="button"
+                        class="ss-choice-card ss-choice-card--compact${spelling.looksRight.awaitingAdvanceWordId === currentLookWord.id && option.value === spelling.looksRight.answers[currentLookWord.id] ? " is-selected" : ""}"
+                        data-spelling-looks-right-word="${currentLookWord.id}"
+                        data-spelling-looks-right-value="${escapeHtml(option.value)}"
+                        ${spelling.looksRight.awaitingAdvanceWordId ? "disabled" : ""}
+                      >
+                        <span>${buildSpellingLooksRightChoiceSentence(
+                          getSpellingLooksRightSentence(currentLookWord),
+                          currentLookWord.word,
+                          option.displayWord
+                        )}</span>
+                      </button>
+                    `
+                  )
+                  .join("")}
+              </div>
+              ${spelling.looksRight.awaitingAdvanceWordId === currentLookWord.id ? `
+                <div class="ss-status-note ss-status-note--feedback${spelling.looksRight.feedbackKind === "correct" ? " is-correct" : " is-incorrect"}">
+                  <p>${escapeHtml(currentLookWord.lookRightNote || currentLookWord.familyNote || spelling.looksRight.feedbackMessage || "")}</p>
+                </div>
+                <div class="spelling-stage-actions spelling-stage-actions--footer">
+                  <button type="button" class="primary-button primary-button--dark" data-spelling-looks-right-advance="${currentLookWord.id}">${escapeHtml(followUpWords.every((entry) => Boolean(spelling.looksRight.answers[entry.id])) ? "Finish stage" : "Next word")}</button>
+                </div>
+              ` : ""}
+            </section>
+          ` : ""}
+        </article>
+      `;
+  } else if (stageId === "word-families") {
+    const flashcardWords = getSpellingFlashcardWords(spelling);
+    const currentFlashcardWord = getSpellingFlashcardCurrentWord(spelling);
+    const currentFlashcardCard = currentFlashcardWord ? ensureSpellingFlashcardCard(spelling, currentFlashcardWord.id) : null;
+    const flashcardExposureLimit = currentFlashcardWord ? getSpellingFlashcardExposureLimit(currentFlashcardWord.id) : SPELLING_FLASHCARD_EXPOSURE_COUNT;
+    const currentFlashcardSentenceIndex = currentFlashcardCard
+      ? Math.max(0, Math.min(currentFlashcardCard.exposureIndex, flashcardExposureLimit - 1, (currentFlashcardWord?.familySentences || []).length - 1))
+      : 0;
+    const currentFlashcardSentence = currentFlashcardWord?.familySentences?.[currentFlashcardSentenceIndex] || "";
+    const currentFlashcardSentenceWord = currentFlashcardWord?.familyWords?.[currentFlashcardSentenceIndex] || "";
+    const completedFlashcardCount = flashcardWords.filter((entry) => ensureSpellingFlashcardCard(spelling, entry.id).completed).length;
+    const currentFlashcardIndex = currentFlashcardWord ? Math.max(0, flashcardWords.findIndex((entry) => entry.id === currentFlashcardWord.id)) : 0;
+    stageBody = spelling.flashcards.completed
+      ? `
+        <article class="ss-stage-panel">
+          <div class="ss-stage-panel__head">
+            <div>
+              <p class="eyebrow">Complete</p>
+              <h4>Stage 3 review</h4>
+            </div>
+            <span class="ss-stage-badge is-complete">Ribbon earned</span>
+          </div>
+          <p class="ss-stage-copy">You have finished the word-family sentence loop for this session.</p>
+          <div class="ss-stage-progress">
+            <span>${escapeHtml(`${stageScoreSummary["word-families"].correct}/${stageScoreSummary["word-families"].total} correct`)}</span>
+            <span>${escapeHtml(`${getSpellingStageScorePercent(spelling, "word-families")}% score`)}</span>
+          </div>
+          <div class="ss-review-list">
+            ${flashcardWords.map((entry) => `
+              <article class="ss-review-row is-correct">
+                <div>
+                  <strong>${escapeHtml(entry.word)}</strong>
+                  <span>${escapeHtml((entry.familyWords || []).join(" · "))}</span>
+                </div>
+                <span class="ss-review-mark">✓</span>
+              </article>
+            `).join("")}
+          </div>
+          <div class="spelling-stage-actions">
+            <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="word-families">Reset stage</button>
+          </div>
+        </article>
+      `
+      : `
+        <article class="ss-stage-panel">
+          <div class="ss-stage-panel__head ss-stage-panel__head--compact">
+            <p class="eyebrow">Tap the root</p>
+            <span class="ss-stage-counter">${escapeHtml(`Word ${completedFlashcardCount + 1} of ${flashcardWords.length}`)}</span>
+          </div>
+          ${currentFlashcardWord ? `
+            <div class="ss-stage-progress">
+              <div class="ss-dot-row" aria-label="Stage 3 progress">
+                ${buildSpellingSessionDotRow(flashcardWords.length, currentFlashcardIndex, completedFlashcardCount)}
+              </div>
+            </div>
+            <section class="ss-family-panel${currentFlashcardCard?.checked ? (currentFlashcardCard?.feedbackKind === "correct" ? " is-correct" : " is-incorrect") : ""}">
+              ${currentFlashcardCard?.exposureIndex < flashcardExposureLimit ? `
+                <div class="ss-family-stage-grid">
+                  <div class="ss-family-keyword-panel">
+                    <button
+                      type="button"
+                      class="ss-keyword-button"
+                      data-spelling-flashcard-reveal="${currentFlashcardWord.id}"
+                      ${currentFlashcardCard?.isShowingSentence ? "disabled" : ""}
+                    >
+                      ${escapeHtml(currentFlashcardWord.word)}
+                      <span class="ss-keyword-pill">tap</span>
+                    </button>
+                  </div>
+                  <div class="ss-family-sentence-card${currentFlashcardCard?.isShowingSentence ? " is-active" : ""}">
+                    <p class="ss-family-sentence-label">Family word ${escapeHtml(String(Math.min((currentFlashcardCard?.exposureIndex || 0) + 1, flashcardExposureLimit)))} of ${escapeHtml(String(flashcardExposureLimit))} · ${escapeHtml((currentFlashcardSentenceWord || "").toUpperCase())}</p>
+                    <p>${currentFlashcardCard?.isShowingSentence ? buildSpellingFamilySentenceMarkup(currentFlashcardSentence, currentFlashcardSentenceWord) : "tap the root word"}</p>
+                  </div>
+                </div>
+                <div class="ss-family-strip">
+                  ${(currentFlashcardWord.familyWords || []).map((word) => `<span>${escapeHtml(word)} ✓</span>`).join("")}
+                </div>
+              ` : `
+                <div class="ss-family-recall">
+                  <p class="ss-family-recall__prompt">Now type the root they share</p>
+                  <input
+                    class="reader-editor spelling-inline-input spelling-inline-input--centered"
+                    type="text"
+                    autocomplete="off"
+                    autocapitalize="off"
+                    spellcheck="false"
+                    value="${escapeHtml(currentFlashcardCard?.typedValue || "")}"
+                    placeholder="Type the key word from memory"
+                    data-spelling-flashcard-input="${currentFlashcardWord.id}"
+                  />
+                  ${currentFlashcardCard?.checked ? `<div class="ss-status-note ss-status-note--feedback${currentFlashcardCard?.feedbackKind === "correct" ? " is-correct" : " is-incorrect"}"><p>${escapeHtml(currentFlashcardCard?.feedbackMessage || "")}</p></div>` : ""}
+                  <div class="spelling-stage-actions spelling-stage-actions--footer">
+                    ${currentFlashcardCard?.awaitingAdvance
+                      ? `<button type="button" class="primary-button primary-button--dark" data-spelling-flashcard-advance="${currentFlashcardWord.id}">${escapeHtml(spelling.flashcards.completed ? "Finish stage" : "Next word")}</button>`
+                      : `<button type="button" class="primary-button primary-button--dark" data-spelling-flashcard-submit="${currentFlashcardWord.id}">Check word</button>`}
+                  </div>
+                </div>
+              `}
+            </section>
+          ` : ""}
+        </article>
+      `;
+  } else if (stageId === "tense-transfer") {
+    const currentFamilyWord = getSpellingTenseCurrentWord(spelling);
+    const currentFamilyAnswer = currentFamilyWord ? ensureSpellingTenseAnswer(spelling, currentFamilyWord.id) : null;
+    const completedTenseCount = followUpWords.filter((entry) => ensureSpellingTenseAnswer(spelling, entry.id).completed).length;
+    const displayTenseProgress = Math.min(
+      followUpWords.length,
+      completedTenseCount + (currentFamilyAnswer?.awaitingAdvance ? 1 : 0)
+    );
+    const horseProgressIndex = Math.min(displayTenseProgress, Math.max(0, SPELLING_UNIT_SEED.followUpWordCount - 1));
+    const horseProgressRatio = SPELLING_UNIT_SEED.followUpWordCount > 1
+      ? horseProgressIndex / (SPELLING_UNIT_SEED.followUpWordCount - 1)
+      : 0;
+    const incorrectTenseCount = followUpWords.filter((entry) => ensureSpellingTenseAnswer(spelling, entry.id).feedbackKind === "incorrect").length;
+    const hayRemaining = Math.max(0, SPELLING_UNIT_SEED.followUpWordCount - incorrectTenseCount);
+    const currentTenseIndex = currentFamilyWord ? Math.max(0, followUpWords.findIndex((entry) => entry.id === currentFamilyWord.id)) : 0;
+    const currentTensePrompt = currentFamilyWord ? getSpellingTensePrompt(spelling, currentFamilyWord) : null;
+    const raceHorseMeta = SPELLING_PADDOCK_HORSES[getSpellingVisibleHorseCount(spelling)] || getSpellingOwnedHorseMeta(spelling)[0] || SPELLING_PADDOCK_HORSES[0];
+    stageBody = spelling.tenseTransfer.completed
+      ? `
+        <article class="ss-stage-panel">
+          <div class="ss-stage-panel__head">
+            <div>
+              <p class="eyebrow">Complete</p>
+              <h4>Stage 4 review</h4>
+            </div>
+            <span class="ss-stage-badge is-complete">Ribbon earned</span>
+          </div>
+          <p class="ss-stage-copy">The tense sort is complete for this session.</p>
+          <div class="ss-stage-progress">
+            <span>${escapeHtml(`${stageScoreSummary["tense-transfer"].correct}/${stageScoreSummary["tense-transfer"].total} correct`)}</span>
+            <span>${escapeHtml(`${getSpellingStageScorePercent(spelling, "tense-transfer")}% score`)}</span>
+          </div>
+          <div class="ss-review-list">
+            ${followUpWords.map((entry) => `
+              <article class="ss-review-row${ensureSpellingTenseAnswer(spelling, entry.id).feedbackKind === "correct" ? " is-correct" : " is-incorrect"}">
+                <div>
+                  <strong>${escapeHtml(entry.word)}</strong>
+                  <span>${escapeHtml(`${entry.tense?.past || ""} · ${entry.tense?.present || ""} · ${entry.tense?.future || ""}`)}</span>
+                </div>
+                <span class="ss-review-mark">${ensureSpellingTenseAnswer(spelling, entry.id).feedbackKind === "correct" ? "✓" : "✕"}</span>
+              </article>
+            `).join("")}
+          </div>
+          <div class="spelling-stage-actions">
+            <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="tense-transfer">Reset stage</button>
+          </div>
+        </article>
+      `
+      : `
+        <article class="ss-stage-panel">
+          <div class="ss-stage-panel__head ss-stage-panel__head--compact">
+            <p class="eyebrow">Choose the tense</p>
+            <span class="ss-stage-counter">${escapeHtml(`Word ${completedTenseCount + 1} of ${followUpWords.length}`)}</span>
+          </div>
+          ${currentFamilyWord && currentTensePrompt ? `
+            <section class="ss-tense-race${currentFamilyAnswer?.checked ? (currentFamilyAnswer?.feedbackKind === "correct" ? " is-correct" : " is-incorrect") : ""}">
+              <div class="ss-tense-race__scene">
+                <div class="ss-tense-race__track" aria-label="Horse progress to the stable">
+                  ${Array.from({ length: SPELLING_UNIT_SEED.followUpWordCount }, (_, index) => `
+                    <span class="ss-tense-race__tile${index < displayTenseProgress ? " is-complete" : ""}${index === Math.min(displayTenseProgress, SPELLING_UNIT_SEED.followUpWordCount - 1) ? " is-current" : ""}"></span>
+                  `).join("")}
+                  <img class="ss-tense-race__horse" src="${escapeHtml(raceHorseMeta.image)}" alt="${escapeHtml(raceHorseMeta.label)}" style="--horse-progress-ratio:${escapeHtml(String(horseProgressRatio))};" />
+                  <div class="ss-tense-race__stable">
+                    <img src="/horses/Stables.png" alt="Stable" />
+                    <div class="ss-tense-race__hay" aria-label="${escapeHtml(`${hayRemaining} hay bag${hayRemaining === 1 ? "" : "s"} left`)}">
+                      ${Array.from({ length: SPELLING_UNIT_SEED.followUpWordCount }, (_, index) => `<span class="ss-tense-race__hay-bale${index < hayRemaining ? "" : " is-gone"}"></span>`).join("")}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="ss-stage-progress">
+                <div class="ss-dot-row" aria-label="Stage 4 progress">
+                  ${buildSpellingSessionDotRow(followUpWords.length, currentTenseIndex, completedTenseCount)}
+                </div>
+              </div>
+              <div class="ss-tense-question">
+                <p class="ss-tense-question__sentence">${buildSpellingFamilySentenceMarkup(currentTensePrompt.sentence, currentTensePrompt.wordForm)}</p>
+                <p class="ss-family-recall__prompt">Is the highlighted word past, present, or future?</p>
+              </div>
+              <div class="ss-tense-choice-grid">
+                ${SPELLING_TENSE_IDS.map((tenseId) => `
+                  <button
+                    type="button"
+                    class="ss-tense-choice${currentFamilyAnswer?.selectedTense === tenseId ? " is-selected" : ""}"
+                    data-spelling-tense-option="${escapeHtml(tenseId)}"
+                    data-spelling-tense-word="${currentFamilyWord.id}"
+                    ${currentFamilyAnswer?.awaitingAdvance ? "disabled" : ""}
+                  >
+                    ${escapeHtml(tenseId.charAt(0).toUpperCase() + tenseId.slice(1))}
+                  </button>
+                `).join("")}
+              </div>
+              ${currentFamilyAnswer?.checked ? `<div class="ss-status-note ss-status-note--feedback${currentFamilyAnswer?.feedbackKind === "correct" ? " is-correct" : " is-incorrect"}"><p>${escapeHtml(currentFamilyAnswer?.feedbackMessage || "")}</p></div>` : ""}
+              <div class="spelling-stage-actions spelling-stage-actions--footer">
+                ${currentFamilyAnswer?.awaitingAdvance
+                  ? `<button type="button" class="primary-button primary-button--dark" data-spelling-tense-advance="${currentFamilyWord.id}">${escapeHtml(spelling.tenseTransfer.completed ? "Finish the set" : "Next word")}</button>`
+                  : `<button type="button" class="primary-button primary-button--dark" data-spelling-tense-submit="${currentFamilyWord.id}">Check answer</button>`}
+              </div>
+            </section>
+          ` : ""}
+        </article>
+      `;
+  } else {
+    const earnedHorseMeta = getSpellingPaddockHorseMeta(spelling.lastUnlockedHorseId || spelling.paddockHorses[spelling.paddockHorses.length - 1]);
+    const repeatWord = getSpellingRepeatCurrentWord(spelling);
+    const repeatCompletedCount = Object.keys(spelling.repeatCheck.responses || {}).length;
+    stageBody = showSessionCompletionSummary
+      ? `
+        <article class="ss-stage-panel">
+          <div class="ss-stage-panel__head">
+            <div>
+              <p class="eyebrow">Session complete</p>
+              <h4>Five-stage summary</h4>
+            </div>
+            <span class="ss-stage-badge is-complete">Program complete</span>
+          </div>
+          <p class="ss-stage-copy">${escapeHtml(`Overall score: ${overallScorePercent}%. You moved from ${getSpellingDiagnosticCorrectCount(spelling)}/${attemptWords.length} in stage 1 to ${getSpellingRepeatCorrectCount(spelling)}/${attemptWords.length} in stage 5.${earnedHorseMeta ? ` ${earnedHorseMeta.label || "A new horse"} earned for the paddock.` : ""}`)}</p>
+          ${earnedHorseMeta ? `
+            <article class="ss-earned-horse-card">
+              <img class="spelling-horse-card__image" src="${escapeHtml(earnedHorseMeta.image)}" alt="${escapeHtml(earnedHorseMeta.name)}" />
+              <div class="spelling-horse-card__copy">
+                <strong>${escapeHtml(`${earnedHorseMeta.name} · ${earnedHorseMeta.label}`)}</strong>
+                <span>${escapeHtml(getSpellingHorseRankLabel(getSpellingVisibleHorseCount(spelling)))}</span>
+              </div>
+            </article>
+          ` : ""}
+          <div class="ss-review-list">
+            ${Object.entries(stageScoreSummary)
+              .map(([stageKey, stageScore]) => `
+                <article class="ss-review-row${getSpellingStageScorePercent(spelling, stageKey) >= 50 ? " is-correct" : " is-incorrect"}">
+                  <div>
+                    <strong>${escapeHtml(stageScore.label)}</strong>
+                    <span>${escapeHtml(`${stageScore.correct}/${stageScore.total} · ${getSpellingStageScorePercent(spelling, stageKey)}%`)}</span>
+                  </div>
+                  <span class="ss-review-mark">${getSpellingStageScorePercent(spelling, stageKey) >= 50 ? "✓" : "✕"}</span>
+                </article>
+              `)
+              .join("")}
+          </div>
+          <div class="spelling-review-card__days">
+            ${SPELLING_UNIT_SEED.reviewDays.map((dayLabel) => `<span class="is-done">${escapeHtml(dayLabel)}</span>`).join("")}
+          </div>
+          <div class="spelling-stage-actions spelling-stage-actions--centered">
+            <button type="button" class="primary-button primary-button--dark" data-spelling-finish-session="true">Visit the stables</button>
+          </div>
+        </article>
+      `
+      : spelling.repeatCheck.completed
+      ? `
+        <article class="ss-stage-panel">
+          <div class="ss-stage-panel__head">
+            <div>
+              <p class="eyebrow">Complete</p>
+              <h4>Stage 5 review</h4>
+            </div>
+            <span class="ss-stage-badge is-complete">Ribbon earned</span>
+          </div>
+          <p class="ss-stage-copy">${escapeHtml(`The final spelling check is complete. You moved from ${getSpellingDiagnosticCorrectCount(spelling)}/${attemptWords.length} to ${getSpellingRepeatCorrectCount(spelling)}/${attemptWords.length}.`)}</p>
+          <div class="ss-stage-progress">
+            <span>${escapeHtml(`${stageScoreSummary["repeat-check"].correct}/${stageScoreSummary["repeat-check"].total} correct`)}</span>
+            <span>${escapeHtml(`${getSpellingStageScorePercent(spelling, "repeat-check")}% score`)}</span>
+          </div>
+          <div class="ss-review-list">
+            ${attemptWords.map((wordEntry) => {
+              const diagnosticResponse = spelling.diagnostic.responses[wordEntry.id] || {};
+              const repeatResponse = spelling.repeatCheck.responses[wordEntry.id] || {};
+              const repeatCorrect = Boolean(repeatResponse.correct);
+              return `
+                <article class="ss-review-row${repeatCorrect ? " is-correct" : " is-incorrect"}">
+                  <div>
+                    <strong>${escapeHtml(wordEntry.word)}</strong>
+                    <span>${escapeHtml(`Stage 1: ${diagnosticResponse.attempt || "No answer"} · Stage 5: ${repeatResponse.attempt || "No answer"}`)}</span>
+                  </div>
+                  <span class="ss-review-mark">${repeatCorrect ? "✓" : "✕"}</span>
+                </article>
+              `;
+            }).join("")}
+          </div>
+          <div class="spelling-stage-actions">
+            <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-activity="repeat-check">Reset stage</button>
+          </div>
+        </article>
+      `
+      : `
+        <article class="ss-stage-panel ss-stage-panel--diagnostic">
+          <div class="ss-stage-panel__head ss-stage-panel__head--compact">
+            <p class="eyebrow">Final check</p>
+            <span class="ss-stage-counter">${escapeHtml(`Word ${Math.min(spelling.repeatCheck.currentIndex + 1, attemptWords.length)} of ${attemptWords.length}`)}</span>
+          </div>
+          <div class="spelling-diagnostic-dots spelling-diagnostic-dots--large" aria-label="Final spelling check progress">
+            ${attemptWords
+              .map((_, index) => `
+                <span class="spelling-diagnostic-dot${index < spelling.repeatCheck.currentIndex ? " is-complete" : ""}${index === spelling.repeatCheck.currentIndex ? " is-current" : ""}"></span>
+              `)
+              .join("")}
+          </div>
+          <div class="ss-audio-actions">
+            <button type="button" class="primary-button primary-button--dark" data-spelling-play-repeat="true">Hear the word</button>
+            <button type="button" class="ghost-button ghost-button--light" data-spelling-play-repeat-sentence="true">Hear it in a sentence</button>
+          </div>
+          ${buildSpellingAudioStatusMarkup("repeat-check", repeatWord)}
+          <label class="spelling-input-label" for="spelling-repeat-input">Type your spelling</label>
+          <input
+            id="spelling-repeat-input"
+            class="reader-editor spelling-inline-input spelling-inline-input--hero"
+            type="text"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+            value="${escapeHtml(spelling.repeatCheck.currentInput)}"
+            placeholder="Type the spelling"
+          />
+          <div class="ss-status-note ss-status-note--soft">
+            <span class="ss-status-dot"></span>
+            <p>Repeat the same ten words so we can compare this round with the first check.</p>
+          </div>
+          <div class="spelling-stage-actions spelling-stage-actions--footer">
+            <button type="button" class="primary-button primary-button--dark" data-spelling-submit-repeat="true">
+              ${repeatCompletedCount >= attemptWords.length - 1 ? "Finish stage" : "Next word"}
+            </button>
+          </div>
+        </article>
+      `;
+  }
 
   host.innerHTML = `
-    <section class="spelling-shell" data-spelling-font="${escapeHtml(spelling.preferences.font)}" data-spelling-spacing="${escapeHtml(spelling.preferences.spacing)}" data-spelling-tint="${escapeHtml(spelling.preferences.tint)}">
-      ${buildSpellingSurfaceTabs(homeTab)}
-      ${homeTab === "paddock"
-        ? buildSpellingPaddockHome(subject, spelling, masteryPercent, completedCount, totalCount, stageIndex)
-        : homeTab === "progress"
-          ? buildSpellingProgressHome(subject, spelling, masteryPercent, completedCount, totalCount)
-          : buildSpellingSessionHome(subject, spelling, masteryPercent, completedCount, totalCount, stageIndex)}
+    <section class="ss-root spelling-shell" data-spelling-font="${escapeHtml(spelling.preferences.font)}" data-spelling-spacing="${escapeHtml(spelling.preferences.spacing)}" data-spelling-tint="${escapeHtml(spelling.preferences.tint)}">
+      ${buildSpellingSurfaceTabs("session")}
+
+      <div class="ss-layout">
+        <div class="ss-main">
+          ${stageBody}
+        </div>
+
+        <aside class="ss-side">
+          ${buildSpellingStageSidebar(subject, spelling, stageId)}
+        </aside>
+      </div>
     </section>
   `;
 
-  host.querySelectorAll("[data-spelling-home-tab]").forEach((button) => {
-    button.addEventListener("click", () => {
-      setSpellingHomeTab(subject, button.dataset.spellingHomeTab);
-      render();
-    });
+  setupSpellingPaddockInteractions(subject, host);
+  bindSpellingNavigationInteractions(subject, host);
+
+  host.querySelector("[data-spelling-reset-unit]")?.addEventListener("click", () => {
+    const spelling = getSubjectSpellingState(subject);
+    resetSpellingProgressForNewAttempt(spelling);
+    spelling.sessionPreparedKey = currentSpellingSessionKey;
+    persistSubjects();
+    render();
   });
 
-  host.querySelectorAll("[data-spelling-stage-select]").forEach((button) => {
-    button.addEventListener("click", () => {
-      setSpellingSelectedStage(subject, button.dataset.spellingStageSelect);
-      render();
-    });
+  host.querySelector("[data-spelling-continue-stage]")?.addEventListener("click", () => {
+    continueSpellingStageToTarget(subject, host.querySelector("[data-spelling-continue-stage]")?.dataset.spellingContinueStage || "");
+    render();
   });
 
-  host.querySelectorAll("[data-spelling-set-font]").forEach((button) => {
-    button.addEventListener("click", () => {
-      spelling.preferences.font = button.dataset.spellingSetFont;
-      persistSubjects();
-      render();
-    });
-  });
-
-  host.querySelectorAll("[data-spelling-set-spacing]").forEach((button) => {
-    button.addEventListener("click", () => {
-      spelling.preferences.spacing = button.dataset.spellingSetSpacing;
-      persistSubjects();
-      render();
-    });
-  });
-
-  host.querySelectorAll("[data-spelling-set-tint]").forEach((button) => {
-    button.addEventListener("click", () => {
-      spelling.preferences.tint = button.dataset.spellingSetTint;
-      persistSubjects();
-      render();
-    });
+  host.querySelector("[data-spelling-finish-session]")?.addEventListener("click", () => {
+    finishSpellingSession(subject);
+    render();
   });
 
   host.querySelectorAll("[data-spelling-reset-activity]").forEach((button) => {
@@ -9566,86 +15907,147 @@ function renderSpelling() {
     });
   });
 
-  host.querySelector("[data-spelling-reset-unit]")?.addEventListener("click", () => {
-    subject.spelling = createDefaultSpellingState(subject.id);
-    persistSubjects();
-    render();
-  });
-
-  host.querySelectorAll("[data-spelling-assessment-input]").forEach((input) => {
-    input.addEventListener("input", (event) => {
-      const activityId = input.dataset.spellingAssessmentInput;
-      const word = input.dataset.spellingWord;
-      const activity = spelling.activities[activityId];
-      if (!activity || !word) {
+  host.querySelectorAll("[data-spelling-looks-right-word]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (spelling.looksRight.awaitingAdvanceWordId) {
         return;
       }
-      activity.answers[word] = event.target.value;
-      activity.checked = false;
-      activity.completed = false;
-      activity.results = [];
+      selectSpellingLooksRightAnswer(subject, button.dataset.spellingLooksRightWord, button.dataset.spellingLooksRightValue);
+      render();
     });
+  });
 
+  host.querySelectorAll("[data-spelling-play-looks-right]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const wordId = button.dataset.spellingPlayLooksRight || "";
+      const entry = SPELLING_INTERVENTION_LIBRARY[wordId];
+      if (!entry) {
+        return;
+      }
+      void speakTextWithOpenAi(`You heard ${entry.word}. ${entry.sentence || ""}`, {
+        context: `spelling:looks-right:${entry.id}`,
+        statusMessages: {
+          preparing: "Preparing spelling audio...",
+          playing: "Reading spelling cue...",
+          error: "Spelling audio failed."
+        }
+      }).catch((error) => {
+        console.error("Looks-right spelling audio failed.", error);
+      });
+    });
+  });
+
+  host.querySelectorAll("[data-spelling-looks-right-advance]").forEach((button) => {
+    button.addEventListener("click", () => {
+      advanceSpellingLooksRightWord(subject);
+      render();
+    });
+  });
+
+  host.querySelectorAll("[data-spelling-flashcard-reveal]").forEach((button) => {
+    button.addEventListener("click", () => {
+      revealSpellingFlashcardSentence(subject, button.dataset.spellingFlashcardReveal);
+    });
+  });
+
+  host.querySelectorAll("[data-spelling-flashcard-input]").forEach((input) => {
+    input.addEventListener("input", (event) => {
+      const card = ensureSpellingFlashcardCard(spelling, input.dataset.spellingFlashcardInput);
+      card.typedValue = event.target.value;
+      card.checked = false;
+      card.awaitingAdvance = false;
+      card.feedbackKind = "";
+      card.feedbackMessage = "";
+      persistSubjects();
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        submitSpellingFlashcardRecall(subject, input.dataset.spellingFlashcardInput, event.target.value);
+        render();
+      }
+    });
     input.addEventListener("blur", () => {
       persistSubjects();
     });
   });
 
-  host.querySelectorAll("[data-spelling-check-assessment]").forEach((button) => {
+  host.querySelectorAll("[data-spelling-flashcard-submit]").forEach((button) => {
     button.addEventListener("click", () => {
-      checkSpellingAssessmentStage(subject, button.dataset.spellingCheckAssessment);
+      const input = host.querySelector(`[data-spelling-flashcard-input="${button.dataset.spellingFlashcardSubmit}"]`);
+      submitSpellingFlashcardRecall(subject, button.dataset.spellingFlashcardSubmit, input?.value || "");
       render();
     });
   });
 
-  host.querySelectorAll("[data-spelling-drag]").forEach((item) => {
-    item.addEventListener("dragstart", (event) => {
-      activeSpellingDragPayload = {
-        activityId: item.dataset.spellingActivity,
-        value: item.dataset.spellingValue
-      };
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", JSON.stringify(activeSpellingDragPayload));
-    });
-
-    item.addEventListener("dragend", () => {
-      activeSpellingDragPayload = null;
+  host.querySelectorAll("[data-spelling-flashcard-advance]").forEach((button) => {
+    button.addEventListener("click", () => {
+      advanceSpellingFlashcardWord(subject, button.dataset.spellingFlashcardAdvance);
+      render();
     });
   });
 
-  host.querySelectorAll("[data-spelling-dropzone]").forEach((zone) => {
-    zone.addEventListener("dragover", (event) => {
-      event.preventDefault();
-      zone.classList.add("is-over");
-    });
-
-    zone.addEventListener("dragleave", () => {
-      zone.classList.remove("is-over");
-    });
-
-    zone.addEventListener("drop", (event) => {
-      event.preventDefault();
-      zone.classList.remove("is-over");
-      if (!activeSpellingDragPayload) {
-        try {
-          activeSpellingDragPayload = JSON.parse(event.dataTransfer.getData("text/plain"));
-        } catch (error) {
-          activeSpellingDragPayload = null;
-        }
-      }
-      if (!activeSpellingDragPayload) {
-        return;
-      }
-      handleSpellingDrop(
-        subject,
-        activeSpellingDragPayload.activityId,
-        zone.dataset.spellingActivity,
-        zone.dataset.spellingDrop,
-        activeSpellingDragPayload.value
-      );
-      activeSpellingDragPayload = null;
+  host.querySelectorAll("[data-spelling-tense-option]").forEach((button) => {
+    button.addEventListener("click", () => {
+      selectSpellingTenseOption(subject, button.dataset.spellingTenseWord, button.dataset.spellingTenseOption);
       render();
     });
+  });
+
+  host.querySelectorAll("[data-spelling-tense-submit]").forEach((button) => {
+    button.addEventListener("click", () => {
+      checkSpellingTenseTransfer(subject, button.dataset.spellingTenseSubmit);
+      render();
+    });
+  });
+
+  host.querySelectorAll("[data-spelling-tense-advance]").forEach((button) => {
+    button.addEventListener("click", () => {
+      advanceSpellingTenseTransfer(subject, button.dataset.spellingTenseAdvance);
+      render();
+    });
+  });
+
+  host.querySelector("[data-spelling-play-repeat]")?.addEventListener("click", () => {
+    const input = host.querySelector("#spelling-repeat-input");
+    spelling.repeatCheck.currentInput = input?.value || spelling.repeatCheck.currentInput;
+    persistSubjects({ skipRemoteSync: true });
+    speakSpellingRepeatWord(getSpellingRepeatCurrentWord(getSubjectSpellingState(subject)));
+  });
+
+  host.querySelector("[data-spelling-play-repeat-sentence]")?.addEventListener("click", () => {
+    const input = host.querySelector("#spelling-repeat-input");
+    spelling.repeatCheck.currentInput = input?.value || spelling.repeatCheck.currentInput;
+    persistSubjects({ skipRemoteSync: true });
+    speakSpellingRepeatSentence(getSpellingRepeatCurrentWord(getSubjectSpellingState(subject)));
+  });
+
+  host.querySelector("#spelling-repeat-input")?.addEventListener("input", (event) => {
+    spelling.repeatCheck.currentInput = event.target.value;
+    persistSubjects({ skipRemoteSync: true });
+  });
+
+  host.querySelector("#spelling-repeat-input")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      submitSpellingRepeatWord(subject, event.currentTarget.value);
+      render();
+      if (!getSubjectSpellingState(subject).repeatCheck.completed) {
+        speakSpellingRepeatWord(getSpellingRepeatCurrentWord(getSubjectSpellingState(subject)));
+      }
+    }
+  });
+
+  host.querySelector("#spelling-repeat-input")?.addEventListener("blur", () => {
+    persistSubjects();
+  });
+
+  host.querySelector("[data-spelling-submit-repeat]")?.addEventListener("click", () => {
+    submitSpellingRepeatWord(subject, host.querySelector("#spelling-repeat-input")?.value || "");
+    render();
+    if (!getSubjectSpellingState(subject).repeatCheck.completed) {
+      speakSpellingRepeatWord(getSpellingRepeatCurrentWord(getSubjectSpellingState(subject)));
+    }
   });
 }
 
@@ -9827,30 +16229,25 @@ function renderPractice() {
 async function handleAsk() {
   const subject = getSelectedSubject();
   const document = getAskDocument() || getSelectedDocument();
+  const activeSurface = getActiveAskSurface();
   if (!subject) {
     return;
   }
 
-  const question = elements.askInput.value.trim();
+  const question = activeSurface?.input?.value.trim() || "";
   if (!question) {
-    elements.askResponse.textContent = "Write a question first so the AI can focus on what you need help with.";
+    setAskSurfaceStatus(activeSurface, "Write a question first so the AI can focus on what you need help with.");
     return;
   }
 
-  if (elements.askButton) {
-    elements.askButton.disabled = true;
-  }
-  elements.askResponse.textContent = "Thinking...";
+  setAskSurfaceStatus(activeSurface, "Thinking...");
 
   let answer = "";
   try {
     answer = await requestAskAnswer(question, subject, document);
   } catch (error) {
-    elements.askResponse.textContent =
-      error instanceof Error ? `Ask AI failed: ${error.message}` : "Ask AI failed.";
-    if (elements.askButton) {
-      elements.askButton.disabled = false;
-    }
+    const message = error instanceof Error ? `Ask AI failed: ${error.message}` : "Ask AI failed.";
+    setAskSurfaceStatus(activeSurface, message);
     return;
   }
 
@@ -9862,10 +16259,19 @@ async function handleAsk() {
     answer
   });
   persistSubjects();
-  elements.askResponse.textContent = answer;
-  elements.askInput.value = "";
-  if (elements.askButton) {
-    elements.askButton.disabled = false;
+  setAskSurfaceStatus(activeSurface, answer);
+  if (activeSurface?.input) {
+    activeSurface.input.value = "";
+  }
+  if (activeSurface?.kind === "landing") {
+    state.subjectLandingAskDraft = "";
+    state.subjectLandingAskAnswer = answer;
+    state.subjectLandingAskLastQuestion = question;
+  } else {
+    state.askLatestSubjectId = subject.id;
+    state.askStatusSubjectId = subject.id;
+    state.askLatestQuestion = question;
+    state.askLatestAnswer = answer;
   }
   renderAskContext();
 }
@@ -9879,51 +16285,59 @@ function handleAskMicToggle() {
 }
 
 function handleAskListen() {
+  const activeSurface = getActiveAskSurface();
   if (state.askResponseSpeaking) {
     stopListening();
-    elements.askResponse.textContent = getLatestAskAnswer() || getAskIdleMessage();
+    setAskSurfaceStatus(activeSurface, getStoredAskAnswer(activeSurface) ? getAskReadyStatus() : getAskIdleStatus(activeSurface));
     return;
   }
 
   const subject = getSelectedSubject();
   const document = getAskDocument() || getSelectedDocument();
-  const question = elements.askInput.value.trim();
-  const playAnswer = (answer) => {
-    speakTextWithOpenAi(answer, {
+  const question = activeSurface?.input?.value.trim() || "";
+  const playAnswer = (answerToPlay) => {
+    speakTextWithOpenAi(answerToPlay, {
       context: "ask",
+      statusElement: activeSurface?.response || null,
       statusMessages: {
         preparing: "Preparing Panda's answer...",
         playing: "Playing Panda's answer...",
         error: "AI voice playback failed for this answer."
       },
+      onStatusChange: (_status, message) => {
+        setAskSurfaceStatus(activeSurface, message);
+      },
       onFinished: () => {
-        elements.askResponse.textContent = answer;
-        renderAskVoiceControls();
+        setAskSurfaceStatus(activeSurface, getAskReadyStatus());
+        renderAskContext();
       }
     }).catch((error) => {
       console.error("OpenAI speech failed.", error);
       stopListening();
-      elements.askResponse.textContent =
-        error instanceof Error ? `Listen failed: ${error.message}` : "Listen failed.";
+      const message = error instanceof Error ? `Listen failed: ${error.message}` : "Listen failed.";
+      setAskSurfaceStatus(activeSurface, message);
     });
   };
 
-  if (!question) {
-    const latestAnswer = getLatestAskAnswer();
-    if (!latestAnswer) {
-      elements.askResponse.textContent = "Write a question first so Panda knows what to answer.";
-      renderAskVoiceControls();
+  if (canReplayStoredAskAnswer(activeSurface, question)) {
+    const answerToPlay = getAskPlaybackText(activeSurface);
+    if (answerToPlay) {
+      playAnswer(answerToPlay);
       return;
     }
-    playAnswer(latestAnswer);
-    return;
   }
 
   if (!subject) {
     return;
   }
 
-  elements.askResponse.textContent = "Thinking...";
+  if (!question) {
+    setAskSurfaceStatus(activeSurface, "Write a question first so Panda knows what to answer.");
+    renderAskVoiceControls();
+    return;
+  }
+
+  setAskSurfaceStatus(activeSurface, "Thinking...");
   requestAskAnswer(question, subject, document)
     .then((answer) => {
       subject.askHistory = Array.isArray(subject.askHistory) ? subject.askHistory : [];
@@ -9934,11 +16348,12 @@ function handleAskListen() {
         answer
       });
       persistSubjects();
+      storeAskAnswerForSurface(activeSurface, question, answer);
       playAnswer(answer);
     })
     .catch((error) => {
-      elements.askResponse.textContent =
-        error instanceof Error ? `Ask AI failed: ${error.message}` : "Ask AI failed.";
+      const message = error instanceof Error ? `Ask AI failed: ${error.message}` : "Ask AI failed.";
+      setAskSurfaceStatus(activeSurface, message);
     });
 }
 
@@ -9966,6 +16381,8 @@ function createId() {
   return `doc-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+const STUDY_PLAN_VERSION = 2;
+
 function createDocumentRecord({ title, type, content }) {
   return {
     id: createId(),
@@ -9977,11 +16394,13 @@ function createDocumentRecord({ title, type, content }) {
     uploadGroupId: null,
     originalFile: null,
     previewImageUrl: null,
+    revisionArchived: false,
     reviewed: false,
     reviewMode: "",
     pages: [],
     studyOverview: "",
     studyPlanStatus: "idle",
+    studyPlanVersion: 0,
     studySections: [],
     completedSectionIds: [],
     currentSectionIndex: 0,
@@ -10005,6 +16424,9 @@ function normaliseStudySection(section, index) {
     sectionText: String(section?.sectionText || "").trim(),
     pageStart: Number(section?.pageStart || 0) || null,
     pageEnd: Number(section?.pageEnd || 0) || null,
+    bullets: Array.isArray(section?.bullets)
+      ? section.bullets.map((bullet) => String(bullet || "").trim()).filter(Boolean).slice(0, 4)
+      : [],
     importantTerms: Array.isArray(section?.importantTerms)
       ? section.importantTerms.map((term) => String(term || "").trim()).filter(Boolean)
       : []
@@ -10062,6 +16484,87 @@ function summariseSectionText(value, maxLength = 180) {
   return `${text.slice(0, maxLength).trim()}…`;
 }
 
+function extractStudySentences(value) {
+  return String(value || "")
+    .split(/[\n•]+/)
+    .flatMap((chunk) => String(chunk || "").split(/(?<=[.!?])\s+/))
+    .map((sentence) => normaliseWhitespace(sentence))
+    .filter(Boolean)
+    .filter((sentence) => !/^page\s+\d+\b/i.test(sentence));
+}
+
+function scoreStudySentence(sentence, importantTerms = []) {
+  const lowerSentence = String(sentence || "").toLowerCase();
+  const termHits = importantTerms.reduce((count, term) => {
+    const lowerTerm = String(term || "").trim().toLowerCase();
+    return lowerTerm && lowerSentence.includes(lowerTerm) ? count + 1 : count;
+  }, 0);
+  const cueHits = (lowerSentence.match(/\b(is|means|shows|explains|because|therefore|causes|includes|uses|forms|affects|results|theme|evidence|process|formula|definition|function|purpose|structure)\b/g) || []).length;
+  const numberHits = (lowerSentence.match(/\b\d+(?:\.\d+)?\b/g) || []).length;
+  const lengthScore = Math.min(4, Math.max(0, Math.round(lowerSentence.length / 40)));
+  return termHits * 4 + cueHits * 2 + numberHits + lengthScore;
+}
+
+function buildCoreStudySummary(value, importantTerms = [], maxLength = 220) {
+  const sentences = extractStudySentences(value)
+    .filter((sentence) => sentence.length >= 28)
+    .map((sentence, index) => ({
+      sentence,
+      index,
+      score: scoreStudySentence(sentence, importantTerms)
+    }))
+    .sort((left, right) => right.score - left.score || left.index - right.index);
+
+  if (!sentences.length) {
+    return summariseSectionText(value, maxLength);
+  }
+
+  const chosen = sentences
+    .slice(0, 2)
+    .sort((left, right) => left.index - right.index)
+    .map((entry) => entry.sentence.replace(/[.!?]+$/, "").trim());
+  const combined = normaliseWhitespace(chosen.join(". "));
+  if (!combined) {
+    return summariseSectionText(value, maxLength);
+  }
+  if (combined.length <= maxLength) {
+    return combined;
+  }
+  return summariseSectionText(combined, maxLength);
+}
+
+function buildCoreStudyBullets(value, importantTerms = [], limit = 3) {
+  const rankedSentences = extractStudySentences(value)
+    .map((sentence, index) => ({
+      sentence: sentence.replace(/[.!?]+$/, "").trim(),
+      index,
+      score: scoreStudySentence(sentence, importantTerms)
+    }))
+    .filter((entry) => entry.sentence.length >= 18)
+    .sort((left, right) => right.score - left.score || left.index - right.index);
+
+  const chosen = [];
+  rankedSentences.forEach((entry) => {
+    if (chosen.length >= limit) {
+      return;
+    }
+    if (chosen.some((candidate) => candidate.toLowerCase() === entry.sentence.toLowerCase())) {
+      return;
+    }
+    chosen.push(entry.sentence);
+  });
+
+  if (chosen.length) {
+    return chosen;
+  }
+
+  if (importantTerms.length) {
+    return importantTerms.slice(0, limit).map((term) => `Focus on ${term}`);
+  }
+
+  return ["Read the main idea closely", "Pull out the strongest detail", "Keep the key terms in mind"];
+}
+
 function buildFallbackStudyPlan(documentRecord) {
   const sourceText = String(documentRecord.content || "").trim();
   const pages = Array.isArray(documentRecord.pages) ? documentRecord.pages : [];
@@ -10071,9 +16574,9 @@ function buildFallbackStudyPlan(documentRecord) {
       text: getDocumentPageText(page)
     }))
     .filter((page) => page.text);
+  const targetSectionCount = getRecommendedStudySectionCountForDocument(documentRecord);
   const rawSections = usablePages.length
     ? (() => {
-        const targetSectionCount = Math.min(7, Math.max(3, Math.ceil(usablePages.length / 12)));
         const chunkSize = Math.max(1, Math.ceil(usablePages.length / targetSectionCount));
         return Array.from({ length: Math.ceil(usablePages.length / chunkSize) }, (_, index) => {
           const group = usablePages.slice(index * chunkSize, (index + 1) * chunkSize);
@@ -10089,18 +16592,43 @@ function buildFallbackStudyPlan(documentRecord) {
           };
         }).filter((section) => section.sectionText);
       })()
-    : [{ title: "Overview", summary: summariseSectionText(sourceText), sectionText: sourceText, pageStart: null, pageEnd: null }];
+    : (() => {
+        const textBlocks = String(documentRecord.content || "")
+          .split(/\n{2,}/)
+          .map((block) => normaliseWhitespace(block))
+          .filter((block) => block.length >= 60);
+        if (!textBlocks.length) {
+          return [{ title: "Overview", summary: summariseSectionText(sourceText), sectionText: sourceText, pageStart: null, pageEnd: null }];
+        }
+        const chunkSize = Math.max(1, Math.ceil(textBlocks.length / Math.min(targetSectionCount, textBlocks.length)));
+        return Array.from({ length: Math.ceil(textBlocks.length / chunkSize) }, (_, index) => {
+          const group = textBlocks.slice(index * chunkSize, (index + 1) * chunkSize);
+          const sectionText = group.join("\n\n");
+          return {
+            title: `Section ${index + 1}`,
+            summary: summariseSectionText(sectionText),
+            sectionText,
+            pageStart: null,
+            pageEnd: null
+          };
+        }).filter((section) => section.sectionText);
+      })();
 
   const usableSections = rawSections
-    .map((section, index) => normaliseStudySection({
-      id: `section-${index + 1}`,
-      title: section.title,
-      summary: section.summary || "",
-      sectionText: section.sectionText || sourceText,
-      pageStart: section.pageStart,
-      pageEnd: section.pageEnd,
-      importantTerms: extractImportantTermsFromText(section.sectionText || sourceText).slice(0, 8)
-    }, index))
+    .map((section, index) => {
+      const sectionText = section.sectionText || sourceText;
+      const importantTerms = extractImportantTermsFromText(sectionText).slice(0, 8);
+      return normaliseStudySection({
+        id: `section-${index + 1}`,
+        title: section.title,
+        summary: buildCoreStudySummary(section.summary || sectionText, importantTerms),
+        sectionText,
+        pageStart: section.pageStart,
+        pageEnd: section.pageEnd,
+        bullets: buildCoreStudyBullets(sectionText, importantTerms, 3),
+        importantTerms
+      }, index);
+    })
     .filter((section) => section.sectionText);
 
   const sections = usableSections.length
@@ -10108,12 +16636,14 @@ function buildFallbackStudyPlan(documentRecord) {
     : [normaliseStudySection({
         id: "section-1",
         title: "Overview",
-        summary: "",
+        summary: buildCoreStudySummary(sourceText),
         sectionText: sourceText || "No readable text is available for this document yet.",
+        bullets: buildCoreStudyBullets(sourceText, [], 3),
         importantTerms: []
       }, 0)];
 
-  const quizTerms = extractImportantTermsFromText(sourceText).slice(0, 4);
+  const allImportantTerms = extractImportantTermsFromText(sourceText).slice(0, 20);
+  const quizTerms = allImportantTerms.slice(0, 4);
   const quiz = normaliseStudyQuiz({
     title: `${documentRecord.title} quick check`,
     passingScore: Math.min(3, Math.max(1, quizTerms.length || 3)),
@@ -10132,8 +16662,8 @@ function buildFallbackStudyPlan(documentRecord) {
   });
 
   return {
-    overview: "",
-    importantTerms: extractImportantTermsFromText(sourceText).slice(0, 20),
+    overview: buildCoreStudySummary(sourceText, allImportantTerms.slice(0, 8), 260),
+    importantTerms: allImportantTerms,
     sections,
     quiz
   };
@@ -10905,6 +17435,7 @@ async function processFiles(fileList) {
   const files = [...fileList];
   const subject = getUploadSubject();
   const flags = buildUploadFlags();
+  let uploadSavedLocally = false;
   if (!subject) {
     return;
   }
@@ -10929,7 +17460,7 @@ async function processFiles(fileList) {
       state.selectedSubjectId = subject.id;
       state.currentView = "subjects";
       state.activeSubjectTab = "watch";
-      state.focusArea = state.focusMode ? "watch" : null;
+      state.focusArea = null;
       persistSubjects();
       render();
       elements.uploadStatus.textContent = "That WATCH link is already in this subject.";
@@ -10954,7 +17485,7 @@ async function processFiles(fileList) {
     state.selectedSubjectId = subject.id;
     state.currentView = "subjects";
     state.activeSubjectTab = "watch";
-    state.focusArea = state.focusMode ? "watch" : null;
+    state.focusArea = null;
     persistSubjects();
     render();
     elements.uploadStatus.textContent = "WATCH item added.";
@@ -11012,24 +17543,29 @@ async function processFiles(fileList) {
       }
     }
 
-    persistSubjects();
+    const remoteSubjectsSequence = persistSubjects();
+    uploadSavedLocally = true;
+    if (state.authToken && remoteSubjectsSequence) {
+      elements.uploadStatus.textContent = "Saving uploaded documents to your account...";
+      await waitForRemoteSubjectsPersist(remoteSubjectsSequence);
+    }
     if (flags.homework) {
       state.selectedSubjectId = subject.id;
       state.currentView = "subjects";
       state.activeSubjectTab = "homework";
-      state.focusArea = state.focusMode ? "homework" : null;
+      state.focusArea = null;
     } else if (flags.assessment) {
       state.selectedSubjectId = subject.id;
       state.currentView = "subjects";
       state.activeSubjectTab = "assessments";
-      state.focusArea = state.focusMode ? "assessments" : null;
+      state.focusArea = null;
     } else if (flags.classNotes) {
       state.selectedSubjectId = subject.id;
       state.currentView = "subjects";
       state.activeSubjectTab = "reader";
-      state.focusArea = state.focusMode ? "reader" : null;
+      state.focusArea = null;
     }
-    state.selectedDocumentId = getVisibleSubjectDocuments(subject)[0]?.id || null;
+    state.selectedDocumentId = getReaderDocuments(subject)[0]?.id || getRevisionReaderDocuments(subject)[0]?.id || null;
     elements.documentUpload.value = "";
     clearUploadOptions();
     render();
@@ -11039,11 +17575,12 @@ async function processFiles(fileList) {
       .forEach((record) => {
         void ensureDocumentStudyPlan(record, subject);
       });
-    elements.uploadStatus.textContent = `${files.length} document${files.length === 1 ? "" : "s"} uploaded.`;
+    elements.uploadStatus.textContent = `${files.length} document${files.length === 1 ? "" : "s"} uploaded and saved.`;
     closeUploadModal();
   } catch (error) {
-    elements.uploadStatus.textContent =
-      error instanceof Error ? `Upload failed: ${error.message}` : "Upload failed.";
+    elements.uploadStatus.textContent = uploadSavedLocally
+      ? (error instanceof Error ? error.message : "Upload saved on this device, but the shared account copy could not be updated.")
+      : (error instanceof Error ? `Upload failed: ${error.message}` : "Upload failed.");
   }
 }
 
@@ -11357,9 +17894,8 @@ async function saveAccountSettings() {
       const currentKey = normaliseAccountKey(currentEmail);
       const nextKey = normaliseAccountKey(nextEmail);
       if (storedSubjectsMap[currentKey]) {
-        storedSubjectsMap[nextKey] = storedSubjectsMap[currentKey];
         delete storedSubjectsMap[currentKey];
-        saveStoredSubjectsMap(storedSubjectsMap);
+        saveStoredSubjectsMapForAccount(storedSubjectsMap, nextKey, state.subjects);
       }
     }
     applyAuthenticatedAccount(payload.account, {
@@ -11434,12 +17970,14 @@ function render() {
   renderSubjectsHero();
   renderSubjectHeader();
   renderSubjectTabs();
+  renderSubjectLanding();
   renderFocusMode();
   renderPendingUpload();
   renderDocuments();
   renderAskContext();
   renderSavedRevisionTests();
   renderAssessments();
+  renderWriting();
   renderSpelling();
   renderPractice();
   renderWatchList();
@@ -11492,79 +18030,87 @@ async function handleDashboardOpen() {
     return;
   }
 
-  if (!isCreateMode) {
-    try {
-      const payload = await requestApi("/api/auth/signin", {
-        email: studentEmail,
-        password
-      });
-      state.authToken = payload.token || "";
-      applyAuthenticatedAccount(payload.account, {
-        token: payload.token || "",
-        subjects: payload.subjects,
-        settings: payload.settings,
-        skipRemoteSync: true
-      });
-      openDashboard("home");
+  if (isCreateMode) {
+    if (!studentName) {
+      elements.signInStatus.textContent = "Enter a student name.";
       return;
-    } catch (error) {
-      if (
-        error instanceof Error &&
-        error.status === 404 &&
-        existingLegacyAccount &&
-        existingLegacyAccount.password === password
-      ) {
-        try {
-          const legacySubjects = getStoredSubjectsForAccount(existingLegacyAccount);
-          const payload = await registerCloudAccountWithFallback({
-            name: existingLegacyAccount.name,
-            email: existingLegacyAccount.email,
-            password,
-            grade: normaliseGrade(existingLegacyAccount.grade),
-            subjects: legacySubjects,
-            settings: buildCloudAccountSettingsPayload()
-          });
-          state.authToken = payload.token || "";
-          applyAuthenticatedAccount(payload.account, {
-            token: payload.token || "",
-            subjects: legacySubjects,
-            settings: payload.settings,
-            skipRemoteSync: false
-          });
-          openDashboard("home");
-          return;
-        } catch (migrationError) {
-          elements.signInStatus.textContent =
-            migrationError instanceof Error ? migrationError.message : "Account migration failed.";
-          return;
-        }
-      }
-
-      if (studentName || confirmPassword) {
-        setAuthMode("create", { clearStatus: false });
-      } else {
-        elements.signInStatus.textContent = error instanceof Error ? error.message : "Sign-in failed.";
-      }
+    }
+    if (!confirmPassword) {
+      elements.signInStatus.textContent = "Confirm the password.";
+      return;
+    }
+    if (password !== confirmPassword) {
+      elements.signInStatus.textContent = "Passwords do not match.";
       return;
     }
   }
 
-  if (!studentName) {
-    elements.signInStatus.textContent = "Enter a student name.";
-    return;
-  }
-  if (!confirmPassword) {
-    elements.signInStatus.textContent = "Confirm the password.";
-    return;
-  }
-  if (password !== confirmPassword) {
-    elements.signInStatus.textContent = "Passwords do not match.";
-    return;
-  }
+  setAuthPending(true, isCreateMode ? "Creating your account..." : "Signing you in...");
+  await flushUiFrame();
 
   try {
+    if (!isCreateMode) {
+      try {
+        const payload = await requestApi("/api/auth/signin", {
+          email: studentEmail,
+          password
+        });
+        elements.signInStatus.textContent = "Loading your study space...";
+        state.authToken = payload.token || "";
+        const mergedSubjects = await getMergedStoredSubjectsForAccount(payload.account, payload.subjects);
+        applyAuthenticatedAccount(payload.account, {
+          token: payload.token || "",
+          subjects: mergedSubjects,
+          settings: payload.settings,
+          skipRemoteSync: true
+        });
+        openDashboard("home");
+        return;
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.status === 404 &&
+          existingLegacyAccount &&
+          existingLegacyAccount.password === password
+        ) {
+          try {
+            elements.signInStatus.textContent = "Restoring your saved account...";
+            const legacySubjects = await getMergedStoredSubjectsForAccount(
+              existingLegacyAccount,
+              getStoredSubjectsForAccount(existingLegacyAccount)
+            );
+            const payload = await registerCloudAccountWithFallback({
+              name: existingLegacyAccount.name,
+              email: existingLegacyAccount.email,
+              password,
+              grade: normaliseGrade(existingLegacyAccount.grade),
+              subjects: legacySubjects || getStoredSubjectsForAccount(existingLegacyAccount),
+              settings: buildCloudAccountSettingsPayload()
+            });
+            elements.signInStatus.textContent = "Loading your study space...";
+            state.authToken = payload.token || "";
+            applyAuthenticatedAccount(payload.account, {
+              token: payload.token || "",
+              subjects: legacySubjects || getStoredSubjectsForAccount(existingLegacyAccount),
+              settings: payload.settings,
+              skipRemoteSync: false
+            });
+            openDashboard("home");
+            return;
+          } catch (migrationError) {
+            elements.signInStatus.textContent =
+              migrationError instanceof Error ? migrationError.message : "Account migration failed.";
+            return;
+          }
+        }
+
+        elements.signInStatus.textContent = error instanceof Error ? error.message : "Sign-in failed.";
+        return;
+      }
+    }
+
     const desiredSubjects = existingLegacyAccount
-      ? getStoredSubjectsForAccount(existingLegacyAccount)
+      ? await getMergedStoredSubjectsForAccount(existingLegacyAccount, getStoredSubjectsForAccount(existingLegacyAccount))
       : createInitialSubjectsForAccount({
           email: studentEmail,
           grade: studentGrade,
@@ -11578,10 +18124,15 @@ async function handleDashboardOpen() {
       subjects: desiredSubjects,
       settings: buildCloudAccountSettingsPayload()
     });
+    elements.signInStatus.textContent = "Loading your study space...";
     state.authToken = payload.token || "";
     applyAuthenticatedAccount(payload.account, {
       token: payload.token || "",
-      subjects: desiredSubjects,
+      subjects: desiredSubjects || createInitialSubjectsForAccount({
+        email: studentEmail,
+        grade: studentGrade,
+        name: studentName
+      }),
       settings: payload.settings,
       skipRemoteSync: false
     });
@@ -11591,6 +18142,12 @@ async function handleDashboardOpen() {
       setAuthMode("signin", { clearStatus: false });
     }
     elements.signInStatus.textContent = error instanceof Error ? error.message : "Account creation failed.";
+  } finally {
+    if (!elements.landingPanel.classList.contains("hidden")) {
+      setAuthPending(false, elements.signInStatus.textContent);
+    } else {
+      state.authPending = false;
+    }
   }
 }
 
@@ -11650,9 +18207,6 @@ elements.revisionNotesSelect.addEventListener("change", () => {
 elements.createRevisionTestButton.addEventListener("click", handleCreateRevisionTest);
 elements.submitRevisionTestButton.addEventListener("click", handleSubmitRevisionTest);
 elements.saveRevisionTestButton.addEventListener("click", saveCurrentRevisionTest);
-elements.focusModeToggle?.addEventListener("click", () => {
-  setFocusMode(!state.focusMode);
-});
 elements.focusAskButton?.addEventListener("click", handleFocusAskLaunch);
 elements.focusAskAvatarButton?.addEventListener("click", handleFocusAskLaunch);
 elements.navHomeButton.addEventListener("click", () => {
@@ -11662,10 +18216,9 @@ elements.navHomeButton.addEventListener("click", () => {
 });
 elements.navSubjectsButton.addEventListener("click", () => {
   state.currentView = "subjects";
+  resetSubjectWorkspaceView();
   state.focusAskOpen = false;
-  if (state.focusMode) {
-    state.focusArea = null;
-  }
+  state.focusArea = null;
   render();
 });
 elements.navSettingsButton.addEventListener("click", () => {
@@ -11679,10 +18232,9 @@ elements.changeBackgroundButton.addEventListener("click", () => {
 elements.backgroundUpload.addEventListener("change", handleBackgroundUpload);
 elements.enterSubjectsButton.addEventListener("click", () => {
   state.currentView = "subjects";
+  resetSubjectWorkspaceView();
   state.focusAskOpen = false;
-  if (state.focusMode) {
-    state.focusArea = null;
-  }
+  state.focusArea = null;
   render();
 });
 elements.openUploadModalButton?.addEventListener("click", openUploadModal);
@@ -11731,25 +18283,15 @@ elements.homeAskMicButton?.addEventListener("click", () => {
   startAskMicrophone();
 });
 elements.homeAskReadButton?.addEventListener("click", () => {
-  const subject = getSelectedSubject();
-  if (!subject) {
-    return;
-  }
-  const bundle = getHomeworkBundles(subject)[0];
-  if (!bundle) {
-    openSubjectsWorkspace("homework");
-    return;
-  }
-  const firstDocument = bundle.documents[0];
-  if (firstDocument) {
-    state.askDocumentId = firstDocument.id;
-    state.selectedDocumentId = firstDocument.id;
-  }
-  openSubjectsWorkspace("homework");
+  state.currentView = "subjects";
+  resetSubjectWorkspaceView();
+  state.focusAskOpen = false;
+  state.focusArea = null;
+  render();
 });
 elements.homeAskQuizButton?.addEventListener("click", () => {
-  openSubjectsWorkspace("homework");
-  elements.askInput.value = "Quiz me on the notes I read yesterday and focus on the most important ideas.";
+  openSubjectsWorkspace("reader");
+  elements.askInput.value = "Quiz me on the notes I read recently and focus on the most important ideas.";
   renderAskContext();
   void handleAsk();
 });
@@ -11761,15 +18303,17 @@ elements.subjectTabs?.querySelectorAll("[data-viewer-tab]").forEach((button) => 
     }
     state.activeSubjectTab = nextTab;
     state.focusAskOpen = false;
-    if (state.focusMode) {
-      state.focusArea = nextTab;
-    }
+    state.focusArea = null;
     render();
   });
 });
 elements.focusBackButton?.addEventListener("click", () => {
   state.focusAskOpen = false;
   state.focusArea = null;
+  if (state.subjectWorkspaceReturnLandingSubjectId) {
+    state.selectedSubjectId = state.subjectWorkspaceReturnLandingSubjectId;
+    resetSubjectWorkspaceView();
+  }
   render();
 });
 elements.subjectsView?.addEventListener("click", (event) => {
@@ -11808,7 +18352,7 @@ elements.closeRevisionViewButton.addEventListener("click", () => {
     state.selectedSubjectId = returnContext.subjectId || state.selectedSubjectId;
     state.activeSubjectTab = returnContext.activeSubjectTab || "reader";
     state.focusAskOpen = false;
-    state.focusArea = state.focusMode ? state.activeSubjectTab : null;
+    state.focusArea = null;
     state.selectedDocumentId = returnContext.documentId || state.selectedDocumentId;
     render();
     requestAnimationFrame(() => {
@@ -11841,7 +18385,7 @@ elements.documentsToggleButton.addEventListener("click", () => {
 });
 elements.documentsSelectAllButton.addEventListener("click", () => {
   const subject = getSelectedSubject();
-  const visibleDocuments = getVisibleSubjectDocuments(subject || { documents: [] });
+  const visibleDocuments = getSelectableDocumentsForTable(subject || { documents: [] });
   if (!visibleDocuments.length) {
     return;
   }
