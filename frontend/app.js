@@ -552,9 +552,9 @@ const SPELLING_FOCUS_LABELS = {
 };
 const SPELLING_UNIT_SEED = {
   id: "spelling-progression",
-  title: "Spelling Stables",
+  title: "Practice Property",
   intro:
-    "Run a five-stage spelling session built from the words that still need attention, then earn ribbons and grow the stable.",
+    "Run a five-stage practice session built from the words that still need attention, then earn ribbons and grow your horse property.",
   diagnosticTargetCount: 10,
   followUpWordCount: 10,
   reviewDays: ["Day 1", "Day 3", "Day 7", "Day 14", "Day 30"]
@@ -563,7 +563,7 @@ const SPELLING_SESSION_NEW_WORD_COUNT = 4;
 const SPELLING_SESSION_REVIEW_WORD_COUNT = 6;
 const SPELLING_CUMULATIVE_REVIEW_FREQUENCY = 5;
 const SPELLING_SESSION_REVIEW_INTERVALS = [1, 2, 4, 7, 10];
-const SPELLING_HOME_TABS = ["session", "stable", "paddock", "progress"];
+const SPELLING_HOME_TABS = ["session", "property", "progress", "stable", "paddock"];
 const SPELLING_PADDOCK_HORSES = [
   { id: "arabian", label: "Arabian", name: "Dusty", age: 7, image: "/horses/Arabian.png" },
   { id: "quarter-horse", label: "Quarter Horse", name: "Willow", age: 8, image: "/horses/Quarter Horse.png" },
@@ -613,6 +613,97 @@ const SPELLING_PADDOCK_HORSE_BY_ID = Object.fromEntries(
 const SPELLING_HORSE_RANKS = ["Foal", "Pony", "School Horse", "Show Horse", "Champion"];
 const SPELLING_TENSE_IDS = ["past", "present", "future"];
 const SPELLING_CHALLENGE_MODE_ORDER = ["looks-right", "dictation", "root-word", "missing-letter"];
+const RP_STORAGE_KEY = "paperpanda:property:v1";
+const RP_STAGES = [
+  ["/property/property-stage1.png", "Stage 1 - run-down", "Bare yards, rusted sheds, broken rails. Nothing renovated yet."],
+  ["/property/property-stage2.png", "Stage 2 - arena prepared", "Arena surface laid, hedging installed, jumps set out."],
+  ["/property/property-stage3.png", "Stage 3 - stable renovated", "New roof and cladding, tidy yard, tack shed repaired."],
+  ["/property/property-stage4.png", "Stage 4 - fencing and troughs", "Clean post-and-rail fencing, water troughs, and feed bays."],
+  ["/property/property-stage5.png", "Stage 5 - landscaped entrance", "Stone gateway, mature trees, planting, and polished paths."]
+];
+const RP_TACK = [
+  { k: "saddle", label: "Saddle", x: 41, y: 41 },
+  { k: "pad", label: "Saddle pad", x: 50, y: 64 },
+  { k: "bridle", label: "Bridle", x: 30, y: 61 },
+  { k: "girth", label: "Girth", x: 63, y: 39 },
+  { k: "lead", label: "Lead rope", x: 62, y: 52 },
+  { k: "harness", label: "Harness", x: 88, y: 50 },
+  { k: "rider", label: "Rider", x: 72, y: 64 }
+];
+const RP_ZONES = [
+  { n: "the arena", x1: 11, x2: 42, y1: 52, y2: 71 },
+  { n: "the stable yard", x1: 49, x2: 71, y1: 44, y2: 55 },
+  { n: "the rear paddock", x1: 75, x2: 95, y1: 54, y2: 76 },
+  { n: "the front drive", x1: 33, x2: 68, y1: 80, y2: 92 }
+];
+const RP_HOTSPOTS = [
+  { view: "stable", label: "STABLE AISLE", x: 57.5, y: 31, color: "rgba(110,90,134,.9)" },
+  { view: "tack", label: "TACK ROOM", x: 79, y: 44, color: "rgba(94,125,99,.92)" }
+];
+const RP_ASSETS = {
+  tackRoom: "/property/tack-room.jpeg",
+  arena: "/property/arena-empty.jpeg"
+};
+const RP_VARIANT_SHEETS = {
+  rider: {
+    src: "/property/riders-sheet.jpeg",
+    width: 3090,
+    height: 1344,
+    items: [
+      { id: "sarah", label: "Sarah", x: 30, y: 90, w: 520, h: 980 },
+      { id: "aisha", label: "Aisha", x: 580, y: 120, w: 520, h: 940 },
+      { id: "chloe", label: "Chloe", x: 1180, y: 150, w: 460, h: 920 },
+      { id: "max", label: "Max", x: 1790, y: 115, w: 470, h: 960 },
+      { id: "leo", label: "Leo", x: 2390, y: 105, w: 560, h: 960 }
+    ]
+  },
+  pad: {
+    src: "/property/pads-sheet.jpeg",
+    width: 3090,
+    height: 1344,
+    items: [
+      { id: "midnight-blue", label: "Midnight Blue", x: 20, y: 120, w: 720, h: 390 },
+      { id: "emerald-green", label: "Emerald Green", x: 770, y: 120, w: 720, h: 390 },
+      { id: "bordeaux-red", label: "Bordeaux Red", x: 1520, y: 120, w: 720, h: 390 },
+      { id: "rose-gold", label: "Rose Gold", x: 2270, y: 120, w: 720, h: 390 },
+      { id: "champagne-gold", label: "Champagne Gold", x: 20, y: 760, w: 720, h: 390 },
+      { id: "silver-grey", label: "Silver Grey", x: 770, y: 760, w: 720, h: 390 },
+      { id: "black-pad", label: "Black", x: 1520, y: 760, w: 720, h: 390 },
+      { id: "dark-teal", label: "Dark Teal", x: 2270, y: 760, w: 720, h: 390 }
+    ]
+  },
+  girth: {
+    src: "/property/girths-sheet.jpeg",
+    width: 3090,
+    height: 1344,
+    items: [
+      { id: "black-girth", label: "Black girth", x: 80, y: 360, w: 1320, h: 430 },
+      { id: "brown-girth", label: "Brown girth", x: 1680, y: 340, w: 1320, h: 430 }
+    ]
+  },
+  bridle: {
+    src: "/property/bridles-sheet.jpeg",
+    width: 3090,
+    height: 1344,
+    items: [
+      { id: "brown-bridle", label: "Brown bridle", x: 180, y: 90, w: 980, h: 920 },
+      { id: "black-bridle", label: "Black bridle", x: 1680, y: 90, w: 980, h: 920 }
+    ]
+  }
+};
+const RP_JUMP_SHEET = {
+  src: "/property/jumps-sheet.jpeg",
+  width: 3090,
+  height: 1344,
+  items: [
+    { id: "vertical-jump", label: "Vertical jump", x: 20, y: 240, w: 500, h: 560, arenaWidth: 13 },
+    { id: "spread-oxer", label: "Spread oxer", x: 520, y: 240, w: 620, h: 560, arenaWidth: 17 },
+    { id: "water-jump", label: "Water jump", x: 1080, y: 250, w: 690, h: 560, arenaWidth: 19 },
+    { id: "rustic-plank", label: "Rustic plank", x: 1790, y: 250, w: 620, h: 540, arenaWidth: 17 },
+    { id: "hay-bale", label: "Hay bale", x: 2440, y: 250, w: 620, h: 540, arenaWidth: 17 }
+  ]
+};
+const RP_TACK_VARIANT_KEYS = ["pad", "bridle", "girth", "rider"];
 const SPELLING_TENSE_PROMPTS = {
   believe: {
     past: "They believed the strongest explanation straight away.",
@@ -6065,7 +6156,7 @@ function createDefaultSpellingState(subjectId = "", subjectName = "") {
       responses: {},
       completed: false
     },
-    homeTab: "stable",
+    homeTab: "property",
     selectedStageId: "",
     celebrationStageId: "",
     sessionCompletionReady: false,
@@ -6120,8 +6211,8 @@ function normaliseSpellingState(spelling, subjectId = "", subjectName = "") {
     : [];
 
   const normalisedHomeTabRaw = String(next.homeTab || "");
-  const normalisedHomeTab = normalisedHomeTabRaw === "paddock"
-    ? "stable"
+  const normalisedHomeTab = normalisedHomeTabRaw === "paddock" || normalisedHomeTabRaw === "stable"
+    ? "property"
     : normalisedHomeTabRaw === "review"
       ? "progress"
       : normalisedHomeTabRaw;
@@ -6272,7 +6363,7 @@ function normaliseSpellingState(spelling, subjectId = "", subjectName = "") {
         : {},
       completed: Boolean(repeatCheck.completed)
     },
-    homeTab: SPELLING_HOME_TABS.includes(normalisedHomeTab) ? normalisedHomeTab : "stable",
+    homeTab: SPELLING_HOME_TABS.includes(normalisedHomeTab) ? normalisedHomeTab : "property",
     selectedStageId: SPELLING_STAGE_ORDER.includes(String(next.selectedStageId || "")) ? String(next.selectedStageId || "") : "",
     celebrationStageId: SPELLING_STAGE_ORDER.includes(String(next.celebrationStageId || "")) ? String(next.celebrationStageId || "") : "",
     sessionCompletionReady: Boolean(next.sessionCompletionReady),
@@ -7082,7 +7173,7 @@ function resetSpellingProgressForNewAttempt(spelling) {
     responses: {},
     completed: false
   };
-  spelling.homeTab = "stable";
+  spelling.homeTab = "property";
   spelling.selectedStageId = "";
   spelling.celebrationStageId = "";
   spelling.sessionCompletionReady = false;
@@ -7178,12 +7269,12 @@ function activateSpellingSession(subject) {
 
 function setSpellingHomeTab(subject, tabId) {
   const spelling = getSubjectSpellingState(subject);
-  const normalizedTabId = String(tabId || "") === "paddock"
-    ? "stable"
+  const normalizedTabId = String(tabId || "") === "paddock" || String(tabId || "") === "stable"
+    ? "property"
     : String(tabId || "") === "review"
       ? "progress"
       : String(tabId || "");
-  if (!["session", "stable", "progress"].includes(normalizedTabId)) {
+  if (!["session", "property", "progress"].includes(normalizedTabId)) {
     return;
   }
   if (normalizedTabId === "session") {
@@ -7392,7 +7483,7 @@ function continueSpellingStageToTarget(subject, targetStageId = "") {
 
 function finishSpellingSession(subject) {
   const spelling = getSubjectSpellingState(subject);
-  spelling.homeTab = "stable";
+  spelling.homeTab = "property";
   spelling.selectedStageId = "repeat-check";
   spelling.celebrationStageId = "";
   spelling.sessionCompletionReady = isSpellingAttemptComplete(subject);
@@ -8162,9 +8253,12 @@ function finaliseSpellingRepeatCheck(subject) {
   spelling.lastOverallScorePercent = overallScorePercent;
   const unlockedHorse = attemptAlreadyRecorded ? "" : unlockSpellingPaddockHorse(spelling);
   const unlockedHorseMeta = getSpellingPaddockHorseMeta(unlockedHorse);
+  if (unlockedHorseMeta) {
+    RewardProperty.addHorse(unlockedHorseMeta.id, unlockedHorseMeta.name, unlockedHorseMeta.label);
+  }
   recordCompletedSpellingAttempt(subject);
   const completionMessage = unlockedHorse
-    ? `Final spelling check complete. You moved from ${initialScore}/${SPELLING_UNIT_SEED.diagnosticTargetCount} to ${repeatScore}/${SPELLING_UNIT_SEED.diagnosticTargetCount}. ${unlockedHorseMeta?.name || "A new horse"} has been added to the paddock.`
+    ? `Final spelling check complete. You moved from ${initialScore}/${SPELLING_UNIT_SEED.diagnosticTargetCount} to ${repeatScore}/${SPELLING_UNIT_SEED.diagnosticTargetCount}. ${unlockedHorseMeta?.name || "A new horse"} has been added to your property.`
     : `Final spelling check complete. You moved from ${initialScore}/${SPELLING_UNIT_SEED.diagnosticTargetCount} to ${repeatScore}/${SPELLING_UNIT_SEED.diagnosticTargetCount}.`;
   spelling.homeTab = "session";
   spelling.selectedStageId = "repeat-check";
@@ -8335,7 +8429,7 @@ function resetSpellingActivity(subject, activityId) {
   } else {
     subject.spelling = createDefaultSpellingState(subject.id, subject.name);
   }
-  spelling.homeTab = activityId === "diagnostic" ? "stable" : "session";
+  spelling.homeTab = activityId === "diagnostic" ? "property" : "session";
   spelling.selectedStageId = "";
   spelling.celebrationStageId = "";
   spelling.sessionCompletionReady = false;
@@ -8801,15 +8895,902 @@ function buildSpellingPaddockMarkup(spelling) {
   `;
 }
 
+function buildRewardPropertyMarkup() {
+  const devActions = import.meta.env.DEV ? `
+    <div class="rp-acts">
+      <button class="rp-btn rp-btn-moss" data-rp="session">+ Practice session complete</button>
+      <button class="rp-btn rp-btn-plum" data-rp="renovate">+ Grammar stage complete</button>
+      <button class="rp-btn rp-btn-ghost" data-rp="reset">Reset</button>
+    </div>
+  ` : "";
+  return `
+    <section class="rp-root" id="rp">
+      <header class="rp-head">
+        <div>
+          <div class="rp-eyebrow">PaperPanda · shared reward world</div>
+          <h2 class="rp-title">Your horse property</h2>
+          <p class="rp-sub">Practice sessions add horses and unlock tack. Grammar stages can renovate the property. Move between the paddocks, the stable aisle, and the tack room.</p>
+        </div>
+        ${devActions}
+      </header>
+
+      <nav class="rp-tabs">
+        <button class="rp-tab is-on" data-rp-view="property">Property</button>
+        <button class="rp-tab" data-rp-view="stable">Stable aisle</button>
+        <button class="rp-tab" data-rp-view="tack">Tack room</button>
+        <button class="rp-tab" data-rp-view="arena">Arena setup</button>
+      </nav>
+
+      <div class="rp-cols">
+        <div class="rp-main">
+          <div class="rp-stage" data-rp-panel="property">
+            <div class="rp-world">
+              <div class="rp-bg"></div>
+              <div class="rp-occluder"></div>
+            </div>
+            <div class="rp-hud"><span class="rp-hud-stage"></span><i></i><span class="rp-hud-count"></span></div>
+            <div class="rp-zoom">
+              <button class="rp-zbtn" data-rp="zoom-out" aria-label="Zoom out">-</button>
+              <div class="rp-zval">100%</div>
+              <button class="rp-zbtn" data-rp="zoom-in" aria-label="Zoom in">+</button>
+            </div>
+          </div>
+
+          <div class="rp-aisle" data-rp-panel="stable" hidden>
+            <div class="rp-aisle-head">
+              <div>
+                <div class="rp-eyebrow rp-eyebrow-wood">Inside the stable</div>
+                <div class="rp-aisle-title">Stable aisle · <span class="rp-inside">0 horses</span> inside</div>
+              </div>
+              <div class="rp-aisle-hint">Tap a stall to select a horse</div>
+            </div>
+            <div class="rp-stalls"></div>
+          </div>
+
+          <div class="rp-tackwrap" data-rp-panel="tack" hidden>
+            <div class="rp-tackhint"></div>
+            <div class="rp-tackroom"></div>
+            <div class="rp-tackchoices"></div>
+          </div>
+
+          <div class="rp-arenawrap" data-rp-panel="arena" hidden>
+            <div class="rp-arenahint">Add a jump, then drag it anywhere inside the arena.</div>
+            <div class="rp-arena-stage">
+              <div class="rp-arena-canvas"></div>
+            </div>
+            <div class="rp-arena-actions">
+              <div class="rp-arena-library"></div>
+              <button class="rp-btn rp-btn-ghost" data-rp="remove-jump">Remove selected jump</button>
+            </div>
+          </div>
+
+          <div class="rp-foot"></div>
+        </div>
+
+        <aside class="rp-rail">
+          <div class="rp-card">
+            <h3 class="rp-card-t">Renovation</h3>
+            <p class="rp-card-p rp-stage-note"></p>
+            <div class="rp-pips"><i></i><i></i><i></i><i></i><i></i></div>
+          </div>
+
+          <div class="rp-card rp-sel" hidden>
+            <div class="rp-sel-head">
+              <div class="rp-sel-thumb"></div>
+              <div>
+                <div class="rp-sel-name"></div>
+                <div class="rp-sel-breed"></div>
+                <div class="rp-sel-where"></div>
+              </div>
+            </div>
+            <div class="rp-label">Tack and rider</div>
+            <div class="rp-tackrows"></div>
+            <div class="rp-choice-summary"></div>
+            <button class="rp-btn rp-btn-dark rp-wide" data-rp="stable-toggle">Send back to the stable</button>
+            <button class="rp-btn rp-btn-ghost rp-wide" data-rp="deselect">Close</button>
+          </div>
+
+          <div class="rp-card rp-empty">
+            <h3 class="rp-card-t">No horse selected</h3>
+            <p class="rp-card-p">Tap a horse on the property or a stall in the aisle to tack it up.</p>
+          </div>
+
+          <div class="rp-card">
+            <h3 class="rp-card-t">Your horses</h3>
+            <div class="rp-chips"></div>
+          </div>
+        </aside>
+      </div>
+    </section>
+  `;
+}
+
+const RewardProperty = (function () {
+  const START_SPOTS = [[80, 60], [86, 68], [90, 58], [78, 72], [20, 62], [32, 66], [55, 50], [64, 52]];
+  let root = null;
+  let S = null;
+  let view = "property";
+  let sel = null;
+  let activeTackCategory = "pad";
+  let selectedArenaJumpId = "";
+  let zoom = 1;
+  let px = 0;
+  let py = 0;
+  let drag = null;
+  let pan = null;
+
+  function defaultState() {
+    return { stage: 0, owned: 2, sessions: 0, horses: [], arenaJumps: [] };
+  }
+
+  function clampZone(x, y) {
+    for (const zone of RP_ZONES) {
+      if (x >= zone.x1 && x <= zone.x2 && y >= zone.y1 && y <= zone.y2) {
+        return { x, y, zone: zone.n };
+      }
+    }
+    let best = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const zone of RP_ZONES) {
+      const cx = Math.max(zone.x1, Math.min(zone.x2, x));
+      const cy = Math.max(zone.y1, Math.min(zone.y2, y));
+      const distance = ((cx - x) ** 2) + ((cy - y) ** 2);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = { x: cx, y: cy, zone: zone.n };
+      }
+    }
+    return best || { x: 84, y: 64, zone: "the rear paddock" };
+  }
+
+  function getHorseSource(slug = "") {
+    const horseMeta = getSpellingPaddockHorseMeta(slug);
+    return horseMeta?.image || "";
+  }
+
+  function getVariantSheet(category = "") {
+    return RP_VARIANT_SHEETS[String(category || "")] || null;
+  }
+
+  function getVariantItems(category = "") {
+    return getVariantSheet(category)?.items || [];
+  }
+
+  function getVariantLabel(category = "", variantId = "") {
+    return getVariantItems(category).find((item) => item.id === variantId)?.label || "";
+  }
+
+  function getHorseChoiceKey(category = "") {
+    return `${String(category || "")}Choice`;
+  }
+
+  function getHorseVariant(horse, category = "") {
+    if (!horse) {
+      return null;
+    }
+    return getVariantItems(category).find((item) => item.id === horse[getHorseChoiceKey(category)]) || null;
+  }
+
+  function getHorseTackLabels(horse) {
+    if (!horse) {
+      return [];
+    }
+    return RP_TACK
+      .filter((item) => Boolean(horse[item.k]))
+      .map((item) => getHorseVariant(horse, item.k)?.label || item.label);
+  }
+
+  function normaliseArenaJump(rawJump, index = 0) {
+    const fallback = RP_JUMP_SHEET.items.find((item) => item.id === rawJump?.type) || RP_JUMP_SHEET.items[index % RP_JUMP_SHEET.items.length] || RP_JUMP_SHEET.items[0];
+    return {
+      id: String(rawJump?.id || `arena-jump-${index + 1}`),
+      type: fallback.id,
+      x: Math.max(8, Math.min(92, Number(rawJump?.x ?? 50) || 50)),
+      y: Math.max(20, Math.min(90, Number(rawJump?.y ?? 62) || 62)),
+      scale: Math.max(0.8, Math.min(1.35, Number(rawJump?.scale ?? 1) || 1))
+    };
+  }
+
+  function normaliseHorse(rawHorse, index = 0) {
+    const fallbackMeta = getSpellingPaddockHorseMeta(rawHorse?.slug || rawHorse?.id || "");
+    const spot = START_SPOTS[index % START_SPOTS.length];
+    const clamped = clampZone(
+      Number(rawHorse?.x ?? spot[0]) || spot[0],
+      Number(rawHorse?.y ?? spot[1]) || spot[1]
+    );
+    const horse = {
+      id: String(rawHorse?.id || `rp-horse-${index + 1}`),
+      slug: String(rawHorse?.slug || fallbackMeta?.id || ""),
+      name: String(rawHorse?.name || fallbackMeta?.name || `Horse ${index + 1}`),
+      breed: String(rawHorse?.breed || fallbackMeta?.label || "Horse"),
+      src: String(rawHorse?.src || getHorseSource(rawHorse?.slug || rawHorse?.id || fallbackMeta?.id || "")),
+      x: clamped.x,
+      y: clamped.y,
+      zone: clamped.zone,
+      stabled: Boolean(rawHorse?.stabled)
+    };
+    RP_TACK.forEach((item) => {
+      horse[item.k] = Boolean(rawHorse?.[item.k]);
+    });
+    RP_TACK_VARIANT_KEYS.forEach((category) => {
+      const choiceKey = getHorseChoiceKey(category);
+      const availableIds = new Set(getVariantItems(category).map((item) => item.id));
+      const rawChoice = String(rawHorse?.[choiceKey] || "");
+      horse[choiceKey] = availableIds.has(rawChoice) ? rawChoice : "";
+      if (horse[category] && !horse[choiceKey] && getVariantItems(category).length) {
+        horse[choiceKey] = getVariantItems(category)[0].id;
+      }
+    });
+    return horse;
+  }
+
+  function load() {
+    let saved = null;
+    try {
+      saved = JSON.parse(localStorage.getItem(RP_STORAGE_KEY) || "null");
+    } catch (error) {
+      saved = null;
+    }
+    const base = saved && typeof saved === "object" ? saved : defaultState();
+    S = {
+      stage: Math.max(0, Math.min(RP_STAGES.length - 1, Number(base.stage || 0) || 0)),
+      owned: Math.max(2, Math.min(RP_TACK.length, Number(base.owned || 2) || 2)),
+      sessions: Math.max(0, Number(base.sessions || 0) || 0),
+      horses: Array.isArray(base.horses) ? base.horses.map((horse, index) => normaliseHorse(horse, index)) : [],
+      arenaJumps: Array.isArray(base.arenaJumps) ? base.arenaJumps.map((jump, index) => normaliseArenaJump(jump, index)) : []
+    };
+  }
+
+  function ensureLoaded() {
+    if (!S) {
+      load();
+    }
+  }
+
+  function save() {
+    ensureLoaded();
+    try {
+      localStorage.setItem(RP_STORAGE_KEY, JSON.stringify(S));
+    } catch (error) {
+      // Ignore storage write failures.
+    }
+  }
+
+  function byId(id) {
+    ensureLoaded();
+    return S.horses.find((horse) => horse.id === id) || null;
+  }
+
+  function ownedTack() {
+    ensureLoaded();
+    return Math.max(1, Math.min(RP_TACK.length, Number(S.owned || 1) || 1));
+  }
+
+  function nextHorsePosition(index = 0) {
+    const spot = START_SPOTS[index % START_SPOTS.length];
+    return clampZone(spot[0] + (Math.random() * 4 - 2), spot[1] + (Math.random() * 3 - 1.5));
+  }
+
+  function getJumpMeta(type = "") {
+    return RP_JUMP_SHEET.items.find((item) => item.id === type) || RP_JUMP_SHEET.items[0] || null;
+  }
+
+  function arenaJumpById(jumpId = "") {
+    ensureLoaded();
+    return S.arenaJumps.find((jump) => jump.id === jumpId) || null;
+  }
+
+  function buildHorse(slug, name, breed) {
+    const horseMeta = getSpellingPaddockHorseMeta(slug) || null;
+    const position = nextHorsePosition(S.horses.length);
+    const horse = {
+      id: `h${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`,
+      slug: String(slug || horseMeta?.id || ""),
+      name: String(name || horseMeta?.name || "Horse"),
+      breed: String(breed || horseMeta?.label || "Horse"),
+      src: String(horseMeta?.image || getHorseSource(slug)),
+      x: position.x,
+      y: position.y,
+      zone: position.zone,
+      stabled: false
+    };
+    RP_TACK.forEach((item) => {
+      horse[item.k] = false;
+    });
+    RP_TACK_VARIANT_KEYS.forEach((category) => {
+      horse[getHorseChoiceKey(category)] = "";
+    });
+    return horse;
+  }
+
+  function ensureHorse(slug, name, breed) {
+    ensureLoaded();
+    const existingHorse = S.horses.find((horse) => horse.slug === slug);
+    if (existingHorse) {
+      if (!existingHorse.src) {
+        existingHorse.src = getHorseSource(slug);
+      }
+      return { horse: existingHorse, added: false };
+    }
+    const nextHorse = buildHorse(slug, name, breed);
+    S.horses.push(nextHorse);
+    return { horse: nextHorse, added: true };
+  }
+
+  function nextRosterHorse() {
+    ensureLoaded();
+    return SPELLING_PADDOCK_HORSES.find((horse) => !S.horses.some((ownedHorse) => ownedHorse.slug === horse.id)) || SPELLING_PADDOCK_HORSES[0];
+  }
+
+  function syncPracticeState(subject) {
+    ensureLoaded();
+    if (!subject) {
+      return;
+    }
+    const spelling = getSubjectSpellingState(subject);
+    let changed = false;
+    getSpellingOwnedHorseMeta(spelling).forEach((horseMeta) => {
+      const result = ensureHorse(horseMeta.id, horseMeta.name, horseMeta.label);
+      changed = changed || result.added;
+    });
+    const completedCount = Array.isArray(spelling.completedAttempts) ? spelling.completedAttempts.length : 0;
+    const nextOwnedCount = Math.max(S.owned, Math.min(RP_TACK.length, 2 + completedCount));
+    const nextSessionCount = Math.max(S.sessions, completedCount);
+    if (nextOwnedCount !== S.owned) {
+      S.owned = nextOwnedCount;
+      changed = true;
+    }
+    if (nextSessionCount !== S.sessions) {
+      S.sessions = nextSessionCount;
+      changed = true;
+    }
+    if (changed) {
+      save();
+    }
+  }
+
+  function addHorse(slug, name, breed) {
+    ensureLoaded();
+    const result = ensureHorse(slug, name, breed);
+    if (result.added) {
+      S.owned = Math.min(RP_TACK.length, S.owned + 1);
+      S.sessions += 1;
+      sel = result.horse.id;
+      save();
+    } else if (S.horses.length) {
+      sel = result.horse.id;
+    }
+    render();
+    return result.horse;
+  }
+
+  function renovate() {
+    ensureLoaded();
+    const nextStage = Math.min(RP_STAGES.length - 1, S.stage + 1);
+    if (nextStage !== S.stage) {
+      S.stage = nextStage;
+      save();
+    }
+    render();
+  }
+
+  function reset() {
+    S = defaultState();
+    sel = null;
+    view = "property";
+    activeTackCategory = "pad";
+    selectedArenaJumpId = "";
+    zoom = 1;
+    px = 0;
+    py = 0;
+    save();
+    render();
+  }
+
+  function limit() {
+    return (zoom - 1) * 50;
+  }
+
+  function clampPan() {
+    const panLimit = limit();
+    px = Math.max(-panLimit, Math.min(panLimit, px));
+    py = Math.max(-panLimit, Math.min(panLimit, py));
+  }
+
+  function buildSpriteCropMarkup(sheet, item, label, className = "rp-sprite-crop") {
+    if (!sheet || !item) {
+      return "";
+    }
+    return `
+      <span
+        class="${className}"
+        style="--sheet-width:${sheet.width}px;--sheet-height:${sheet.height}px;--sprite-x:${item.x}px;--sprite-y:${item.y}px;--sprite-width:${item.w}px;--sprite-height:${item.h}px;"
+      >
+        <img src="${escapeHtml(sheet.src)}" alt="${escapeHtml(label || item.label || "")}" loading="lazy" />
+      </span>
+    `;
+  }
+
+  function addArenaJump(type = "") {
+    const jumpMeta = getJumpMeta(type);
+    if (!jumpMeta) {
+      return;
+    }
+    const nextJump = normaliseArenaJump({
+      id: `arena-jump-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`,
+      type: jumpMeta.id,
+      x: 52,
+      y: 62,
+      scale: 1
+    }, S.arenaJumps.length);
+    S.arenaJumps.push(nextJump);
+    selectedArenaJumpId = nextJump.id;
+    view = "arena";
+    save();
+    render();
+  }
+
+  function removeSelectedArenaJump() {
+    if (!selectedArenaJumpId) {
+      return;
+    }
+    const nextArenaJumps = S.arenaJumps.filter((jump) => jump.id !== selectedArenaJumpId);
+    if (nextArenaJumps.length === S.arenaJumps.length) {
+      return;
+    }
+    S.arenaJumps = nextArenaJumps;
+    selectedArenaJumpId = "";
+    save();
+    render();
+  }
+
+  function toggleTack(category = "") {
+    const horse = sel ? byId(sel) : null;
+    if (!horse) {
+      return;
+    }
+    const tackIndex = RP_TACK.findIndex((item) => item.k === category);
+    if (tackIndex < 0 || tackIndex >= ownedTack()) {
+      return;
+    }
+    if (getVariantSheet(category)) {
+      activeTackCategory = category;
+      view = "tack";
+      render();
+      return;
+    }
+    horse[category] = !horse[category];
+    save();
+    render();
+  }
+
+  function applyVariant(category = "", variantId = "") {
+    const horse = sel ? byId(sel) : null;
+    if (!horse) {
+      return;
+    }
+    const variant = getVariantItems(category).find((item) => item.id === variantId);
+    if (!variant) {
+      return;
+    }
+    const choiceKey = getHorseChoiceKey(category);
+    if (horse[category] && horse[choiceKey] === variantId) {
+      horse[category] = false;
+      horse[choiceKey] = "";
+    } else {
+      horse[category] = true;
+      horse[choiceKey] = variantId;
+    }
+    activeTackCategory = category;
+    save();
+    render();
+  }
+
+  function clearVariant(category = "") {
+    const horse = sel ? byId(sel) : null;
+    if (!horse) {
+      return;
+    }
+    horse[category] = false;
+    horse[getHorseChoiceKey(category)] = "";
+    save();
+    render();
+  }
+
+  function render() {
+    if (!root || !root.isConnected) {
+      return;
+    }
+    ensureLoaded();
+    const stage = RP_STAGES[Math.min(S.stage, RP_STAGES.length - 1)];
+    const selectedHorse = sel ? byId(sel) : null;
+    const query = (selector) => root.querySelector(selector);
+
+    root.querySelectorAll("[data-rp-panel]").forEach((panel) => {
+      panel.hidden = panel.dataset.rpPanel !== view;
+    });
+    root.querySelectorAll(".rp-tab").forEach((tab) => {
+      tab.classList.toggle("is-on", tab.dataset.rpView === view);
+    });
+
+    query(".rp-world").style.transform = `scale(${zoom}) translate(${px}%,${py}%)`;
+    query(".rp-bg").style.backgroundImage = `url('${stage[0]}')`;
+    query(".rp-occluder").style.backgroundImage = `url('${stage[0]}')`;
+    query(".rp-hud-stage").textContent = stage[1];
+    query(".rp-hud-count").textContent = `${S.horses.length} horse${S.horses.length === 1 ? "" : "s"}`;
+    query(".rp-zval").textContent = `${Math.round(zoom * 100)}%`;
+    query(".rp-stage-note").textContent = stage[2];
+    root.querySelectorAll(".rp-pips i").forEach((pip, index) => {
+      pip.classList.toggle("is-on", index <= S.stage);
+    });
+
+    const world = query(".rp-world");
+    world.querySelectorAll(".rp-horse,.rp-hotspot").forEach((node) => node.remove());
+    const occluder = query(".rp-occluder");
+    S.horses.filter((horse) => !horse.stabled).forEach((horse) => {
+      const depth = 0.55 + (((horse.y - 44) / 48) * 0.8);
+      const tags = RP_TACK.filter((item) => horse[item.k]).map((item) => item.label);
+      const horseElement = document.createElement("div");
+      horseElement.className = "rp-horse";
+      horseElement.dataset.id = horse.id;
+      horseElement.style.cssText = `left:${horse.x}%;top:${horse.y}%;width:${(6.4 * depth).toFixed(2)}%;z-index:${10 + Math.round(horse.y)}`;
+      horseElement.innerHTML = `<div class="rp-sprite" style="background-image:url('${horse.src}')"></div>${tags.length ? `<div class="rp-badge">${escapeHtml(tags.join(" · "))}</div>` : ""}${horse.id === sel ? '<div class="rp-ring"></div>' : ""}`;
+      world.insertBefore(horseElement, occluder);
+    });
+
+    RP_HOTSPOTS.forEach((hotspot) => {
+      const hotspotButton = document.createElement("button");
+      hotspotButton.className = "rp-hotspot";
+      hotspotButton.dataset.rpView = hotspot.view;
+      hotspotButton.style.cssText = `left:${hotspot.x}%;top:${hotspot.y}%`;
+      hotspotButton.innerHTML = `<span class="rp-dot" style="background:${hotspot.color}"></span><span class="rp-tag">${hotspot.label}</span>`;
+      world.appendChild(hotspotButton);
+    });
+
+    const inside = S.horses.filter((horse) => horse.stabled);
+    query(".rp-inside").textContent = `${inside.length} horse${inside.length === 1 ? "" : "s"}`;
+    const totalStalls = Math.max(6, Math.ceil((inside.length + 1) / 4) * 4);
+    let stallsMarkup = "";
+    for (let index = 0; index < totalStalls; index += 1) {
+      const horse = inside[index];
+      stallsMarkup += `<div class="rp-stall${horse ? (horse.id === sel ? " is-on" : "") : " is-empty"}" data-id="${horse ? escapeHtml(horse.id) : ""}">${horse ? `<div class="rp-stall-horse" style="background-image:url('${horse.src}')"></div>` : ""}<div class="rp-rails"></div><div class="rp-rail-top"></div><div class="rp-rail-bot"></div><div class="rp-door"></div><div class="rp-plaque">${escapeHtml(horse ? horse.name : `No. ${index + 1}`)}</div></div>`;
+    }
+    query(".rp-stalls").innerHTML = stallsMarkup;
+
+    query(".rp-tackhint").textContent = selectedHorse
+      ? `Fitting tack to ${selectedHorse.name} - choose a rack, then pick a style.`
+      : "Select a horse first, then tap a rack to fit its tack.";
+    query(".rp-tackroom").style.backgroundImage = `url('${RP_ASSETS.tackRoom}')`;
+    query(".rp-tackroom").innerHTML = RP_TACK.map((item, index) => {
+      const unlocked = index < ownedTack();
+      const active = selectedHorse ? Boolean(selectedHorse[item.k]) : false;
+      return `<button class="rp-spot${active ? " is-on" : ""}${activeTackCategory === item.k ? " is-focus" : ""}${unlocked ? "" : " is-locked"}" data-k="${escapeHtml(item.k)}" style="left:${item.x}%;top:${item.y}%">${escapeHtml(item.label)}${active ? " ✓" : ""}</button>`;
+    }).join("");
+    const tackVariants = getVariantItems(activeTackCategory);
+    query(".rp-tackchoices").innerHTML = !selectedHorse
+      ? `<div class="rp-choice-empty">Select a horse to open the tack tray.</div>`
+      : tackVariants.length
+        ? `
+          <div class="rp-choice-head">
+            <strong>${escapeHtml(RP_TACK.find((item) => item.k === activeTackCategory)?.label || "Tack style")}</strong>
+            <span>Choose one style for this horse.</span>
+          </div>
+          <div class="rp-choice-grid">
+            ${tackVariants.map((variant) => `
+              <button type="button" class="rp-choice-card${selectedHorse[activeTackCategory] && selectedHorse[getHorseChoiceKey(activeTackCategory)] === variant.id ? " is-on" : ""}" data-rp-variant-category="${escapeHtml(activeTackCategory)}" data-rp-variant-id="${escapeHtml(variant.id)}">
+                ${buildSpriteCropMarkup(getVariantSheet(activeTackCategory), variant, variant.label, "rp-sprite-crop rp-sprite-crop--card")}
+                <span>${escapeHtml(variant.label)}</span>
+              </button>
+            `).join("")}
+          </div>
+          <button type="button" class="rp-btn rp-btn-ghost rp-choice-clear" data-rp-variant-clear="${escapeHtml(activeTackCategory)}">Clear ${escapeHtml(RP_TACK.find((item) => item.k === activeTackCategory)?.label || "selection")}</button>
+        `
+        : `<div class="rp-choice-empty">${escapeHtml(activeTackCategory === "saddle" ? "Saddle uses the tack-room rack for now. A separate saddle sprite can drop in later." : activeTackCategory === "lead" ? "Lead rope is tracked as fitted until a separate rope sprite is added." : activeTackCategory === "harness" ? "Harness is tracked as fitted until a dedicated sprite set is added." : "Choose a rack to open the tack tray.")}</div>`;
+
+    query(".rp-arena-stage").style.backgroundImage = `url('${RP_ASSETS.arena}')`;
+    query(".rp-arena-canvas").innerHTML = S.arenaJumps.map((jump) => {
+      const jumpMeta = getJumpMeta(jump.type);
+      if (!jumpMeta) {
+        return "";
+      }
+      return `
+        <button
+          type="button"
+          class="rp-arena-jump${jump.id === selectedArenaJumpId ? " is-on" : ""}"
+          data-rp-arena-jump="${escapeHtml(jump.id)}"
+          style="left:${jump.x}%;top:${jump.y}%;width:${(jumpMeta.arenaWidth * jump.scale).toFixed(2)}%;"
+          aria-label="${escapeHtml(jumpMeta.label)}"
+        >
+          ${buildSpriteCropMarkup(RP_JUMP_SHEET, jumpMeta, jumpMeta.label, "rp-sprite-crop rp-sprite-crop--jump")}
+        </button>
+      `;
+    }).join("");
+    query(".rp-arena-library").innerHTML = RP_JUMP_SHEET.items.map((jumpMeta) => `
+      <button type="button" class="rp-jumplib" data-rp-jump-type="${escapeHtml(jumpMeta.id)}">
+        ${buildSpriteCropMarkup(RP_JUMP_SHEET, jumpMeta, jumpMeta.label, "rp-sprite-crop rp-sprite-crop--library")}
+        <span>${escapeHtml(jumpMeta.label)}</span>
+      </button>
+    `).join("");
+    const removeButton = query("[data-rp='remove-jump']");
+    if (removeButton) {
+      removeButton.disabled = !selectedArenaJumpId;
+    }
+
+    query(".rp-sel").hidden = !selectedHorse;
+    query(".rp-empty").hidden = Boolean(selectedHorse);
+    if (selectedHorse) {
+      query(".rp-sel-thumb").style.backgroundImage = `url('${selectedHorse.src}')`;
+      query(".rp-sel-name").textContent = selectedHorse.name;
+      query(".rp-sel-breed").textContent = selectedHorse.breed;
+      query(".rp-sel-where").textContent = selectedHorse.stabled ? "In the stable aisle" : `Out in ${selectedHorse.zone || "the paddock"}`;
+      query("[data-rp='stable-toggle']").textContent = selectedHorse.stabled ? "Bring out to the property" : "Send back to the stable";
+      query(".rp-tackrows").innerHTML = RP_TACK.map((item, index) => {
+        const unlocked = index < ownedTack();
+        const active = Boolean(selectedHorse[item.k]);
+        const variantLabel = getVariantLabel(item.k, selectedHorse[getHorseChoiceKey(item.k)] || "");
+        const statusLabel = !unlocked
+          ? "Locked"
+          : active && variantLabel
+            ? variantLabel
+            : active
+              ? "Fitted"
+              : getVariantSheet(item.k)
+                ? "Choose"
+                : "Available";
+        return `<button class="rp-row${active ? " is-on" : ""}${activeTackCategory === item.k ? " is-focus" : ""}${unlocked ? "" : " is-locked"}" data-k="${escapeHtml(item.k)}"><span>${escapeHtml(item.label)}</span><span class="rp-tag2">${escapeHtml(statusLabel)}</span></button>`;
+      }).join("");
+      query(".rp-choice-summary").innerHTML = getHorseTackLabels(selectedHorse).length
+        ? `<div class="rp-pill-row">${getHorseTackLabels(selectedHorse).map((label) => `<span class="rp-pill">${escapeHtml(label)}</span>`).join("")}</div>`
+        : `<div class="rp-choice-empty rp-choice-empty--inline">No tack fitted yet.</div>`;
+    }
+
+    query(".rp-chips").innerHTML = S.horses.map((horse) => `<button class="rp-chip${horse.id === sel ? " is-on" : ""}" data-id="${escapeHtml(horse.id)}">${escapeHtml(horse.name)}</button>`).join("");
+    query(".rp-foot").textContent = view === "property"
+      ? "Drag a horse to move it. Drop it below the front wall to stand behind the fence. Use the zoom controls to look closer."
+      : view === "stable"
+        ? "Horses sent back from the property stand in their stall with their plaque below."
+        : view === "tack"
+          ? "Tack unlocks one item per completed practice session. Pick a rack, then choose a style from the tray."
+          : "Add jumps from the library, then drag them around the arena to build the course.";
+  }
+
+  function bind() {
+    if (!root || root.dataset.rpBound === "true") {
+      return;
+    }
+    root.dataset.rpBound = "true";
+    root.addEventListener("click", (event) => {
+      const target = event.target.closest("[data-rp-view],[data-rp],.rp-spot,.rp-row,.rp-chip,.rp-stall,[data-rp-variant-id],[data-rp-variant-clear],[data-rp-jump-type],[data-rp-arena-jump]");
+      if (!target || !root.contains(target)) {
+        return;
+      }
+      if (target.dataset.rpView) {
+        view = target.dataset.rpView;
+        render();
+        return;
+      }
+      if (target.dataset.rpVariantId) {
+        applyVariant(target.dataset.rpVariantCategory || "", target.dataset.rpVariantId || "");
+        return;
+      }
+      if (target.dataset.rpVariantClear) {
+        clearVariant(target.dataset.rpVariantClear || "");
+        return;
+      }
+      if (target.dataset.rpJumpType) {
+        addArenaJump(target.dataset.rpJumpType || "");
+        return;
+      }
+      if (target.dataset.rpArenaJump) {
+        selectedArenaJumpId = target.dataset.rpArenaJump || "";
+        render();
+        return;
+      }
+      if (target.classList.contains("rp-spot") || target.classList.contains("rp-row")) {
+        toggleTack(target.dataset.k || "");
+        return;
+      }
+      if (target.classList.contains("rp-chip")) {
+        sel = target.dataset.id || null;
+        render();
+        return;
+      }
+      if (target.classList.contains("rp-stall")) {
+        if (target.dataset.id) {
+          sel = target.dataset.id;
+          render();
+        }
+        return;
+      }
+
+      const action = target.dataset.rp;
+      if (action === "renovate") {
+        renovate();
+        return;
+      }
+      if (action === "reset") {
+        reset();
+        return;
+      }
+      if (action === "remove-jump") {
+        removeSelectedArenaJump();
+        return;
+      }
+      if (action === "deselect") {
+        sel = null;
+        render();
+        return;
+      }
+      if (action === "zoom-in") {
+        zoom = Math.min(3.2, zoom + 0.35);
+        clampPan();
+        render();
+        return;
+      }
+      if (action === "zoom-out") {
+        zoom = Math.max(1, zoom - 0.35);
+        clampPan();
+        render();
+        return;
+      }
+      if (action === "stable-toggle") {
+        const horse = byId(sel);
+        if (!horse) {
+          return;
+        }
+        horse.stabled = !horse.stabled;
+        if (!horse.stabled) {
+          const position = clampZone(84, 64);
+          horse.x = position.x;
+          horse.y = position.y;
+          horse.zone = position.zone;
+        }
+        save();
+        render();
+        return;
+      }
+      if (action === "session") {
+        const nextHorse = nextRosterHorse();
+        addHorse(nextHorse.id, nextHorse.name, nextHorse.label);
+      }
+    });
+
+    const stage = root.querySelector(".rp-stage");
+    stage?.addEventListener("wheel", (event) => {
+      event.preventDefault();
+      zoom = Math.max(1, Math.min(3.2, zoom - (event.deltaY * 0.0016)));
+      clampPan();
+      render();
+    }, { passive: false });
+
+    stage?.addEventListener("pointerdown", (event) => {
+      const horse = event.target.closest(".rp-horse");
+      if (horse) {
+        drag = { kind: "horse", id: horse.dataset.id || "" };
+        sel = horse.dataset.id || null;
+        render();
+      } else if (!event.target.closest(".rp-hotspot,.rp-zoom,.rp-hud")) {
+        pan = { x: event.clientX, y: event.clientY };
+      }
+      try {
+        stage.setPointerCapture(event.pointerId);
+      } catch (error) {
+        // Ignore pointer capture failures.
+      }
+    });
+
+    stage?.addEventListener("pointermove", (event) => {
+      const rect = stage.getBoundingClientRect();
+      if (drag?.kind === "horse") {
+        const cx = (((event.clientX - rect.left) / rect.width) - 0.5) / zoom + 0.5 - (px / 100);
+        const cy = (((event.clientY - rect.top) / rect.height) - 0.5) / zoom + 0.5 - (py / 100);
+        const clamped = clampZone(cx * 100, cy * 100);
+        const horse = byId(drag.id);
+        if (horse) {
+          horse.x = clamped.x;
+          horse.y = clamped.y;
+          horse.zone = clamped.zone;
+          horse.stabled = false;
+          render();
+        }
+      } else if (pan) {
+        px += (((event.clientX - pan.x) / rect.width) * 100) / zoom;
+        py += (((event.clientY - pan.y) / rect.height) * 100) / zoom;
+        pan = { x: event.clientX, y: event.clientY };
+        clampPan();
+        render();
+      }
+    });
+
+    const arenaStage = root.querySelector(".rp-arena-stage");
+    arenaStage?.addEventListener("pointerdown", (event) => {
+      const jump = event.target.closest("[data-rp-arena-jump]");
+      if (!jump) {
+        selectedArenaJumpId = "";
+        render();
+        return;
+      }
+      drag = { kind: "jump", id: jump.dataset.rpArenaJump || "" };
+      selectedArenaJumpId = jump.dataset.rpArenaJump || "";
+      render();
+      try {
+        arenaStage.setPointerCapture(event.pointerId);
+      } catch (error) {
+        // Ignore pointer capture failures.
+      }
+    });
+
+    arenaStage?.addEventListener("pointermove", (event) => {
+      if (drag?.kind !== "jump") {
+        return;
+      }
+      const rect = arenaStage.getBoundingClientRect();
+      const nextX = ((event.clientX - rect.left) / rect.width) * 100;
+      const nextY = ((event.clientY - rect.top) / rect.height) * 100;
+      const arenaJump = arenaJumpById(drag.id);
+      if (!arenaJump) {
+        return;
+      }
+      arenaJump.x = Math.max(8, Math.min(92, nextX));
+      arenaJump.y = Math.max(24, Math.min(90, nextY));
+      render();
+    });
+
+    const endPointer = () => {
+      if (drag) {
+        save();
+      }
+      drag = null;
+      pan = null;
+    };
+    stage?.addEventListener("pointerup", endPointer);
+    stage?.addEventListener("pointercancel", endPointer);
+    stage?.addEventListener("pointerleave", endPointer);
+    arenaStage?.addEventListener("pointerup", endPointer);
+    arenaStage?.addEventListener("pointercancel", endPointer);
+    arenaStage?.addEventListener("pointerleave", endPointer);
+  }
+
+  function mount(element, options = {}) {
+    root = element;
+    ensureLoaded();
+    if (options.subject) {
+      syncPracticeState(options.subject);
+    }
+    bind();
+    render();
+  }
+
+  return {
+    mount,
+    addHorse,
+    renovate,
+    reset,
+    syncPracticeState,
+    get state() {
+      ensureLoaded();
+      return S;
+    }
+  };
+})();
+
+function mountRewardProperty(subject, host) {
+  const root = host?.querySelector("#rp");
+  if (!root) {
+    return;
+  }
+  RewardProperty.mount(root, { subject });
+}
+
 function buildSpellingSurfaceTabs(activeTab) {
   const tabs = [
     { id: "session", label: "Session" },
-    { id: "paddock", label: "Paddock" },
+    { id: "property", label: "Property" },
     { id: "progress", label: "Progress" }
   ];
 
   return `
-    <div class="ss-surface-tabs" role="tablist" aria-label="Spelling views">
+    <div class="ss-surface-tabs" role="tablist" aria-label="Practice views">
       ${tabs
         .map(
           (tab) => `
@@ -8924,7 +9905,7 @@ function buildSpellingOneRibbonCard() {
   return `
     <section class="ss-side-card ss-side-card--accent">
       <p class="eyebrow">Two stages to go</p>
-      <h4>Finish tenses, then the final spelling check, to win a new horse for your stable.</h4>
+      <h4>Finish tenses, then the final spelling check, to win a new horse for your property.</h4>
     </section>
   `;
 }
@@ -9002,7 +9983,7 @@ function buildSpellingHorsePreviewCard(spelling) {
         <img src="${escapeHtml(nextHorse.image)}" alt="${escapeHtml(nextHorse.name)}" />
       </div>
       <strong>${escapeHtml(`${nextHorse.name} is waiting`)}</strong>
-      <span>${escapeHtml(`Earn the 5th ribbon to add this ${nextHorse.label} to your stable.`)}</span>
+      <span>${escapeHtml(`Earn the 5th ribbon to add this ${nextHorse.label} to your property.`)}</span>
     </section>
   `;
 }
@@ -9019,12 +10000,12 @@ function buildSpellingHomeOverview(subject, spelling) {
       <article class="ss-stage-panel">
         <div class="ss-stage-panel__head">
           <div>
-            <p class="eyebrow">Spelling Stables</p>
+            <p class="eyebrow">Practice Property</p>
             <h4>${escapeHtml(attemptComplete ? "Set complete" : isFreshSession ? "Ready to begin a new set" : `Continue with ${currentStageLabel}`)}</h4>
           </div>
           <span class="ss-stage-badge">${escapeHtml(`${ownedHorseCount} / ${SPELLING_PADDOCK_HORSES.length} horses`)}</span>
         </div>
-        <p class="ss-stage-copy">${escapeHtml(attemptComplete ? `All five stages are complete.${latestHorseMeta ? ` ${latestHorseMeta.name} is now in the stable.` : ""} Review the finished set or start a fresh one when you are ready.` : SPELLING_UNIT_SEED.intro)}</p>
+        <p class="ss-stage-copy">${escapeHtml(attemptComplete ? `All five stages are complete.${latestHorseMeta ? ` ${latestHorseMeta.name} is now on your property.` : ""} Review the finished set or start a fresh one when you are ready.` : SPELLING_UNIT_SEED.intro)}</p>
         <div class="ss-stage-actions">
           <button type="button" class="primary-button primary-button--dark" data-spelling-begin-session="true">${escapeHtml(attemptComplete ? "Review completed set" : isFreshSession ? "Start spelling session" : `Continue to ${currentStageLabel}`)}</button>
           ${attemptComplete ? '<button type="button" class="ghost-button ghost-button--small" data-spelling-reset-unit="true">Start next set</button>' : ""}
@@ -9039,7 +10020,7 @@ function buildSpellingStableHome(subject, spelling) {
   return `
     <div class="ss-home-panel ss-home-panel--stable">
       <div class="ss-main">
-        ${buildSpellingPaddockMarkup(spelling)}
+        ${buildRewardPropertyMarkup()}
       </div>
     </div>
   `;
@@ -15659,9 +16640,9 @@ function renderSpelling() {
     host.innerHTML = `
       <section class="spelling-shell spelling-shell--empty">
         <article class="spelling-empty-card">
-          <p class="eyebrow">Spelling Stables</p>
+          <p class="eyebrow">Practice Property</p>
           <h3>Open the Practice subject to train this lesson</h3>
-          <p>Spelling Stables now lives as its own subject so the horse-themed spelling practice can be selected directly from the subject list.</p>
+          <p>The horse property lives inside the Practice subject so each completed session and reward stays with that workspace.</p>
         </article>
       </section>
     `;
@@ -15676,9 +16657,12 @@ function renderSpelling() {
   const stageId = getSpellingVisibleStageId(subject);
   const stageIndex = SPELLING_STAGE_ORDER.indexOf(stageId);
   const unlockedStageIndex = Math.min(completedCount, SPELLING_STAGE_ORDER.length - 1);
-  let homeTab = String(spelling.homeTab || "stable");
+  let homeTab = String(spelling.homeTab || "property");
   if (homeTab === "review") {
     homeTab = "progress";
+  }
+  if (homeTab === "stable" || homeTab === "paddock") {
+    homeTab = "property";
   }
   const isSessionView = homeTab === "session";
   const showingCelebration = isSessionView && spelling.celebrationStageId === stageId;
@@ -15689,7 +16673,7 @@ function renderSpelling() {
   const stageScoreSummary = getSpellingStageScoreSummary(spelling);
   const overallScorePercent = getSpellingOverallScorePercent(spelling);
   const ownedHorseMeta = getSpellingOwnedHorseMeta(spelling);
-  const visibleHomeTab = homeTab === "stable" ? "paddock" : homeTab;
+  const visibleHomeTab = homeTab;
   const showSessionCompletionSummary = isSessionView
     && !showingCelebration
     && spelling.repeatCheck.completed
@@ -15824,8 +16808,8 @@ function renderSpelling() {
       </section>
     `;
 
-    setupSpellingPaddockInteractions(subject, host);
     bindSpellingNavigationInteractions(subject, host);
+    mountRewardProperty(subject, host);
     return;
   }
 
@@ -16308,7 +17292,7 @@ function renderSpelling() {
             </div>
             <span class="ss-stage-badge is-complete">Program complete</span>
           </div>
-          <p class="ss-stage-copy">${escapeHtml(`Overall score: ${overallScorePercent}%. You moved from ${getSpellingDiagnosticCorrectCount(spelling)}/${attemptWords.length} in stage 1 to ${getSpellingRepeatCorrectCount(spelling)}/${attemptWords.length} in stage 5.${earnedHorseMeta ? ` ${earnedHorseMeta.label || "A new horse"} earned for the paddock.` : ""}`)}</p>
+          <p class="ss-stage-copy">${escapeHtml(`Overall score: ${overallScorePercent}%. You moved from ${getSpellingDiagnosticCorrectCount(spelling)}/${attemptWords.length} in stage 1 to ${getSpellingRepeatCorrectCount(spelling)}/${attemptWords.length} in stage 5.${earnedHorseMeta ? ` ${earnedHorseMeta.label || "A new horse"} earned for your property.` : ""}`)}</p>
           ${earnedHorseMeta ? `
             <article class="ss-earned-horse-card">
               <img class="spelling-horse-card__image" src="${escapeHtml(earnedHorseMeta.image)}" alt="${escapeHtml(earnedHorseMeta.name)}" />
@@ -16336,7 +17320,7 @@ function renderSpelling() {
           </div>
           <div class="spelling-stage-actions spelling-stage-actions--centered">
             <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-unit="true">Start next</button>
-            <button type="button" class="primary-button primary-button--dark" data-spelling-finish-session="true">Visit the stables</button>
+            <button type="button" class="primary-button primary-button--dark" data-spelling-finish-session="true">Visit the property</button>
           </div>
         </article>
       `

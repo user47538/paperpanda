@@ -10147,3 +10147,887 @@ input[type="date"] {
     padding: 24px 20px;
   }
 }
+
+.rp-root {
+  --bg: #d7d2da;
+  --surface: #f5f2f7;
+  --ink: #2e2a33;
+  --soft: #645d6c;
+  --accent: #6e5a86;
+  --accent2: #5e7d63;
+  --line: #dad3df;
+  --line2: #c4bbcb;
+  --wood: #d8b27c;
+  --wood2: #cba167;
+  --iron: #2e2a33;
+  --brass: #e8c97e;
+  --straw1: #efe9df;
+  --straw2: #e3d9c9;
+  padding: 28px 30px 40px;
+  font-family: "Lexend", system-ui, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--spelling-line);
+  border-radius: 28px;
+}
+
+.rp-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 0 auto 16px;
+  flex-wrap: wrap;
+}
+
+.rp-eyebrow {
+  font: 600 12px/1 "Lexend", system-ui, sans-serif;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.rp-eyebrow-wood {
+  color: #8a7f6d;
+  letter-spacing: 0.16em;
+}
+
+.rp-title {
+  margin: 8px 0 4px;
+  font: 600 32px/1.1 "Lexend", system-ui, sans-serif;
+  letter-spacing: -0.02em;
+}
+
+.rp-sub {
+  max-width: 660px;
+  margin: 0;
+  font: 400 16px/1.5 "Lexend", system-ui, sans-serif;
+  color: #5d566a;
+  text-wrap: pretty;
+}
+
+.rp-acts,
+.rp-tabs,
+.rp-cols,
+.rp-sel-head,
+.rp-pips,
+.rp-chips,
+.rp-zoom {
+  display: flex;
+}
+
+.rp-acts {
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.rp-btn {
+  min-height: 44px;
+  padding: 13px 18px;
+  border: none;
+  border-radius: 13px;
+  font: 600 15px/1.2 "Lexend", system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.rp-btn-moss {
+  background: var(--accent2);
+  color: var(--surface);
+}
+
+.rp-btn-plum {
+  background: var(--accent);
+  color: var(--surface);
+}
+
+.rp-btn-dark {
+  background: var(--ink);
+  color: #e9e5ec;
+}
+
+.rp-btn-ghost {
+  border: 1.5px solid var(--line2);
+  background: transparent;
+  color: var(--soft);
+  font-weight: 500;
+}
+
+.rp-wide {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.rp-tabs {
+  gap: 9px;
+  margin: 0 auto 14px;
+  flex-wrap: wrap;
+}
+
+.rp-tab {
+  min-height: 44px;
+  padding: 11px 20px;
+  border: 1.5px solid var(--line2);
+  border-radius: 12px;
+  background: transparent;
+  color: #5d566a;
+  font: 600 15px/1.2 "Lexend", system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.rp-tab.is-on {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--surface);
+}
+
+.rp-cols {
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.rp-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.rp-rail {
+  width: 330px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.rp-stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 2.35;
+  overflow: hidden;
+  border-radius: 20px;
+  background: #cfc6d6;
+  cursor: grab;
+  touch-action: none;
+  box-shadow: 0 24px 50px -22px rgba(34, 28, 40, 0.45);
+}
+
+.rp-world {
+  position: absolute;
+  inset: 0;
+  transform-origin: 50% 50%;
+  transition: transform 0.12s ease-out;
+}
+
+.rp-bg,
+.rp-occluder {
+  position: absolute;
+  inset: 0;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+
+.rp-occluder {
+  z-index: 60;
+  clip-path: inset(80% 0 0 0);
+  pointer-events: none;
+}
+
+.rp-horse {
+  position: absolute;
+  aspect-ratio: 1.22;
+  transform: translate(-50%, -85%);
+  cursor: grab;
+  touch-action: none;
+}
+
+.rp-sprite {
+  position: absolute;
+  inset: 0;
+  background-position: center bottom;
+  background-repeat: no-repeat;
+  background-size: contain;
+  pointer-events: none;
+  filter: drop-shadow(0 6px 6px rgba(40, 30, 50, 0.25));
+}
+
+.rp-badge {
+  position: absolute;
+  left: 50%;
+  top: -16%;
+  z-index: 2;
+  transform: translateX(-50%);
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--surface);
+  font: 600 9px/1.2 "Lexend", system-ui, sans-serif;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 3px 8px -3px rgba(0, 0, 0, 0.5);
+}
+
+.rp-ring {
+  position: absolute;
+  left: 50%;
+  bottom: -6px;
+  width: 74%;
+  height: 14px;
+  transform: translateX(-50%);
+  border: 2.5px solid var(--accent2);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.rp-hotspot {
+  position: absolute;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.rp-dot {
+  width: 34px;
+  height: 34px;
+  border: 3px solid var(--surface);
+  border-radius: 50%;
+  box-shadow: 0 6px 16px -4px rgba(0, 0, 0, 0.5);
+}
+
+.rp-tag {
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--surface);
+  font: 700 10px/1.2 "Lexend", system-ui, sans-serif;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px -4px rgba(0, 0, 0, 0.5);
+}
+
+.rp-hud {
+  position: absolute;
+  left: 16px;
+  top: 16px;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(245, 242, 247, 0.92);
+  font: 600 14px/1.2 "Lexend", system-ui, sans-serif;
+  box-shadow: 0 6px 16px -8px rgba(0, 0, 0, 0.4);
+}
+
+.rp-hud i {
+  width: 1px;
+  height: 18px;
+  background: var(--line);
+}
+
+.rp-hud-count {
+  font-weight: 500;
+  color: var(--soft);
+}
+
+.rp-zoom {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 80;
+  align-items: center;
+  gap: 8px;
+}
+
+.rp-zbtn {
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: 12px;
+  background: rgba(46, 42, 51, 0.85);
+  color: var(--surface);
+  font: 600 20px/1 "Lexend", system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.rp-zval {
+  min-width: 64px;
+  padding: 11px 8px;
+  border-radius: 12px;
+  background: rgba(245, 242, 247, 0.92);
+  text-align: center;
+  font: 600 14px/1.2 "Lexend", system-ui, sans-serif;
+}
+
+.rp-aisle {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 2.35;
+  overflow-y: auto;
+  padding: 22px;
+  border-radius: 20px;
+  background: linear-gradient(var(--straw1), var(--straw2));
+  box-shadow: 0 24px 50px -22px rgba(34, 28, 40, 0.45);
+  scrollbar-width: none;
+}
+
+.rp-aisle::-webkit-scrollbar {
+  width: 0;
+}
+
+.rp-aisle-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.rp-aisle-title {
+  font: 600 21px/1.2 "Lexend", system-ui, sans-serif;
+  color: #3b3226;
+}
+
+.rp-aisle-hint {
+  font: 500 14px/1.4 "Lexend", system-ui, sans-serif;
+  color: #6f6455;
+}
+
+.rp-stalls {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.rp-stall {
+  position: relative;
+  aspect-ratio: 1.55;
+  overflow: hidden;
+  border: 3px solid var(--wood2);
+  border-radius: 14px;
+  background: #efe7d6;
+  container-type: inline-size;
+  cursor: pointer;
+  box-shadow: 0 8px 18px -12px rgba(60, 45, 30, 0.6);
+}
+
+.rp-stall.is-empty {
+  border-color: #d2b98c;
+  cursor: default;
+}
+
+.rp-stall.is-on {
+  border-color: var(--accent2);
+}
+
+.rp-stall-horse {
+  position: absolute;
+  left: 6%;
+  right: 4%;
+  top: 2%;
+  bottom: 20%;
+  background-position: center bottom;
+  background-repeat: no-repeat;
+  background-size: auto 100%;
+}
+
+.rp-rails {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 44%;
+  height: 24%;
+  background: repeating-linear-gradient(90deg, var(--iron) 0 2.6cqw, transparent 2.6cqw 8cqw);
+}
+
+.rp-rail-top,
+.rp-rail-bot {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 4%;
+  background: var(--iron);
+}
+
+.rp-rail-top {
+  top: 44%;
+}
+
+.rp-rail-bot {
+  top: 64%;
+}
+
+.rp-door {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 32%;
+  background: repeating-linear-gradient(90deg, var(--wood) 0 11cqw, var(--wood2) 11cqw 12.4cqw);
+}
+
+.rp-plaque {
+  position: absolute;
+  left: 50%;
+  bottom: 6%;
+  z-index: 5;
+  transform: translateX(-50%);
+  padding: 1.6cqw 5cqw;
+  border: 1.5px solid #b99a5e;
+  border-radius: 7px;
+  background: var(--brass);
+  color: #4a3a22;
+  font: 700 clamp(9px, 7cqw, 16px)/1.2 "Lexend", system-ui, sans-serif;
+  white-space: nowrap;
+}
+
+.rp-stall.is-empty .rp-plaque {
+  background: #dcd1bb;
+}
+
+.rp-tackwrap {
+  width: min(100%, 820px);
+  margin: 0 auto;
+}
+
+.rp-tackhint {
+  margin-bottom: 12px;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: #3b3226;
+  font: 500 16px/1.5 "Lexend", system-ui, sans-serif;
+}
+
+.rp-tackroom {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1.145;
+  overflow: hidden;
+  border-radius: 20px;
+  container-type: inline-size;
+  box-shadow: 0 24px 50px -22px rgba(34, 28, 40, 0.45);
+  background:
+    linear-gradient(180deg, rgba(247, 241, 232, 0.92) 0%, rgba(225, 210, 190, 0.92) 100%),
+    repeating-linear-gradient(90deg, rgba(121, 92, 61, 0.2) 0 7%, rgba(121, 92, 61, 0) 7% 16%);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+
+.rp-spot {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  padding: 1.4cqw 2.2cqw;
+  border: 1.5px solid rgba(46, 42, 51, 0.35);
+  border-radius: 999px;
+  background: rgba(245, 242, 247, 0.96);
+  color: var(--ink);
+  font: 600 clamp(13px, 2.2cqw, 19px)/1.25 "Lexend", system-ui, sans-serif;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: 0 4px 12px -7px rgba(0, 0, 0, 0.7);
+}
+
+.rp-spot.is-on {
+  border-color: var(--accent2);
+  background: var(--accent2);
+  color: var(--surface);
+}
+
+.rp-spot.is-focus,
+.rp-row.is-focus {
+  box-shadow: 0 0 0 3px rgba(110, 90, 134, 0.2);
+}
+
+.rp-spot.is-locked {
+  background: rgba(232, 227, 219, 0.95);
+  color: #a79eb0;
+  cursor: not-allowed;
+}
+
+.rp-tackchoices,
+.rp-arenawrap {
+  margin-top: 14px;
+}
+
+.rp-tackchoices,
+.rp-arenahint,
+.rp-arena-actions {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(245, 242, 247, 0.95);
+}
+
+.rp-tackchoices {
+  padding: 16px;
+}
+
+.rp-choice-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.rp-choice-head strong {
+  font: 600 15px/1.3 "Lexend", system-ui, sans-serif;
+}
+
+.rp-choice-head span,
+.rp-choice-empty {
+  color: var(--soft);
+  font: 500 14px/1.45 "Lexend", system-ui, sans-serif;
+}
+
+.rp-choice-empty {
+  padding: 10px 4px;
+}
+
+.rp-choice-empty--inline {
+  padding: 12px 0 4px;
+}
+
+.rp-choice-grid,
+.rp-arena-library {
+  display: grid;
+  gap: 10px;
+}
+
+.rp-choice-grid {
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+}
+
+.rp-choice-card,
+.rp-jumplib,
+.rp-arena-jump {
+  border: 1.5px solid var(--line);
+  background: #faf8fb;
+  cursor: pointer;
+}
+
+.rp-choice-card,
+.rp-jumplib {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 14px;
+  text-align: left;
+  color: var(--ink);
+  font: 600 13px/1.35 "Lexend", system-ui, sans-serif;
+}
+
+.rp-choice-card.is-on,
+.rp-jumplib:hover {
+  border-color: var(--accent2);
+  background: color-mix(in srgb, var(--accent2) 10%, #faf8fb);
+}
+
+.rp-choice-clear {
+  margin-top: 12px;
+}
+
+.rp-sprite-crop {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  aspect-ratio: calc(var(--sprite-width) / var(--sprite-height));
+}
+
+.rp-sprite-crop img {
+  position: absolute;
+  left: calc(var(--sprite-x) * -1);
+  top: calc(var(--sprite-y) * -1);
+  width: var(--sheet-width);
+  height: var(--sheet-height);
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+
+.rp-sprite-crop--card,
+.rp-sprite-crop--library {
+  border-radius: 12px;
+  background: #fffdfd;
+}
+
+.rp-sprite-crop--jump {
+  width: 100%;
+  pointer-events: none;
+}
+
+.rp-arenahint {
+  padding: 12px 16px;
+  color: #3b3226;
+  font: 500 16px/1.5 "Lexend", system-ui, sans-serif;
+}
+
+.rp-arena-stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 2.35;
+  margin-top: 12px;
+  overflow: hidden;
+  border-radius: 20px;
+  background-color: #d9d3c8;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  box-shadow: 0 24px 50px -22px rgba(34, 28, 40, 0.45);
+}
+
+.rp-arena-canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.rp-arena-jump {
+  position: absolute;
+  transform: translate(-50%, -86%);
+  border: none;
+  border-radius: 12px;
+  padding: 0;
+  background: transparent;
+  touch-action: none;
+}
+
+.rp-arena-jump.is-on {
+  filter: drop-shadow(0 0 0 rgba(0, 0, 0, 0));
+  box-shadow: 0 0 0 3px rgba(110, 90, 134, 0.28);
+}
+
+.rp-arena-actions {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 14px;
+}
+
+.rp-arena-library {
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+}
+
+.rp-pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.rp-pill {
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: rgba(110, 90, 134, 0.12);
+  color: var(--accent);
+  font: 600 12px/1.2 "Lexend", system-ui, sans-serif;
+}
+
+.rp-card {
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface);
+}
+
+.rp-empty {
+  border-style: dashed;
+  border-color: var(--line2);
+}
+
+.rp-card-t {
+  margin: 0 0 6px;
+  font: 600 16px/1.3 "Lexend", system-ui, sans-serif;
+}
+
+.rp-card-p {
+  margin: 0 0 14px;
+  color: var(--soft);
+  font: 400 14px/1.5 "Lexend", system-ui, sans-serif;
+}
+
+.rp-pips {
+  gap: 6px;
+}
+
+.rp-pips i {
+  flex: 1;
+  height: 8px;
+  border-radius: 99px;
+  background: var(--line);
+}
+
+.rp-pips i.is-on {
+  background: var(--accent2);
+}
+
+.rp-sel-head {
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.rp-sel-thumb {
+  width: 64px;
+  height: 64px;
+  flex: none;
+  border-radius: 14px;
+  background: #e9e5ec;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+}
+
+.rp-sel-name {
+  font: 600 18px/1.2 "Lexend", system-ui, sans-serif;
+}
+
+.rp-sel-breed {
+  color: var(--soft);
+  font: 500 14px/1.4 "Lexend", system-ui, sans-serif;
+}
+
+.rp-sel-where {
+  color: var(--accent2);
+  font: 500 13px/1.4 "Lexend", system-ui, sans-serif;
+}
+
+.rp-label {
+  margin-bottom: 10px;
+  color: var(--accent);
+  font: 600 12px/1.2 "Lexend", system-ui, sans-serif;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.rp-tackrows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rp-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 11px 14px;
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  background: #faf8fb;
+  color: var(--ink);
+  text-align: left;
+  font: 600 15px/1.25 "Lexend", system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.rp-row.is-on {
+  border-color: var(--accent2);
+  background: color-mix(in srgb, var(--accent2) 12%, #faf8fb);
+}
+
+.rp-row.is-locked {
+  color: #a79eb0;
+  cursor: not-allowed;
+}
+
+.rp-tag2 {
+  color: #8b8394;
+  font: 600 11px/1.2 "Lexend", system-ui, sans-serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.rp-row.is-on .rp-tag2 {
+  color: var(--accent2);
+}
+
+.rp-row.is-locked .rp-tag2 {
+  color: #b6aebf;
+}
+
+.rp-chips {
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.rp-chip {
+  min-height: 44px;
+  padding: 11px 14px;
+  border: 1.5px solid var(--line);
+  border-radius: 999px;
+  background: #faf8fb;
+  color: var(--ink);
+  font: 600 14px/1.2 "Lexend", system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.rp-chip.is-on {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--surface);
+}
+
+.rp-foot {
+  display: inline-block;
+  margin-top: 12px;
+  padding: 9px 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #ede9f0;
+  color: #5d566a;
+  font: 500 14px/1.5 "Lexend", system-ui, sans-serif;
+}
+
+@media (max-width: 900px) {
+  .rp-root {
+    padding: 22px 18px 28px;
+  }
+
+  .rp-cols {
+    flex-direction: column;
+  }
+
+  .rp-rail {
+    width: 100%;
+  }
+}
+
+@media (max-width: 640px) {
+  .rp-tabs,
+  .rp-acts {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .rp-tab,
+  .rp-btn {
+    width: 100%;
+  }
+
+  .rp-hud {
+    left: 10px;
+    top: 10px;
+    right: 10px;
+    justify-content: center;
+  }
+
+  .rp-zoom {
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+    justify-content: center;
+  }
+}
