@@ -3581,7 +3581,7 @@ function renderSubjectLanding() {
   if (!openDocument && subject.id === "spelling") {
     const writingSubject = state.subjects.find((item) => item.id === "english") || null;
     const spellingCount = getSpellingPendingActivityCount(subject);
-    const grammarCount = writingSubject ? getSubjectGrammarPendingSessionCount(writingSubject) : 0;
+    const grammarCount = getSubjectGrammarPendingSessionCount(subject);
     const writingCount = writingSubject ? getSubjectWritingPendingSectionCount(writingSubject) : 0;
 
     host.innerHTML = `
@@ -4368,7 +4368,7 @@ function openSubjectLandingArea(subjectId, area) {
   }
 
   state.subjectWorkspaceReturnLandingSubjectId = subjectId;
-  if (area === "writing" || area === "grammar") {
+  if (area === "writing") {
     state.selectedSubjectId = "english";
     expandSubjectWorkspace(area);
     return;
@@ -4383,7 +4383,7 @@ function openFocusLaunchpadArea(subject, area) {
     return;
   }
 
-  if (area === "writing" || area === "grammar") {
+  if (area === "writing") {
     state.selectedSubjectId = "english";
     expandSubjectWorkspace(area);
     return;
@@ -4403,6 +4403,17 @@ function shouldUseSpellingFocusUi(subject = getSelectedSubject()) {
     state.currentView === "subjects" &&
     subject.id === "spelling" &&
     state.activeSubjectTab === "spelling" &&
+    state.subjectWorkspaceExpanded &&
+    state.subjectWorkspaceExpandedSubjectId === subject.id
+  );
+}
+
+function shouldUseGrammarFocusUi(subject = getSelectedSubject()) {
+  return Boolean(
+    subject &&
+    state.currentView === "subjects" &&
+    subject.id === "spelling" &&
+    state.activeSubjectTab === "grammar" &&
     state.subjectWorkspaceExpanded &&
     state.subjectWorkspaceExpandedSubjectId === subject.id
   );
@@ -4487,12 +4498,13 @@ function renderFocusMode() {
   const subject = getSelectedSubject();
   const spellingLaunchpad = shouldShowSpellingLaunchpad(subject);
   const spellingFocus = shouldUseSpellingFocusUi(subject);
+  const grammarFocus = shouldUseGrammarFocusUi(subject);
   const askOpen = spellingFocus && state.focusAskOpen;
-  const drilledIn = spellingFocus && !askOpen;
+  const drilledIn = (spellingFocus && !askOpen) || grammarFocus;
   const showWorkspaceBack = Boolean(
     state.currentView === "subjects" &&
     state.subjectWorkspaceExpanded &&
-    state.subjectWorkspaceReturnLandingSubjectId
+    (state.subjectWorkspaceReturnLandingSubjectId || spellingFocus || grammarFocus)
   );
 
   elements.subjectsView?.classList.toggle("focus-launchpad-open", spellingLaunchpad);
@@ -4599,9 +4611,9 @@ function renderDockContext() {
   if (state.activeSubjectTab === "grammar") {
     const grammar = getSubjectGrammarState(subject);
     elements.dockContextTitle.textContent = "Grammar";
-    elements.dockContextBody.innerHTML = subject.id === "english"
+    elements.dockContextBody.innerHTML = subject.id === "spelling"
       ? `<article class="dock-tile dock-tile--mint"><div class="dock-tile__copy"><strong>${escapeHtml(`${grammar.done}/${GP_SESSIONS.length} sessions complete`)}</strong><span>${escapeHtml(grammar.done < GP_SESSIONS.length ? `Session ${grammar.done + 1} is ready to start.` : "All current grammar sessions are complete.")}</span></div></article>`
-      : `<div class="empty-state empty-state--compact">Open English to continue the grammar sessions.</div>`;
+      : `<div class="empty-state empty-state--compact">Open the Practice subject to continue the grammar sessions.</div>`;
     return;
   }
 
@@ -6080,7 +6092,7 @@ function createDefaultWritingState(subjectId = "") {
 }
 
 function createDefaultGrammarState(subjectId = "") {
-  const enabled = subjectId === "english";
+  const enabled = subjectId === "spelling";
   return {
     enabled,
     done: 0,
@@ -6562,6 +6574,26 @@ function getSubjectGrammarState(subject) {
     return createDefaultGrammarState("");
   }
   subject.grammar = normaliseGrammarState(subject.grammar, subject.id);
+  if (
+    subject.id === "spelling" &&
+    subject.grammar.done === 0 &&
+    !subject.grammar.audioHeard.length &&
+    !Object.keys(subject.grammar.skills).length &&
+    !subject.grammar.results.length
+  ) {
+    const legacyEnglish = state.subjects.find((item) => item.id === "english");
+    if (legacyEnglish?.grammar) {
+      const migrated = normaliseGrammarState(legacyEnglish.grammar, "spelling");
+      if (
+        migrated.done > 0 ||
+        migrated.audioHeard.length ||
+        Object.keys(migrated.skills).length ||
+        migrated.results.length
+      ) {
+        subject.grammar = migrated;
+      }
+    }
+  }
   return subject.grammar;
 }
 
@@ -10021,9 +10053,9 @@ function mountRewardProperty(subject, host) {
     return;
   }
   const practiceSubject = state.subjects.find((item) => item.id === "spelling") || subject;
-  const englishSubject = state.subjects.find((item) => item.id === "english") || subject;
+  const grammarSubject = state.subjects.find((item) => item.id === "spelling") || subject;
   if (RewardProperty.setGrammarSessions) {
-    RewardProperty.setGrammarSessions(getSubjectGrammarState(englishSubject).done);
+    RewardProperty.setGrammarSessions(getSubjectGrammarState(grammarSubject).done);
   }
   if (RewardProperty.syncPracticeState) {
     RewardProperty.syncPracticeState(practiceSubject);
@@ -10031,7 +10063,7 @@ function mountRewardProperty(subject, host) {
   RewardProperty.mount(root, {
     subject: practiceSubject,
     practiceSubject,
-    grammarSessions: getSubjectGrammarState(englishSubject).done
+    grammarSessions: getSubjectGrammarState(grammarSubject).done
   });
 }
 
@@ -12669,9 +12701,9 @@ function getSubjectTabCounts(subject) {
 
 function getAvailableSubjectTabs(subject) {
   return subject?.id === "spelling"
-    ? ["spelling"]
+    ? ["spelling", "grammar"]
     : subject?.id === "english"
-      ? ["reader", "grammar", "writing", "homework", "watch", "assessments"]
+      ? ["reader", "writing", "homework", "watch", "assessments"]
       : ["reader", "homework", "watch", "assessments"];
 }
 
@@ -12686,10 +12718,6 @@ function getPreferredSubjectTab(subject) {
     !counts.assessments
   ) {
     return "spelling";
-  }
-
-  if (subject?.id === "english" && counts.grammar) {
-    return "grammar";
   }
 
   return getAvailableSubjectTabs(subject)[0] || "reader";
@@ -16924,8 +16952,8 @@ function renderGrammar() {
       <section class="gp-shell-empty">
         <article class="gp-empty-card">
           <p class="eyebrow">Grammar</p>
-          <h3>Open English to work through grammar sessions</h3>
-          <p>The grammar program lives in the English workspace so session progress, skill tracking, and renovation rewards stay linked.</p>
+          <h3>Open the Practice subject to work through grammar sessions</h3>
+          <p>The grammar program now sits inside Practice so its session flow and property rewards stay together.</p>
         </article>
       </section>
     `;
@@ -18092,7 +18120,7 @@ function renderPractice() {
 }
 
 function buildPracticeGrammarSpotlight(subject) {
-  if (subject?.id !== "english") {
+  if (subject?.id !== "spelling") {
     return "";
   }
 
@@ -20223,8 +20251,8 @@ elements.focusBackButton?.addEventListener("click", () => {
   state.focusArea = null;
   if (state.subjectWorkspaceReturnLandingSubjectId) {
     state.selectedSubjectId = state.subjectWorkspaceReturnLandingSubjectId;
-    resetSubjectWorkspaceView();
   }
+  resetSubjectWorkspaceView();
   render();
 });
 elements.subjectsView?.addEventListener("click", (event) => {

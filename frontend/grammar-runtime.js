@@ -1148,7 +1148,6 @@ export function createGrammarProgram({
               <div class="gp-eyebrow-soft">English · Year 7</div>
               <div class="gp-h1">Grammar</div>
             </div>
-            <button type="button" class="gp-pill-btn" data-gp-tab="property">Property</button>
           </header>
           <div class="gp-card gp-progress">
             <div class="gp-row-baseline">
@@ -1632,15 +1631,37 @@ export function createGrammarProgram({
       `;
     }
 
+    function buildSurfaceTabs() {
+      const tabs = [
+        { id: "hub", label: "Session" },
+        { id: "property", label: "Property" },
+        { id: "progress", label: "Progress" }
+      ];
+
+      return `
+        <div class="ss-surface-tabs" role="tablist" aria-label="Grammar views">
+          ${tabs
+            .map(
+              (entry) => `
+                <button
+                  type="button"
+                  class="ss-surface-tab${tab === entry.id ? " is-active" : ""}"
+                  data-gp-tab="${entry.id}"
+                >
+                  ${escapeHtml(entry.label)}
+                </button>
+              `
+            )
+            .join("")}
+        </div>
+      `;
+    }
+
     function buildShell(contentMarkup) {
       return `
         <section class="gp-root" id="gp">
+          ${buildSurfaceTabs()}
           ${contentMarkup}
-          <nav class="gp-tabs">
-            <button type="button" class="gp-tab${tab === "hub" ? " is-on" : ""}" data-gp-tab="hub"><i class="gp-ic-sq"></i><span>Sessions</span></button>
-            <button type="button" class="gp-tab${tab === "property" ? " is-on" : ""}" data-gp-tab="property"><i class="gp-ic-prop"></i><span>Property</span></button>
-            <button type="button" class="gp-tab${tab === "progress" ? " is-on" : ""}" data-gp-tab="progress"><i class="gp-ic-cir"></i><span>Progress</span></button>
-          </nav>
         </section>
       `;
     }
