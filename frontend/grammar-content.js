@@ -1,9 +1,9 @@
 export const GP_SESSIONS = [
   { n: 1, title: "Fix the Paragraph", meta: "Punctuation · drag-and-drop", act: "fix", content: "para1" },
-  { n: 2, title: "Find the Nouns", meta: "Nouns · floating-word game", act: "game", content: "noun" },
+  { n: 2, title: "Find the Nouns", meta: "Nouns · 10 bubble words", act: "pick", content: "noun" },
   { n: 3, title: "What's Wrong?", meta: "Correction · 10 questions", act: "mc", content: "correct1" },
   { n: 4, title: "Comprehension 1", meta: "Short story · 6 questions", act: "comp", content: "passage1" },
-  { n: 5, title: "Find the Verbs", meta: "Verbs · floating-word game", act: "game", content: "verb" },
+  { n: 5, title: "Find the Verbs", meta: "Verbs · 10 bubble words", act: "pick", content: "verb" },
   { n: 6, title: "When Did It Happen?", meta: "Tense · selector", act: "tense", content: "tense1" },
   { n: 7, title: "Write a Sentence", meta: "Construction · writing", act: "write", content: "write1" },
   { n: 8, title: "Find the Adjectives", meta: "Adjectives · floating-word", act: "game", content: "adjective" },
@@ -57,9 +57,9 @@ export const GP_TERMS = {
     audioText: "A noun names a person, a place, a thing or an idea. Rider is a noun. Gate is a noun. Courage is a noun, even though you cannot touch it. In this game you will tap only the nouns.",
     instruction: "Tap the nouns",
     rounds: [
-      [["horse", 1], ["quickly", 0], ["saddle", 1], ["jumped", 0], ["barn", 1], ["softly", 0], ["rider", 1], ["field", 1]],
-      [["paddock", 1], ["carefully", 0], ["halter", 1], ["green", 0], ["fence", 1], ["trotted", 0], ["groom", 1], ["bucket", 1]],
-      [["courage", 1], ["gently", 0], ["freedom", 1], ["brave", 0], ["silence", 1], ["eagerly", 0], ["journey", 1], ["kindness", 1]]
+      [["horse", 1], ["quickly", 0], ["saddle", 1], ["jumped", 0], ["barn", 1], ["softly", 0], ["rider", 1], ["field", 1], ["stable", 1], ["bright", 0]],
+      [["paddock", 1], ["carefully", 0], ["halter", 1], ["green", 0], ["fence", 1], ["trotted", 0], ["groom", 1], ["bucket", 1], ["arena", 1], ["gentle", 0]],
+      [["courage", 1], ["gently", 0], ["freedom", 1], ["brave", 0], ["silence", 1], ["eagerly", 0], ["journey", 1], ["kindness", 1], ["friendship", 1], ["restless", 0]]
     ]
   },
   verb: {
@@ -69,9 +69,9 @@ export const GP_TERMS = {
     audioText: "A verb tells you what someone or something does. Trots is a verb. Lifted is a verb. Will ride is a verb group. In this game you will tap only the verbs.",
     instruction: "Tap the verbs",
     rounds: [
-      [["gallops", 1], ["saddle", 0], ["brushed", 1], ["barn", 0], ["jumps", 1], ["quiet", 0], ["feeds", 1], ["climbed", 1]],
-      [["arrived", 1], ["paddock", 0], ["whinnied", 1], ["muddy", 0], ["carried", 1], ["gate", 0], ["trotted", 1], ["listened", 1]],
-      [["hesitated", 1], ["gentle", 0], ["remembered", 1], ["patient", 0], ["balanced", 1], ["proudly", 0], ["encouraged", 1], ["struggled", 1]]
+      [["gallops", 1], ["saddle", 0], ["brushed", 1], ["barn", 0], ["jumps", 1], ["quiet", 0], ["feeds", 1], ["climbed", 1], ["steady", 0], ["waited", 1]],
+      [["arrived", 1], ["paddock", 0], ["whinnied", 1], ["muddy", 0], ["carried", 1], ["gate", 0], ["trotted", 1], ["listened", 1], ["gentle", 0], ["leaned", 1]],
+      [["hesitated", 1], ["gentle", 0], ["remembered", 1], ["patient", 0], ["balanced", 1], ["proudly", 0], ["encouraged", 1], ["struggled", 1], ["rested", 1], ["careful", 0]]
     ]
   },
   adjective: {

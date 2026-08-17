@@ -153,7 +153,7 @@ export function createGrammarProgram({
 
     function getNextSessionLabel() {
       const next = GP_SESSIONS[Math.min(G.done, GP_SESSIONS.length - 1)];
-      return next ? `Session ${next.n} · ${next.title}` : "All current sessions complete";
+      return next ? next.title : "All current sessions complete";
     }
 
     function getRewardCopy() {
@@ -217,7 +217,7 @@ export function createGrammarProgram({
       if (!cfg) {
         return "";
       }
-      if (cfg.act === "game" && !hasHeard(cfg.content)) {
+      if ((cfg.act === "game" || cfg.act === "pick") && !hasHeard(cfg.content)) {
         return cfg.content;
       }
       const introMap = { 9: "compare", 14: "purpose" };
@@ -267,7 +267,7 @@ export function createGrammarProgram({
     }
 
     function getIntroStartLabel() {
-      if (sessionConfig?.act === "game") {
+      if (sessionConfig?.act === "game" || sessionConfig?.act === "pick") {
         return "Start round 1";
       }
       if (sessionConfig?.act === "comp") {
@@ -279,6 +279,9 @@ export function createGrammarProgram({
     function getIntroListenCopy() {
       if (sessionConfig?.act === "game") {
         return "You need to hear this once before the game.";
+      }
+      if (sessionConfig?.act === "pick") {
+        return "You need to hear this once before the bubble round.";
       }
       if (sessionConfig?.act === "comp") {
         return "You need to hear this once before the questions.";
@@ -388,6 +391,9 @@ export function createGrammarProgram({
       }
       if (sessionConfig.act === "mc") {
         return { items: getMcItems(), i: 0, picked: null, attempts: 0, right: 0, feedback: "" };
+      }
+      if (sessionConfig.act === "pick") {
+        return { rounds: GP_TERMS[sessionConfig.content]?.rounds || [], round: 0, selected: [], checked: false, score: 0, wrong: 0, roundScores: [], missed: [], feedback: "", perfect: false };
       }
       if (sessionConfig.act === "tense") {
         return { items: GP_TENSE[sessionConfig.content] || [], i: 0, picked: null, attempts: 0, right: 0, feedback: "" };
@@ -720,6 +726,10 @@ export function createGrammarProgram({
       return activity?.items?.[activity.i] || null;
     }
 
+    function getCurrentPickRound() {
+      return activity?.rounds?.[activity.round] || [];
+    }
+
     function canAdvanceChoice(act = sessionConfig?.act, item = getCurrentActivityItem()) {
       if (!item || !activity) {
         return false;
@@ -806,6 +816,86 @@ export function createGrammarProgram({
       activity.subjectPick = null;
       activity.verbPick = null;
       activity.choices = {};
+      paint();
+    }
+
+    function pickBubbleWord(index) {
+      if (!activity || activity.checked) {
+        return;
+      }
+      const selected = new Set(activity.selected || []);
+      if (selected.has(index)) {
+        selected.delete(index);
+      } else {
+        selected.add(index);
+      }
+      activity.selected = [...selected].sort((left, right) => left - right);
+      activity.feedback = "";
+      paint();
+    }
+
+    function submitPick() {
+      if (!activity) {
+        return;
+      }
+      const round = getCurrentPickRound();
+      if (!round.length) {
+        return;
+      }
+      if (activity.checked) {
+        const totalTargets = activity.rounds.reduce((sum, items) => sum + items.filter((entry) => entry[1]).length, 0);
+        if (activity.round >= activity.rounds.length - 1) {
+          finishSession(activity.score, totalTargets, {
+            roundScores: [...activity.roundScores],
+            missed: [...new Set(activity.missed)]
+          });
+          return;
+        }
+        activity.round += 1;
+        activity.selected = [];
+        activity.checked = false;
+        activity.feedback = "";
+        activity.perfect = false;
+        paint();
+        return;
+      }
+      if (!activity.selected.length) {
+        activity.feedback = "Tap the matching bubble words first.";
+        paint();
+        return;
+      }
+      const chosen = new Set(activity.selected);
+      let roundScore = 0;
+      let wrongSelections = 0;
+      const missedWords = [];
+      round.forEach(([word, isTarget], index) => {
+        const picked = chosen.has(index);
+        if (isTarget && picked) {
+          roundScore += 1;
+          tallySkill(`${sessionConfig.content}s`, true);
+          return;
+        }
+        if (isTarget && !picked) {
+          missedWords.push(word);
+          tallySkill(`${sessionConfig.content}s`, false);
+          return;
+        }
+        if (!isTarget && picked) {
+          wrongSelections += 1;
+          tallySkill(`${sessionConfig.content}s`, false);
+        }
+      });
+      activity.score += roundScore;
+      activity.wrong += wrongSelections + missedWords.length;
+      activity.roundScores[activity.round] = roundScore;
+      activity.missed = [...activity.missed, ...missedWords];
+      activity.checked = true;
+      activity.perfect = !wrongSelections && !missedWords.length;
+      activity.feedback = !wrongSelections && !missedWords.length
+        ? "Nice spotting — you found every target word."
+        : missedWords.length
+          ? `${missedWords.join(", ")} still match the target word group.`
+          : "One or more chosen bubbles do not match the target word group.";
       paint();
     }
 
@@ -1076,7 +1166,7 @@ export function createGrammarProgram({
       }
       if (note) {
         note.textContent = audio.done
-          ? (sessionConfig?.act === "game" ? "Three rounds: easy, standard, challenge." : "The explanation is complete. You can begin now.")
+          ? (sessionConfig?.act === "game" ? "Three rounds: easy, standard, challenge." : sessionConfig?.act === "pick" ? "Three bubble rounds are ready." : "The explanation is complete. You can begin now.")
           : "START unlocks when the explanation finishes.";
       }
     }
@@ -1121,26 +1211,9 @@ export function createGrammarProgram({
       }).join("");
     }
 
-    function buildSessionList() {
-      return GP_SESSIONS.map((cfg, index) => {
-        const isDone = cfg.n <= G.done;
-        const isCurrent = cfg.n === Math.min(GP_SESSIONS.length, G.done + 1);
-        const actionLabel = isDone ? "Done" : isCurrent ? "Start" : "Open";
-        return `
-          <button type="button" class="gp-session${isDone ? " is-done" : ""}${isCurrent ? " is-current" : ""}" data-gp-open-session="${index}">
-            <span class="gp-num">${escapeHtml(String(cfg.n))}</span>
-            <span class="gp-session-text">
-              <span class="gp-session-title">${escapeHtml(cfg.title)}</span>
-              <span class="gp-session-meta">${escapeHtml(cfg.meta)}</span>
-            </span>
-            <span class="gp-pill gp-pill-plum">${escapeHtml(actionLabel)}</span>
-          </button>
-        `;
-      }).join("");
-    }
-
     function buildHubView() {
-      const nextSessionNumber = Math.min(GP_SESSIONS.length, G.done + 1);
+      const nextSession = G.done < GP_SESSIONS.length ? GP_SESSIONS[G.done] : null;
+      const latestSession = G.done > 0 ? GP_SESSIONS[Math.min(G.done - 1, GP_SESSIONS.length - 1)] : null;
       return `
         <div class="gp-view" data-gp-view="hub">
           <header class="gp-head">
@@ -1150,15 +1223,20 @@ export function createGrammarProgram({
             </div>
           </header>
           <div class="gp-card gp-progress">
-            <div class="gp-row-baseline">
-              <div class="gp-strong">${escapeHtml(G.done < GP_SESSIONS.length ? `Session ${nextSessionNumber} next` : "All current sessions complete")}</div>
-              <div class="gp-meta">${escapeHtml(`${G.done} of ${GP_SESSIONS.length} done`)}</div>
-            </div>
+            <div class="gp-eyebrow">Session</div>
+            <div class="gp-strong">${escapeHtml(nextSession ? nextSession.title : "All current grammar sessions complete")}</div>
+            <div class="gp-meta">${escapeHtml(nextSession ? nextSession.meta : "You can review the latest session, visit Property, or check Progress.")}</div>
             <div class="gp-bar"><div class="gp-bar-fill" style="width:${Math.round((G.done / GP_SESSIONS.length) * 100)}%"></div></div>
             <div class="gp-next-reward gp-meta">${escapeHtml(getRewardCopy())}</div>
+            ${latestSession ? `<div class="gp-fb is-ok">${escapeHtml(`${latestSession.title} is complete. ${nextSession ? `${nextSession.title} is ready next.` : "Everything in this sequence is complete."}`)}</div>` : ""}
+            <div class="gp-inline-actions">
+              ${nextSession
+                ? `<button type="button" class="gp-cta gp-cta-plum" data-gp-open-session="${G.done}">${escapeHtml(G.done ? `Start ${nextSession.title}` : "Start grammar session")}</button>`
+                : latestSession
+                  ? `<button type="button" class="gp-pill-btn" data-gp-open-session="${Math.max(0, G.done - 1)}">Review latest session</button>`
+                  : ""}
+            </div>
           </div>
-          <div class="gp-label">Your sessions</div>
-          <div class="gp-sessions">${buildSessionList()}</div>
         </div>
       `;
     }
@@ -1192,7 +1270,7 @@ export function createGrammarProgram({
                 <div class="gp-bar"><div class="gp-bar-fill" style="width:${audio.prog}%"></div></div>
               </div>
               <button type="button" class="gp-cta" data-gp="start" ${audio.done ? "" : "disabled"}>${escapeHtml(getIntroStartLabel())}</button>
-              <div class="gp-gate-note">${audio.done ? (sessionConfig.act === "game" ? "Three rounds: easy, standard, challenge." : "The explanation is complete. You can begin now.") : "START unlocks when the explanation finishes."}</div>
+              <div class="gp-gate-note">${audio.done ? (sessionConfig.act === "game" ? "Three rounds: easy, standard, challenge." : sessionConfig.act === "pick" ? "Three bubble rounds are ready." : "The explanation is complete. You can begin now.") : "START unlocks when the explanation finishes."}</div>
             </div>
           </div>
         </div>
@@ -1222,6 +1300,44 @@ export function createGrammarProgram({
                 <div class="gp-miss" hidden></div>
                 <div class="gp-flash" hidden></div>
               </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function buildPickView() {
+      const term = GP_TERMS[sessionConfig.content];
+      const round = getCurrentPickRound();
+      const chosen = new Set(activity.selected || []);
+      const roundTargets = round.filter((entry) => entry[1]).length;
+      return `
+        <div class="gp-view" data-gp-view="activity">
+          <header class="gp-chrome">
+            <div>
+              <div class="gp-eyebrow-soft">English</div>
+              <div class="gp-h2">${escapeHtml(sessionConfig.title)}</div>
+            </div>
+            <span class="gp-pill gp-pill-plum gp-session-pill">${escapeHtml(`Round ${activity.round + 1} of ${activity.rounds.length}`)}</span>
+          </header>
+          <div class="gp-chips">${buildProgressChips()}</div>
+          <div class="gp-stage">
+            <div class="gp-card">
+              <div class="gp-row-baseline">
+                <div class="gp-strong">${escapeHtml(term.instruction)}</div>
+                <div class="gp-meta">${escapeHtml(`${roundTargets} matching words in this round`)}</div>
+              </div>
+              <p class="gp-meta">Tap every matching bubble word, leave the others alone, then check your choices.</p>
+              <div class="gp-token-grid gp-token-grid--bubbles">
+                ${round.map(([word, isTarget], index) => {
+                  const isChosen = chosen.has(index);
+                  const isRight = activity.checked && isTarget;
+                  const isWrong = activity.checked && isChosen && !isTarget;
+                  return `<button type="button" class="gp-token-btn gp-token-btn--bubble${isChosen ? " is-on" : ""}${isRight ? " is-right" : ""}${isWrong ? " is-wrong" : ""}" data-gp-pick-token="${index}">${escapeHtml(word)}</button>`;
+                }).join("")}
+              </div>
+              ${activity.feedback ? `<div class="gp-fb${activity.checked && activity.perfect ? " is-ok" : " is-hint"}">${escapeHtml(activity.feedback)}</div>` : ""}
+              <button type="button" class="gp-cta gp-cta-plum" data-gp="submit-pick">${activity.checked ? (activity.round >= activity.rounds.length - 1 ? "Finish session" : "Next round") : "Check my choices"}</button>
             </div>
           </div>
         </div>
@@ -1699,6 +1815,10 @@ export function createGrammarProgram({
         updateGameUi();
         return;
       }
+      if (sessionConfig.act === "pick") {
+        root.innerHTML = buildShell(buildPickView());
+        return;
+      }
       if (sessionConfig.act === "mc") {
         const item = getCurrentActivityItem();
         root.innerHTML = buildShell(buildChoiceView({
@@ -1766,6 +1886,11 @@ export function createGrammarProgram({
       }
       root.dataset.grammarBound = "true";
       root.addEventListener("click", (event) => {
+        const pickTarget = event.target.closest("[data-gp-pick-token]");
+        if (pickTarget && root.contains(pickTarget)) {
+          pickBubbleWord(Number(pickTarget.dataset.gpPickToken));
+          return;
+        }
         const target = event.target.closest("[data-gp-tab],[data-gp-open-session],[data-gp],[data-gp-opt],[data-gp-slot],[data-gp-chip],[data-gp-word],[data-gp-select-token],[data-gp-build-option]");
         if (!target || !root.contains(target)) {
           return;
@@ -1856,6 +1981,9 @@ export function createGrammarProgram({
             return;
           case "submit-select":
             submitSelect();
+            return;
+          case "submit-pick":
+            submitPick();
             return;
           case "submit-build":
             submitBuild();
