@@ -621,14 +621,13 @@ const RP_STAGES = [
   ["/property/property-stage4.png", "Stage 4 - fencing and troughs", "Clean post-and-rail fencing, water troughs, and feed bays."],
   ["/property/property-stage5.png", "Stage 5 - landscaped entrance", "Stone gateway, mature trees, planting, and polished paths."]
 ];
+const RP_REWARD_READY_STAGE = 3;
+const RP_REWARD_REQUIRED_SESSIONS = 3;
 const RP_TACK = [
-  { k: "saddle", label: "Saddle", x: 41, y: 41 },
-  { k: "pad", label: "Saddle pad", x: 50, y: 64 },
-  { k: "bridle", label: "Bridle", x: 30, y: 61 },
-  { k: "girth", label: "Girth", x: 63, y: 39 },
-  { k: "lead", label: "Lead rope", x: 62, y: 52 },
-  { k: "harness", label: "Harness", x: 88, y: 50 },
-  { k: "rider", label: "Rider", x: 72, y: 64 }
+  { k: "saddle", label: "Saddle", x: 38.8, y: 40.3, w: 21.5, h: 23.5, rotate: -2 },
+  { k: "bridle", label: "Bridle", x: 28.8, y: 64.5, w: 15.4, h: 26.2, rotate: -2 },
+  { k: "girth", label: "Girth", x: 52.2, y: 47.6, w: 12.6, h: 8.6, rotate: 2 },
+  { k: "pad", label: "Saddle pad", x: 84.1, y: 38.6, w: 15.2, h: 12.8, rotate: 10 }
 ];
 const RP_ZONES = [
   { n: "the arena", x1: 11, x2: 42, y1: 52, y2: 71 },
@@ -637,11 +636,12 @@ const RP_ZONES = [
   { n: "the front drive", x1: 33, x2: 68, y1: 80, y2: 92 }
 ];
 const RP_HOTSPOTS = [
-  { view: "stable", label: "STABLE AISLE", x: 57.5, y: 31, color: "rgba(110,90,134,.9)" },
+  { view: "stable", label: "STABLES", x: 57.5, y: 31, color: "rgba(110,90,134,.9)" },
   { view: "tack", label: "TACK ROOM", x: 79, y: 44, color: "rgba(94,125,99,.92)" }
 ];
 const RP_ASSETS = {
-  tackRoom: "/property/tack-room.jpeg",
+  tackRoom: "/property/tack-room-empty.jpeg",
+  saddle: "/property/saddle-reward.jpeg",
   arena: "/property/arena-empty.jpeg"
 };
 const RP_VARIANT_SHEETS = {
@@ -703,7 +703,7 @@ const RP_JUMP_SHEET = {
     { id: "hay-bale", label: "Hay bale", x: 2440, y: 250, w: 620, h: 540, arenaWidth: 17 }
   ]
 };
-const RP_TACK_VARIANT_KEYS = ["pad", "bridle", "girth", "rider"];
+const RP_TACK_VARIANT_KEYS = ["pad", "bridle", "girth"];
 const SPELLING_TENSE_PROMPTS = {
   believe: {
     past: "They believed the strongest explanation straight away.",
@@ -8909,14 +8909,14 @@ function buildRewardPropertyMarkup() {
         <div>
           <div class="rp-eyebrow">PaperPanda · shared reward world</div>
           <h2 class="rp-title">Your horse property</h2>
-          <p class="rp-sub">Practice sessions add horses and unlock tack. Grammar stages can renovate the property. Move between the paddocks, the stable aisle, and the tack room.</p>
+          <p class="rp-sub">Practice sessions add horses and unlock rewards. Renovation stages rebuild the property. Move between the paddocks, the stables, and the tack room.</p>
         </div>
         ${devActions}
       </header>
 
       <nav class="rp-tabs">
         <button class="rp-tab is-on" data-rp-view="property">Property</button>
-        <button class="rp-tab" data-rp-view="stable">Stable aisle</button>
+        <button class="rp-tab" data-rp-view="stable">Stables</button>
         <button class="rp-tab" data-rp-view="tack">Tack room</button>
         <button class="rp-tab" data-rp-view="arena">Arena setup</button>
       </nav>
@@ -8940,7 +8940,7 @@ function buildRewardPropertyMarkup() {
             <div class="rp-aisle-head">
               <div>
                 <div class="rp-eyebrow rp-eyebrow-wood">Inside the stable</div>
-                <div class="rp-aisle-title">Stable aisle · <span class="rp-inside">0 horses</span> inside</div>
+                <div class="rp-aisle-title">Stables · <span class="rp-inside">0 horses</span> inside</div>
               </div>
               <div class="rp-aisle-hint">Tap a stall to select a horse</div>
             </div>
@@ -9011,7 +9011,7 @@ const RewardProperty = (function () {
   let S = null;
   let view = "property";
   let sel = null;
-  let activeTackCategory = "pad";
+  let activeTackCategory = "saddle";
   let selectedArenaJumpId = "";
   let zoom = 1;
   let px = 0;
@@ -9078,6 +9078,72 @@ const RewardProperty = (function () {
     return RP_TACK
       .filter((item) => Boolean(horse[item.k]))
       .map((item) => getHorseVariant(horse, item.k)?.label || item.label);
+  }
+
+  function rewardPhaseUnlocked() {
+    ensureLoaded();
+    return S.sessions >= RP_REWARD_REQUIRED_SESSIONS && S.stage >= RP_REWARD_READY_STAGE;
+  }
+
+  function rewardSessionCount() {
+    ensureLoaded();
+    return rewardPhaseUnlocked() ? Math.max(0, S.sessions - RP_REWARD_REQUIRED_SESSIONS) : 0;
+  }
+
+  function ownedTack() {
+    return Math.max(0, Math.min(RP_TACK.length, rewardSessionCount()));
+  }
+
+  function ownedJumpCount() {
+    return Math.max(0, Math.min(RP_JUMP_SHEET.items.length, rewardSessionCount()));
+  }
+
+  function isTackUnlocked(category = "") {
+    const tackIndex = RP_TACK.findIndex((item) => item.k === category);
+    return tackIndex >= 0 && tackIndex < ownedTack();
+  }
+
+  function isJumpUnlocked(type = "") {
+    const jumpIndex = RP_JUMP_SHEET.items.findIndex((item) => item.id === type);
+    return jumpIndex >= 0 && jumpIndex < ownedJumpCount();
+  }
+
+  function getTackDisplayVariant(category = "", horse = null) {
+    const selectedVariantId = horse?.[getHorseChoiceKey(category)] || "";
+    return getVariantItems(category).find((item) => item.id === selectedVariantId) || getVariantItems(category)[0] || null;
+  }
+
+  function getRewardMilestoneMessage() {
+    const sessionShortfall = Math.max(0, RP_REWARD_REQUIRED_SESSIONS - S.sessions);
+    const stageShortfall = Math.max(0, RP_REWARD_READY_STAGE - S.stage);
+    if (!rewardPhaseUnlocked()) {
+      if (sessionShortfall > 0 && stageShortfall > 0) {
+        return `Collect ${RP_REWARD_REQUIRED_SESSIONS} horses and renovate through the fencing stage to start earning tack and jumps.`;
+      }
+      if (sessionShortfall > 0) {
+        return `Complete ${sessionShortfall} more practice session${sessionShortfall === 1 ? "" : "s"} to start the reward tack and jump collection.`;
+      }
+      return `Finish ${stageShortfall} more renovation stage${stageShortfall === 1 ? "" : "s"} to open the tack room rewards and arena jumps.`;
+    }
+    if (rewardSessionCount() >= RP_TACK.length) {
+      return `All four tack rewards are unlocked. Keep completing sessions to collect and place more jumps.`;
+    }
+    const nextReward = RP_TACK[Math.min(ownedTack(), RP_TACK.length - 1)];
+    return ownedTack()
+      ? `The next completed practice session unlocks ${nextReward.label.toLowerCase()} access and another arena jump.`
+      : `The next completed practice session unlocks the saddle reward and the first arena jump.`;
+  }
+
+  function buildRackArtMarkup(category = "", horse = null) {
+    if (category === "saddle") {
+      return `<span class="rp-rack-art rp-rack-art--image"><img src="${escapeHtml(RP_ASSETS.saddle)}" alt="Saddle reward" loading="lazy" /></span>`;
+    }
+    const variant = getTackDisplayVariant(category, horse);
+    const sheet = getVariantSheet(category);
+    if (!variant || !sheet) {
+      return "";
+    }
+    return buildSpriteCropMarkup(sheet, variant, variant.label, "rp-sprite-crop rp-sprite-crop--rack");
   }
 
   function normaliseArenaJump(rawJump, index = 0) {
@@ -9161,11 +9227,6 @@ const RewardProperty = (function () {
     return S.horses.find((horse) => horse.id === id) || null;
   }
 
-  function ownedTack() {
-    ensureLoaded();
-    return Math.max(1, Math.min(RP_TACK.length, Number(S.owned || 1) || 1));
-  }
-
   function nextHorsePosition(index = 0) {
     const spot = START_SPOTS[index % START_SPOTS.length];
     return clampZone(spot[0] + (Math.random() * 4 - 2), spot[1] + (Math.random() * 3 - 1.5));
@@ -9234,12 +9295,7 @@ const RewardProperty = (function () {
       changed = changed || result.added;
     });
     const completedCount = Array.isArray(spelling.completedAttempts) ? spelling.completedAttempts.length : 0;
-    const nextOwnedCount = Math.max(S.owned, Math.min(RP_TACK.length, 2 + completedCount));
     const nextSessionCount = Math.max(S.sessions, completedCount);
-    if (nextOwnedCount !== S.owned) {
-      S.owned = nextOwnedCount;
-      changed = true;
-    }
     if (nextSessionCount !== S.sessions) {
       S.sessions = nextSessionCount;
       changed = true;
@@ -9253,7 +9309,6 @@ const RewardProperty = (function () {
     ensureLoaded();
     const result = ensureHorse(slug, name, breed);
     if (result.added) {
-      S.owned = Math.min(RP_TACK.length, S.owned + 1);
       S.sessions += 1;
       sel = result.horse.id;
       save();
@@ -9278,7 +9333,7 @@ const RewardProperty = (function () {
     S = defaultState();
     sel = null;
     view = "property";
-    activeTackCategory = "pad";
+    activeTackCategory = "saddle";
     selectedArenaJumpId = "";
     zoom = 1;
     px = 0;
@@ -9313,7 +9368,14 @@ const RewardProperty = (function () {
 
   function addArenaJump(type = "") {
     const jumpMeta = getJumpMeta(type);
-    if (!jumpMeta) {
+    if (!jumpMeta || !isJumpUnlocked(type)) {
+      return;
+    }
+    const existingJump = S.arenaJumps.find((jump) => jump.type === type);
+    if (existingJump) {
+      selectedArenaJumpId = existingJump.id;
+      view = "arena";
+      render();
       return;
     }
     const nextJump = normaliseArenaJump({
@@ -9346,11 +9408,7 @@ const RewardProperty = (function () {
 
   function toggleTack(category = "") {
     const horse = sel ? byId(sel) : null;
-    if (!horse) {
-      return;
-    }
-    const tackIndex = RP_TACK.findIndex((item) => item.k === category);
-    if (tackIndex < 0 || tackIndex >= ownedTack()) {
+    if (!horse || !isTackUnlocked(category)) {
       return;
     }
     if (getVariantSheet(category)) {
@@ -9366,7 +9424,7 @@ const RewardProperty = (function () {
 
   function applyVariant(category = "", variantId = "") {
     const horse = sel ? byId(sel) : null;
-    if (!horse) {
+    if (!horse || !isTackUnlocked(category)) {
       return;
     }
     const variant = getVariantItems(category).find((item) => item.id === variantId);
@@ -9388,7 +9446,7 @@ const RewardProperty = (function () {
 
   function clearVariant(category = "") {
     const horse = sel ? byId(sel) : null;
-    if (!horse) {
+    if (!horse || !isTackUnlocked(category)) {
       return;
     }
     horse[category] = false;
@@ -9457,19 +9515,43 @@ const RewardProperty = (function () {
     }
     query(".rp-stalls").innerHTML = stallsMarkup;
 
-    query(".rp-tackhint").textContent = selectedHorse
-      ? `Fitting tack to ${selectedHorse.name} - choose a rack, then pick a style.`
-      : "Select a horse first, then tap a rack to fit its tack.";
+    query(".rp-tackhint").textContent = !rewardPhaseUnlocked()
+      ? getRewardMilestoneMessage()
+      : selectedHorse
+        ? `Fitting tack to ${selectedHorse.name}. Rewards unlock in order: saddle, bridle, girth, then saddle pad.`
+        : "Select a horse, then tap the unlocked tack hanging in the room to fit it.";
     query(".rp-tackroom").style.backgroundImage = `url('${RP_ASSETS.tackRoom}')`;
     query(".rp-tackroom").innerHTML = RP_TACK.map((item, index) => {
       const unlocked = index < ownedTack();
       const active = selectedHorse ? Boolean(selectedHorse[item.k]) : false;
-      return `<button class="rp-spot${active ? " is-on" : ""}${activeTackCategory === item.k ? " is-focus" : ""}${unlocked ? "" : " is-locked"}" data-k="${escapeHtml(item.k)}" style="left:${item.x}%;top:${item.y}%">${escapeHtml(item.label)}${active ? " ✓" : ""}</button>`;
+      const variantLabel = getTackDisplayVariant(item.k, selectedHorse)?.label || "";
+      const remainingSessions = Math.max(0, (index + 1) - rewardSessionCount());
+      const lockedLabel = rewardPhaseUnlocked() ? `${remainingSessions} session${remainingSessions === 1 ? "" : "s"} away` : "Waiting for rewards";
+      return `
+        <button
+          type="button"
+          class="rp-rack${active ? " is-on" : ""}${activeTackCategory === item.k ? " is-focus" : ""}${unlocked ? "" : " is-locked"}"
+          data-k="${escapeHtml(item.k)}"
+          style="--rack-x:${item.x}%;--rack-y:${item.y}%;--rack-width:${item.w}%;--rack-height:${item.h}%;--rack-rotate:${item.rotate}deg;"
+          aria-label="${escapeHtml(item.label)}"
+        >
+          <span class="rp-rack-hit"></span>
+          ${unlocked ? buildRackArtMarkup(item.k, selectedHorse) : ""}
+          <span class="rp-rack-meta">
+            <strong>${escapeHtml(item.label)}</strong>
+            <span>${escapeHtml(unlocked ? (active && variantLabel ? variantLabel : active ? "Fitted" : variantLabel || "Ready to use") : lockedLabel)}</span>
+          </span>
+        </button>
+      `;
     }).join("");
     const tackVariants = getVariantItems(activeTackCategory);
-    query(".rp-tackchoices").innerHTML = !selectedHorse
-      ? `<div class="rp-choice-empty">Select a horse to open the tack tray.</div>`
-      : tackVariants.length
+    query(".rp-tackchoices").innerHTML = !rewardPhaseUnlocked()
+      ? `<div class="rp-choice-empty">${escapeHtml(getRewardMilestoneMessage())}</div>`
+      : !selectedHorse
+        ? `<div class="rp-choice-empty">Select a horse to open the tack tray.</div>`
+        : !isTackUnlocked(activeTackCategory)
+          ? `<div class="rp-choice-empty">${escapeHtml(`${RP_TACK.find((item) => item.k === activeTackCategory)?.label || "This tack"} unlocks after more completed sessions.`)}</div>`
+          : tackVariants.length
         ? `
           <div class="rp-choice-head">
             <strong>${escapeHtml(RP_TACK.find((item) => item.k === activeTackCategory)?.label || "Tack style")}</strong>
@@ -9485,7 +9567,7 @@ const RewardProperty = (function () {
           </div>
           <button type="button" class="rp-btn rp-btn-ghost rp-choice-clear" data-rp-variant-clear="${escapeHtml(activeTackCategory)}">Clear ${escapeHtml(RP_TACK.find((item) => item.k === activeTackCategory)?.label || "selection")}</button>
         `
-        : `<div class="rp-choice-empty">${escapeHtml(activeTackCategory === "saddle" ? "Saddle uses the tack-room rack for now. A separate saddle sprite can drop in later." : activeTackCategory === "lead" ? "Lead rope is tracked as fitted until a separate rope sprite is added." : activeTackCategory === "harness" ? "Harness is tracked as fitted until a dedicated sprite set is added." : "Choose a rack to open the tack tray.")}</div>`;
+        : `<div class="rp-choice-empty">${escapeHtml(activeTackCategory === "saddle" ? "The saddle reward is live. Use the saddle row on the right to fit or remove it from the selected horse." : "Choose a rack to open the tack tray.")}</div>`;
 
     query(".rp-arena-stage").style.backgroundImage = `url('${RP_ASSETS.arena}')`;
     query(".rp-arena-canvas").innerHTML = S.arenaJumps.map((jump) => {
@@ -9505,12 +9587,22 @@ const RewardProperty = (function () {
         </button>
       `;
     }).join("");
-    query(".rp-arena-library").innerHTML = RP_JUMP_SHEET.items.map((jumpMeta) => `
-      <button type="button" class="rp-jumplib" data-rp-jump-type="${escapeHtml(jumpMeta.id)}">
-        ${buildSpriteCropMarkup(RP_JUMP_SHEET, jumpMeta, jumpMeta.label, "rp-sprite-crop rp-sprite-crop--library")}
-        <span>${escapeHtml(jumpMeta.label)}</span>
-      </button>
-    `).join("");
+    query(".rp-arenahint").textContent = !rewardPhaseUnlocked()
+      ? getRewardMilestoneMessage()
+      : ownedJumpCount()
+        ? `${ownedJumpCount()} jump reward${ownedJumpCount() === 1 ? "" : "s"} unlocked. Add each jump once, then drag it anywhere in the arena.`
+        : "Your next completed practice session unlocks the first jump reward.";
+    query(".rp-arena-library").innerHTML = RP_JUMP_SHEET.items.map((jumpMeta, index) => {
+      const unlocked = index < ownedJumpCount();
+      const added = S.arenaJumps.some((jump) => jump.type === jumpMeta.id);
+      return `
+        <button type="button" class="rp-jumplib${unlocked ? "" : " is-locked"}${added ? " is-added" : ""}" ${unlocked ? `data-rp-jump-type="${escapeHtml(jumpMeta.id)}"` : ""}>
+          ${buildSpriteCropMarkup(RP_JUMP_SHEET, jumpMeta, jumpMeta.label, "rp-sprite-crop rp-sprite-crop--library")}
+          <span>${escapeHtml(jumpMeta.label)}</span>
+          <small>${escapeHtml(unlocked ? (added ? "Already in arena" : "Add to arena") : `Reward ${index + 1}`)}</small>
+        </button>
+      `;
+    }).join("");
     const removeButton = query("[data-rp='remove-jump']");
     if (removeButton) {
       removeButton.disabled = !selectedArenaJumpId;
@@ -9522,8 +9614,8 @@ const RewardProperty = (function () {
       query(".rp-sel-thumb").style.backgroundImage = `url('${selectedHorse.src}')`;
       query(".rp-sel-name").textContent = selectedHorse.name;
       query(".rp-sel-breed").textContent = selectedHorse.breed;
-      query(".rp-sel-where").textContent = selectedHorse.stabled ? "In the stable aisle" : `Out in ${selectedHorse.zone || "the paddock"}`;
-      query("[data-rp='stable-toggle']").textContent = selectedHorse.stabled ? "Bring out to the property" : "Send back to the stable";
+      query(".rp-sel-where").textContent = selectedHorse.stabled ? "In the stables" : `Out in ${selectedHorse.zone || "the paddock"}`;
+      query("[data-rp='stable-toggle']").textContent = selectedHorse.stabled ? "Bring out to the property" : "Send to the stables";
       query(".rp-tackrows").innerHTML = RP_TACK.map((item, index) => {
         const unlocked = index < ownedTack();
         const active = Boolean(selectedHorse[item.k]);
@@ -9550,8 +9642,8 @@ const RewardProperty = (function () {
       : view === "stable"
         ? "Horses sent back from the property stand in their stall with their plaque below."
         : view === "tack"
-          ? "Tack unlocks one item per completed practice session. Pick a rack, then choose a style from the tray."
-          : "Add jumps from the library, then drag them around the arena to build the course.";
+          ? "Each reward session adds the next tack item in order. Use the tack room to preview what has been collected and fit it to a selected horse."
+          : "Each reward session unlocks one arena jump. Add unlocked jumps once, then drag them around the arena to build the course.";
   }
 
   function bind() {
@@ -9560,7 +9652,7 @@ const RewardProperty = (function () {
     }
     root.dataset.rpBound = "true";
     root.addEventListener("click", (event) => {
-      const target = event.target.closest("[data-rp-view],[data-rp],.rp-spot,.rp-row,.rp-chip,.rp-stall,[data-rp-variant-id],[data-rp-variant-clear],[data-rp-jump-type],[data-rp-arena-jump]");
+      const target = event.target.closest("[data-rp-view],[data-rp],.rp-rack,.rp-row,.rp-chip,.rp-stall,[data-rp-variant-id],[data-rp-variant-clear],[data-rp-jump-type],[data-rp-arena-jump]");
       if (!target || !root.contains(target)) {
         return;
       }
@@ -9586,7 +9678,7 @@ const RewardProperty = (function () {
         render();
         return;
       }
-      if (target.classList.contains("rp-spot") || target.classList.contains("rp-row")) {
+      if (target.classList.contains("rp-rack") || target.classList.contains("rp-row")) {
         toggleTack(target.dataset.k || "");
         return;
       }
@@ -9665,17 +9757,22 @@ const RewardProperty = (function () {
 
     stage?.addEventListener("pointerdown", (event) => {
       const horse = event.target.closest(".rp-horse");
+      let shouldCapture = false;
       if (horse) {
         drag = { kind: "horse", id: horse.dataset.id || "" };
         sel = horse.dataset.id || null;
         render();
+        shouldCapture = true;
       } else if (!event.target.closest(".rp-hotspot,.rp-zoom,.rp-hud")) {
         pan = { x: event.clientX, y: event.clientY };
+        shouldCapture = true;
       }
-      try {
-        stage.setPointerCapture(event.pointerId);
-      } catch (error) {
-        // Ignore pointer capture failures.
+      if (shouldCapture) {
+        try {
+          stage.setPointerCapture(event.pointerId);
+        } catch (error) {
+          // Ignore pointer capture failures.
+        }
       }
     });
 
