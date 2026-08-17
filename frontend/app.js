@@ -4610,11 +4610,9 @@ function renderDockContext() {
 
   if (state.activeSubjectTab === "grammar") {
     const grammar = getSubjectGrammarState(subject);
-    const nextSession = GP_SESSIONS[Math.min(grammar.done, Math.max(0, GP_SESSIONS.length - 1))] || null;
-    const latestSession = grammar.done > 0 ? GP_SESSIONS[Math.min(grammar.done - 1, GP_SESSIONS.length - 1)] : null;
     elements.dockContextTitle.textContent = "Grammar";
     elements.dockContextBody.innerHTML = subject.id === "spelling"
-      ? `<article class="dock-tile dock-tile--mint"><div class="dock-tile__copy"><strong>${escapeHtml(nextSession ? nextSession.title : latestSession ? `${latestSession.title} complete` : "Grammar ready")}</strong><span>${escapeHtml(nextSession ? `${nextSession.meta} is ready to start.` : "All current grammar sessions are complete.")}</span></div></article>`
+      ? `<article class="dock-tile dock-tile--mint"><div class="dock-tile__copy"><strong>${escapeHtml(`${grammar.done}/${GP_SESSIONS.length} sessions complete`)}</strong><span>${escapeHtml(grammar.done < GP_SESSIONS.length ? `Session ${grammar.done + 1} is ready to start.` : "All current grammar sessions are complete.")}</span></div></article>`
       : `<div class="empty-state empty-state--compact">Open the Practice subject to continue the grammar sessions.</div>`;
     return;
   }
@@ -12766,7 +12764,7 @@ function getHomeFocusSubjectStatus(subject) {
   const spellingPendingCount = getSpellingPendingActivityCount(subject);
   const grammarPendingCount = getSubjectGrammarPendingSessionCount(subject);
   const waitingCount = unreadCount + remainingHomeworkCount + activeAssessmentCount + spellingPendingCount + grammarPendingCount;
-  const summary = subject?.id === "spelling" && grammarPendingCount && waitingCount === grammarPendingCount
+  const summary = subject?.id === "english" && grammarPendingCount && waitingCount === grammarPendingCount
     ? `${grammarPendingCount} grammar session${grammarPendingCount === 1 ? "" : "s"}`
     : spellingPendingCount && waitingCount === spellingPendingCount
       ? `${spellingPendingCount} spelling ${spellingPendingCount === 1 ? "stage" : "stages"}`
@@ -12834,12 +12832,12 @@ function getSubjectHeroCopy(subject, tab) {
 
   if (tab === "grammar") {
     const grammar = getSubjectGrammarState(subject);
-    const nextSession = GP_SESSIONS[Math.min(grammar.done, Math.max(0, GP_SESSIONS.length - 1))] || null;
+    const nextSessionNumber = Math.min(GP_SESSIONS.length, grammar.done + 1);
     return {
-      big: grammarPending && nextSession ? nextSession.title : "Grammar complete",
+      big: `${grammarPending} ${grammarPending === 1 ? "session" : "sessions"}`,
       rest: grammarPending
-        ? `${nextSession?.meta || "Grammar practice"} in Practice is ready next.`
-        : "all current grammar sessions are complete right now."
+        ? `left in Grammar — next up: session ${nextSessionNumber}.`
+        : "complete in Grammar right now."
     };
   }
 
@@ -18132,11 +18130,11 @@ function buildPracticeGrammarSpotlight(subject) {
   }
 
   const remainingCount = Math.max(0, GP_SESSIONS.length - grammar.done);
-  const nextSession = GP_SESSIONS[Math.min(grammar.done, Math.max(0, GP_SESSIONS.length - 1))] || null;
+  const nextSessionNumber = Math.min(GP_SESSIONS.length, grammar.done + 1);
   const statusLabel = remainingCount ? "Grammar ready" : "Grammar complete";
-  const actionLabel = remainingCount ? `Open ${nextSession?.title || "grammar"}` : "Review grammar";
+  const actionLabel = remainingCount ? `Open session ${nextSessionNumber}` : "Review grammar";
   const summaryCopy = remainingCount
-    ? `${nextSession?.title || "The next grammar activity"} is ready to continue from here.`
+    ? `${remainingCount} session${remainingCount === 1 ? "" : "s"} left. Session ${nextSessionNumber} is ready to continue from here.`
     : "All grammar sessions are complete right now. Open Grammar to replay completed sessions.";
 
   return `
@@ -18149,8 +18147,8 @@ function buildPracticeGrammarSpotlight(subject) {
         <span class="homework-focus-card__due">${escapeHtml(statusLabel)}</span>
       </div>
       <div class="homework-focus-card__chips">
-        <span class="homework-focus-card__chip homework-focus-card__chip--mint">${escapeHtml(remainingCount ? "Practice tab" : "Sequence complete")}</span>
-        <span class="homework-focus-card__chip">${escapeHtml(remainingCount ? nextSession?.meta || "Grammar session ready" : "Replay any completed session")}</span>
+        <span class="homework-focus-card__chip homework-focus-card__chip--mint">${escapeHtml(`${grammar.done}/${GP_SESSIONS.length} sessions complete`)}</span>
+        <span class="homework-focus-card__chip">${escapeHtml(remainingCount ? `Next: session ${nextSessionNumber}` : "All sessions unlocked")}</span>
       </div>
       <div class="homework-focus-card__panda-row">
         <div>

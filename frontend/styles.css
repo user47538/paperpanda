@@ -11778,10 +11778,6 @@ input[type="date"] {
   margin-top: 6px;
 }
 
-.gp-token-grid--bubbles {
-  gap: 12px;
-}
-
 .gp-token-btn,
 .gp-builder-opt {
   min-height: 44px;
@@ -11792,13 +11788,6 @@ input[type="date"] {
   color: var(--ink);
   cursor: pointer;
   font: 600 16px/1.3 "Lexend", system-ui, sans-serif;
-}
-
-.gp-token-btn--bubble {
-  min-height: 54px;
-  padding: 14px 18px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--surface) 88%, #fff);
 }
 
 .gp-token-btn.is-on,
