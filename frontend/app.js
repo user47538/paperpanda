@@ -3581,6 +3581,7 @@ function renderSubjectLanding() {
   if (!openDocument && subject.id === "spelling") {
     const writingSubject = state.subjects.find((item) => item.id === "english") || null;
     const spellingCount = getSpellingPendingActivityCount(subject);
+    const grammarCount = writingSubject ? getSubjectGrammarPendingSessionCount(writingSubject) : 0;
     const writingCount = writingSubject ? getSubjectWritingPendingSectionCount(writingSubject) : 0;
 
     host.innerHTML = `
@@ -3619,8 +3620,8 @@ function renderSubjectLanding() {
           <button type="button" class="ghost-button subject-landing__resource-back" data-subject-landing-all-areas="true">← All areas</button>
           <div class="subject-landing__heading">
             <p class="eyebrow">${escapeHtml(`${subject.name.toUpperCase()} · YEAR ${state.studentGrade}`)}</p>
-            <h2>Choose Practice or Writing</h2>
-            <p>Pick the focused literacy space you want to open.</p>
+            <h2>Choose Practice, Grammar or Writing</h2>
+            <p>Pick the literacy space you want to open next.</p>
           </div>
           <div class="subject-landing__list">
             <button type="button" class="subject-landing-row" data-subject-landing-open-area="spelling">
@@ -3635,6 +3636,23 @@ function renderSubjectLanding() {
               <span class="subject-landing-row__copy">
                 <strong>Spelling</strong>
                 <span>${escapeHtml(`${spellingCount} stage${spellingCount === 1 ? "" : "s"} left · spelling stables and pattern practice`)}</span>
+              </span>
+              <span class="subject-landing-row__action">Open →</span>
+            </button>
+            <button type="button" class="subject-landing-row" data-subject-landing-open-area="grammar">
+              <span class="subject-landing-row__cover subject-landing-row__cover--mint">
+                <span class="subject-landing-row__sheet">
+                  <span class="subject-landing-row__sheet-bar"></span>
+                  <span class="subject-landing-row__sheet-line subject-landing-row__sheet-line--dark"></span>
+                  <span class="subject-landing-row__sheet-line"></span>
+                  <span class="subject-landing-row__sheet-line subject-landing-row__sheet-line--short"></span>
+                </span>
+              </span>
+              <span class="subject-landing-row__copy">
+                <strong>Grammar</strong>
+                <span>${escapeHtml(grammarCount
+                  ? `${grammarCount} session${grammarCount === 1 ? "" : "s"} left · sentence practice and review`
+                  : `All ${GP_SESSIONS.length} sessions complete · sentence practice and review`)}</span>
               </span>
               <span class="subject-landing-row__action">Open →</span>
             </button>
@@ -3918,6 +3936,10 @@ function renderSubjectLanding() {
       const area = String(button.dataset.subjectLandingOpenArea || "");
       if (area === "writing") {
         openSubjectLandingArea(subject.id, "writing");
+        return;
+      }
+      if (area === "grammar") {
+        openSubjectLandingArea(subject.id, "grammar");
         return;
       }
       if (area === "spelling") {
@@ -4305,6 +4327,10 @@ function renderSubjectFocusLaunchpad() {
         openFocusLaunchpadArea(subject, "spelling");
         return;
       }
+      if (area === "grammar") {
+        openFocusLaunchpadArea(subject, "grammar");
+        return;
+      }
       if (area === "writing") {
         openFocusLaunchpadArea(subject, "writing");
         return;
@@ -4342,9 +4368,9 @@ function openSubjectLandingArea(subjectId, area) {
   }
 
   state.subjectWorkspaceReturnLandingSubjectId = subjectId;
-  if (area === "writing") {
+  if (area === "writing" || area === "grammar") {
     state.selectedSubjectId = "english";
-    expandSubjectWorkspace("writing");
+    expandSubjectWorkspace(area);
     return;
   }
 
@@ -4357,9 +4383,9 @@ function openFocusLaunchpadArea(subject, area) {
     return;
   }
 
-  if (area === "writing") {
+  if (area === "writing" || area === "grammar") {
     state.selectedSubjectId = "english";
-    expandSubjectWorkspace("writing");
+    expandSubjectWorkspace(area);
     return;
   }
 
@@ -17880,11 +17906,22 @@ function renderPractice() {
   }
 
   const homeworkBundles = getSubjectHomeworkBundles(subject);
+  const grammarSpotlightMarkup = buildPracticeGrammarSpotlight(subject);
   if (!homeworkBundles.length) {
-    elements.practiceList.innerHTML = `<div class="empty-state">No homework items for this subject yet.</div>`;
+    elements.practiceList.innerHTML = grammarSpotlightMarkup
+      ? `
+        ${grammarSpotlightMarkup}
+        <div class="empty-state empty-state--compact">No homework items for this subject yet.</div>
+      `
+      : `<div class="empty-state">No homework items for this subject yet.</div>`;
     if (elements.subjectHomeworkUpcomingList) {
       elements.subjectHomeworkUpcomingList.innerHTML = `<div class="empty-state empty-state--compact">Nothing else is queued for this week.</div>`;
     }
+    elements.practiceList.querySelectorAll("[data-open-practice-grammar]").forEach((button) => {
+      button.addEventListener("click", () => {
+        expandSubjectWorkspace("grammar");
+      });
+    });
     renderSubjectsHero();
     renderDockContext();
     return;
@@ -17900,6 +17937,7 @@ function renderPractice() {
   const focusStatusLabel = getBundleWorkNotes(focusBundle) ? "In progress" : "Start here";
 
   elements.practiceList.innerHTML = `
+    ${grammarSpotlightMarkup}
     <article class="homework-focus-card">
       <div class="homework-focus-card__header">
         <div>
@@ -17975,6 +18013,11 @@ function renderPractice() {
       openTaskView({ kind: "homework", id: button.dataset.openHomework });
     });
   });
+  elements.practiceList.querySelectorAll("[data-open-practice-grammar]").forEach((button) => {
+    button.addEventListener("click", () => {
+      expandSubjectWorkspace("grammar");
+    });
+  });
   elements.practiceList.querySelectorAll("[data-homework-readaloud]").forEach((button) => {
     button.addEventListener("click", () => {
       const audioContext = `task:homework:${focusBundle.id}`;
@@ -18046,6 +18089,51 @@ function renderPractice() {
 
   renderSubjectsHero();
   renderDockContext();
+}
+
+function buildPracticeGrammarSpotlight(subject) {
+  if (subject?.id !== "english") {
+    return "";
+  }
+
+  const grammar = getSubjectGrammarState(subject);
+  if (!grammar.enabled) {
+    return "";
+  }
+
+  const remainingCount = Math.max(0, GP_SESSIONS.length - grammar.done);
+  const nextSessionNumber = Math.min(GP_SESSIONS.length, grammar.done + 1);
+  const statusLabel = remainingCount ? "Grammar ready" : "Grammar complete";
+  const actionLabel = remainingCount ? `Open session ${nextSessionNumber}` : "Review grammar";
+  const summaryCopy = remainingCount
+    ? `${remainingCount} session${remainingCount === 1 ? "" : "s"} left. Session ${nextSessionNumber} is ready to continue from here.`
+    : "All grammar sessions are complete right now. Open Grammar to replay completed sessions.";
+
+  return `
+    <article class="homework-focus-card homework-focus-card--grammar">
+      <div class="homework-focus-card__header">
+        <div>
+          <p class="eyebrow">Grammar · session program</p>
+          <h3>Grammar is ready</h3>
+        </div>
+        <span class="homework-focus-card__due">${escapeHtml(statusLabel)}</span>
+      </div>
+      <div class="homework-focus-card__chips">
+        <span class="homework-focus-card__chip homework-focus-card__chip--mint">${escapeHtml(`${grammar.done}/${GP_SESSIONS.length} sessions complete`)}</span>
+        <span class="homework-focus-card__chip">${escapeHtml(remainingCount ? `Next: session ${nextSessionNumber}` : "All sessions unlocked")}</span>
+      </div>
+      <div class="homework-focus-card__panda-row">
+        <div>
+          <strong>Open the full grammar workspace</strong>
+          <span>${escapeHtml(summaryCopy)}</span>
+        </div>
+        <button type="button" class="task-inline-link" data-open-practice-grammar="true">Go to grammar</button>
+      </div>
+      <div class="homework-focus-card__actions">
+        <button type="button" class="primary-button primary-button--dark" data-open-practice-grammar="true">${escapeHtml(actionLabel)}</button>
+      </div>
+    </article>
+  `;
 }
 
 async function handleAsk() {

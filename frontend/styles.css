@@ -5239,6 +5239,15 @@ input[type="date"] {
   padding: 28px;
 }
 
+.homework-focus-card--grammar {
+  border: 1px solid rgba(68, 128, 92, 0.16);
+  background: linear-gradient(180deg, #f6fbf7 0%, #fff 100%);
+}
+
+.homework-focus-card--grammar .homework-focus-card__due {
+  background: #2f7a54;
+}
+
 .homework-focus-card__header {
   display: flex;
   align-items: start;
