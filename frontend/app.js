@@ -6121,7 +6121,7 @@ function normaliseGrammarState(grammar, subjectId = "") {
   return {
     ...base,
     ...next,
-    enabled: subjectId === "english",
+    enabled: subjectId === "spelling",
     done: Math.max(0, Math.min(GP_SESSIONS.length, Number(next.done || 0) || 0)),
     audioHeard: Array.isArray(next.audioHeard)
       ? [...new Set(next.audioHeard.map((value) => String(value || "")).filter(Boolean))]
@@ -12764,7 +12764,7 @@ function getHomeFocusSubjectStatus(subject) {
   const spellingPendingCount = getSpellingPendingActivityCount(subject);
   const grammarPendingCount = getSubjectGrammarPendingSessionCount(subject);
   const waitingCount = unreadCount + remainingHomeworkCount + activeAssessmentCount + spellingPendingCount + grammarPendingCount;
-  const summary = subject?.id === "english" && grammarPendingCount && waitingCount === grammarPendingCount
+  const summary = subject?.id === "spelling" && grammarPendingCount && waitingCount === grammarPendingCount
     ? `${grammarPendingCount} grammar session${grammarPendingCount === 1 ? "" : "s"}`
     : spellingPendingCount && waitingCount === spellingPendingCount
       ? `${spellingPendingCount} spelling ${spellingPendingCount === 1 ? "stage" : "stages"}`
