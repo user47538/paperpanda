@@ -151,15 +151,86 @@ export function createGrammarProgram({
       }, { strong: 0, developing: 0, practice: 0 });
     }
 
-    function getNextSessionLabel() {
-      const next = GP_SESSIONS[Math.min(G.done, GP_SESSIONS.length - 1)];
-      return next ? `Session ${next.n} · ${next.title}` : "All current sessions complete";
-    }
-
     function getRewardCopy() {
       return G.done < GP_SESSIONS.length
-        ? `Next reward build begins after ${getNextSessionLabel()}.`
+        ? "Next reward build begins after the next grammar activity."
         : "The current grammar sequence is complete.";
+    }
+
+    function getReadySessionIndex() {
+      const currentNumber = Number(G.current?.n || 0);
+      if (currentNumber > G.done) {
+        const currentIndex = GP_SESSIONS.findIndex((cfg) => cfg.n === currentNumber);
+        if (currentIndex >= 0) {
+          return currentIndex;
+        }
+      }
+      if (G.done < GP_SESSIONS.length) {
+        return G.done;
+      }
+      return GP_SESSIONS.length ? GP_SESSIONS.length - 1 : -1;
+    }
+
+    function getReadySessionConfig() {
+      const index = getReadySessionIndex();
+      return index >= 0 ? GP_SESSIONS[index] || null : null;
+    }
+
+    function clonePlainData(value) {
+      if (value === null || value === undefined) {
+        return null;
+      }
+      try {
+        if (typeof structuredClone === "function") {
+          return structuredClone(value);
+        }
+      } catch (error) {
+        // Fall back to JSON cloning for plain activity snapshots.
+      }
+      try {
+        return JSON.parse(JSON.stringify(value));
+      } catch (error) {
+        return null;
+      }
+    }
+
+    function persistCurrentProgress() {
+      if (!sessionConfig) {
+        return;
+      }
+      const nextCurrent = {
+        n: sessionConfig.n,
+        title: sessionConfig.title,
+        act: sessionConfig.act,
+        content: sessionConfig.content,
+        view,
+        lessonKey,
+        updatedAt: new Date().toISOString(),
+        activity: null,
+        game: null
+      };
+      if (view === "activity" && activity && sessionConfig.act !== "game") {
+        nextCurrent.activity = clonePlainData(activity);
+      }
+      if (sessionConfig.act === "game" && game) {
+        nextCurrent.game = {
+          round: game.round,
+          score: game.score,
+          wrong: game.wrong,
+          roundScores: [...game.roundScores],
+          missed: [...new Set(game.missed)]
+        };
+      }
+      G.current = nextCurrent;
+      saveState({ skipRemoteSync: true });
+    }
+
+    function clearCurrentProgress() {
+      if (!G.current) {
+        return;
+      }
+      G.current = null;
+      saveState({ skipRemoteSync: true });
     }
 
     function getSkillAttempts(skillKey = "") {
@@ -291,22 +362,39 @@ export function createGrammarProgram({
       if (!cfg) {
         return;
       }
+      const savedCurrent = G.current && Number(G.current.n || 0) === cfg.n ? G.current : null;
       stopAll();
       sessionIndex = index;
       sessionConfig = cfg;
-      lessonKey = getSessionIntroKey(cfg);
+      lessonKey = savedCurrent?.lessonKey || getSessionIntroKey(cfg);
       activity = null;
       audio = {
         playing: false,
         done: !lessonKey,
         prog: lessonKey ? 0 : 100
       };
+      if (savedCurrent?.activity && cfg.act !== "game") {
+        activity = clonePlainData(savedCurrent.activity);
+        audio.done = true;
+        audio.prog = 100;
+        view = "activity";
+        paint();
+        return;
+      }
       view = lessonKey ? "intro" : "activity";
+      persistCurrentProgress();
       if (lessonKey) {
         paint();
         return;
       }
       startActivity();
+    }
+
+    function openReadySession() {
+      const readyIndex = getReadySessionIndex();
+      if (readyIndex >= 0) {
+        openSession(readyIndex);
+      }
     }
 
     function speakInstruction(text = "", onDone = () => {}) {
@@ -359,10 +447,13 @@ export function createGrammarProgram({
         startActivity();
         return;
       }
+      const heardKey = lessonKey;
       speakInstruction(lesson.audioText, () => {
         audio.done = true;
         audio.prog = 100;
-        markHeard(lessonKey);
+        markHeard(heardKey);
+        lessonKey = "";
+        persistCurrentProgress();
         paint();
       });
       updateIntroAudioUi();
@@ -393,7 +484,13 @@ export function createGrammarProgram({
         return { items: GP_TENSE[sessionConfig.content] || [], i: 0, picked: null, attempts: 0, right: 0, feedback: "" };
       }
       if (sessionConfig.act === "fix") {
-        return { filled: {}, chip: "", ok: 0, feedback: "" };
+        const data = GP_FIX[sessionConfig.content] || {};
+        const items = Array.isArray(data.items) && data.items.length
+          ? data.items
+          : data.tokens
+            ? [{ tokens: data.tokens }]
+            : [];
+        return { items, i: 0, filled: {}, chip: "", right: 0, feedback: "" };
       }
       if (sessionConfig.act === "write") {
         return { text: "", submitted: false };
@@ -430,9 +527,10 @@ export function createGrammarProgram({
       activity = initActivity();
       if (sessionConfig.act === "game") {
         beginGame(0);
-      } else {
-        paint();
+        return;
       }
+      persistCurrentProgress();
+      paint();
     }
 
     function finishSession(score = 0, total = 0, details = {}) {
@@ -440,6 +538,7 @@ export function createGrammarProgram({
         return;
       }
       G.done = Math.max(G.done, sessionConfig.n);
+      G.current = null;
       G.results = [
         ...G.results.filter((entry) => Number(entry.n || 0) !== sessionConfig.n),
         { n: sessionConfig.n, score, total, at: new Date().toISOString(), details }
@@ -471,6 +570,7 @@ export function createGrammarProgram({
       };
       paint();
       startGameLoops();
+      persistCurrentProgress();
     }
 
     function getCurrentRoundList() {
@@ -622,6 +722,7 @@ export function createGrammarProgram({
         tallySkill(`${sessionConfig.content}s`, false);
         setGameFlash(`${word.text} is not one — keep looking`);
       }
+      persistCurrentProgress();
       updateGameUi();
       if (!game.paused && !game.words.length && game.spawnIndex >= getCurrentRoundList().length) {
         endGameRound();
@@ -643,6 +744,7 @@ export function createGrammarProgram({
         node.remove();
         game.wordNodes.delete(word.id);
       }
+      persistCurrentProgress();
       updateGameUi();
     }
 
@@ -652,6 +754,7 @@ export function createGrammarProgram({
       }
       game.paused = false;
       game.missedWord = "";
+      persistCurrentProgress();
       updateGameUi();
       startGameLoops();
     }
@@ -762,6 +865,7 @@ export function createGrammarProgram({
         if (act === "comp") {
           activity.replayIndex = getReplayParagraphIndex(item.ev);
         }
+        persistCurrentProgress();
         paint();
         return;
       }
@@ -776,6 +880,7 @@ export function createGrammarProgram({
           ? getRetryHint(item, skillKey, act)
           : item.why || "Check the sentence again.";
       }
+      persistCurrentProgress();
       paint();
     }
 
@@ -806,7 +911,34 @@ export function createGrammarProgram({
       activity.subjectPick = null;
       activity.verbPick = null;
       activity.choices = {};
+      persistCurrentProgress();
       paint();
+    }
+
+    function getFixData() {
+      const data = GP_FIX[sessionConfig?.content] || {};
+      const items = Array.isArray(data.items) && data.items.length
+        ? data.items
+        : data.tokens
+          ? [{ tokens: data.tokens }]
+          : [];
+      return { ...data, items };
+    }
+
+    function getCurrentFixItem() {
+      return activity?.items?.[activity.i] || null;
+    }
+
+    function getFixItemSlotTotal(item = getCurrentFixItem()) {
+      return (item?.tokens || []).filter((entry) => entry.slot).length;
+    }
+
+    function isCurrentFixItemComplete() {
+      const item = getCurrentFixItem();
+      if (!item) {
+        return false;
+      }
+      return Object.keys(activity?.filled || {}).length >= getFixItemSlotTotal(item);
     }
 
     function chooseFixChip(chipKey = "") {
@@ -815,6 +947,7 @@ export function createGrammarProgram({
       }
       activity.chip = activity.chip === chipKey ? "" : chipKey;
       activity.feedback = "";
+      persistCurrentProgress();
       paint();
     }
 
@@ -822,8 +955,9 @@ export function createGrammarProgram({
       if (!activity || !slotKey || activity.filled[slotKey]) {
         return;
       }
-      const data = GP_FIX[sessionConfig.content];
-      const token = data.tokens.find((entry) => entry.slot === slotKey);
+      const data = getFixData();
+      const item = getCurrentFixItem();
+      const token = item?.tokens?.find((entry) => entry.slot === slotKey);
       if (!token) {
         return;
       }
@@ -834,8 +968,12 @@ export function createGrammarProgram({
       }
       if (activity.chip === token.need) {
         activity.filled[slotKey] = activity.chip;
-        activity.ok += 1;
-        activity.feedback = "That is right.";
+        activity.right += 1;
+        activity.feedback = isCurrentFixItemComplete()
+          ? activity.i >= activity.items.length - 1
+            ? "Sentence fixed. Finish the session when you are ready."
+            : "Sentence fixed. Move to the next one when you are ready."
+          : "That is right.";
         const skill = data.chips.find((chip) => chip.k === activity.chip)?.skill || "";
         tallySkill(skill, true);
         activity.chip = "";
@@ -844,12 +982,25 @@ export function createGrammarProgram({
         const skill = data.chips.find((chip) => chip.k === activity.chip)?.skill || "";
         tallySkill(skill, false);
       }
+      persistCurrentProgress();
       paint();
     }
 
     function finishFix() {
-      const total = GP_FIX[sessionConfig.content].tokens.filter((entry) => entry.slot).length;
-      finishSession(activity.ok, total);
+      if (!activity || !isCurrentFixItemComplete()) {
+        return;
+      }
+      if (activity.i < activity.items.length - 1) {
+        activity.i += 1;
+        activity.filled = {};
+        activity.chip = "";
+        activity.feedback = "";
+        persistCurrentProgress();
+        paint();
+        return;
+      }
+      const total = activity.items.reduce((sum, item) => sum + getFixItemSlotTotal(item), 0);
+      finishSession(activity.right, total, { sentences: activity.items.length });
     }
 
     function submitWrite() {
@@ -858,6 +1009,7 @@ export function createGrammarProgram({
       }
       if (!activity.submitted) {
         activity.submitted = true;
+        persistCurrentProgress();
         paint();
         return;
       }
@@ -893,6 +1045,7 @@ export function createGrammarProgram({
         tallySkill("tense", false);
         activity.feedback = activity.attempts === 1 ? item.hint : `${item.why} A full answer is: ${item.answers[0]}`;
       }
+      persistCurrentProgress();
       paint();
     }
 
@@ -906,6 +1059,7 @@ export function createGrammarProgram({
         activity.verbPick = activity.verbPick === index ? null : index;
       }
       activity.feedback = "";
+      persistCurrentProgress();
       paint();
     }
 
@@ -935,6 +1089,7 @@ export function createGrammarProgram({
           ? "The subject is who or what the sentence is about. The verb is the action or state."
           : item.why;
       }
+      persistCurrentProgress();
       paint();
     }
 
@@ -944,6 +1099,7 @@ export function createGrammarProgram({
       }
       activity.choices = { ...activity.choices, [groupIndex]: optionIndex };
       activity.feedback = "";
+      persistCurrentProgress();
       paint();
     }
 
@@ -983,6 +1139,7 @@ export function createGrammarProgram({
       activity.feedback = correctCount === item.groups.length
         ? item.why
         : `${item.why} Read the stronger sentence aloud and listen for which details make the most sense.`;
+      persistCurrentProgress();
       paint();
     }
 
@@ -1121,26 +1278,25 @@ export function createGrammarProgram({
       }).join("");
     }
 
-    function buildSessionList() {
-      return GP_SESSIONS.map((cfg, index) => {
-        const isDone = cfg.n <= G.done;
-        const isCurrent = cfg.n === Math.min(GP_SESSIONS.length, G.done + 1);
-        const actionLabel = isDone ? "Done" : isCurrent ? "Start" : "Open";
-        return `
-          <button type="button" class="gp-session${isDone ? " is-done" : ""}${isCurrent ? " is-current" : ""}" data-gp-open-session="${index}">
-            <span class="gp-num">${escapeHtml(String(cfg.n))}</span>
-            <span class="gp-session-text">
-              <span class="gp-session-title">${escapeHtml(cfg.title)}</span>
-              <span class="gp-session-meta">${escapeHtml(cfg.meta)}</span>
-            </span>
-            <span class="gp-pill gp-pill-plum">${escapeHtml(actionLabel)}</span>
-          </button>
-        `;
-      }).join("");
-    }
-
     function buildHubView() {
-      const nextSessionNumber = Math.min(GP_SESSIONS.length, G.done + 1);
+      const readySession = getReadySessionConfig();
+      const hasCurrentActivity = Number(G.current?.n || 0) > G.done && readySession?.n === Number(G.current?.n || 0);
+      const isComplete = G.done >= GP_SESSIONS.length;
+      const title = hasCurrentActivity
+        ? "Continue your grammar activity"
+        : isComplete
+          ? "All current grammar activities are complete"
+          : "Your next grammar activity is ready";
+      const copy = hasCurrentActivity
+        ? "Your place is saved, so you can jump straight back in."
+        : isComplete
+          ? "You can revisit the latest activity, open Property, or check Progress."
+          : "Open the next activity and the program will move forward automatically when you finish.";
+      const buttonLabel = hasCurrentActivity
+        ? "Continue activity"
+        : isComplete
+          ? "Review latest activity"
+          : "Start activity";
       return `
         <div class="gp-view" data-gp-view="hub">
           <header class="gp-head">
@@ -1150,15 +1306,13 @@ export function createGrammarProgram({
             </div>
           </header>
           <div class="gp-card gp-progress">
-            <div class="gp-row-baseline">
-              <div class="gp-strong">${escapeHtml(G.done < GP_SESSIONS.length ? `Session ${nextSessionNumber} next` : "All current sessions complete")}</div>
-              <div class="gp-meta">${escapeHtml(`${G.done} of ${GP_SESSIONS.length} done`)}</div>
-            </div>
+            <div class="gp-eyebrow">Session</div>
+            <div class="gp-strong">${escapeHtml(title)}</div>
+            <div class="gp-meta">${escapeHtml(copy)}</div>
             <div class="gp-bar"><div class="gp-bar-fill" style="width:${Math.round((G.done / GP_SESSIONS.length) * 100)}%"></div></div>
             <div class="gp-next-reward gp-meta">${escapeHtml(getRewardCopy())}</div>
+            ${readySession ? `<button type="button" class="gp-cta gp-cta-plum" data-gp="open-ready">${escapeHtml(buttonLabel)}</button>` : ""}
           </div>
-          <div class="gp-label">Your sessions</div>
-          <div class="gp-sessions">${buildSessionList()}</div>
         </div>
       `;
     }
@@ -1289,8 +1443,12 @@ export function createGrammarProgram({
     }
 
     function buildFixView() {
-      const data = GP_FIX[sessionConfig.content];
-      const totalSlots = data.tokens.filter((token) => token.slot).length;
+      const data = getFixData();
+      const item = getCurrentFixItem();
+      const totalSlots = getFixItemSlotTotal(item);
+      const currentProgress = Object.keys(activity.filled).length;
+      const totalSentences = activity.items.length;
+      const isComplete = isCurrentFixItemComplete();
       return `
         <div class="gp-view" data-gp-view="activity">
           <header class="gp-chrome">
@@ -1298,17 +1456,21 @@ export function createGrammarProgram({
               <div class="gp-eyebrow-soft">English</div>
               <div class="gp-h2">${escapeHtml(sessionConfig.title)}</div>
             </div>
-            <span class="gp-pill gp-pill-plum gp-session-pill">${escapeHtml(`${activity.ok}/${totalSlots} fixed`)}</span>
+            <span class="gp-pill gp-pill-plum gp-session-pill">${escapeHtml(`Sentence ${activity.i + 1} of ${totalSentences}`)}</span>
           </header>
           <div class="gp-chips">${buildProgressChips()}</div>
           <div class="gp-stage">
             <div class="gp-card">
-              <div class="gp-para">${buildFixTokens(data.tokens, activity.filled)}</div>
+              <div class="gp-row-baseline">
+                <div class="gp-strong">Fix this sentence before moving on.</div>
+                <div class="gp-meta">${escapeHtml(`${currentProgress}/${totalSlots} corrections placed`)}</div>
+              </div>
+              <div class="gp-para">${buildFixTokens(item?.tokens || [], activity.filled)}</div>
               <div class="gp-chip-row">
                 ${data.chips.map((chip) => `<button type="button" class="gp-chip-btn${activity.chip === chip.k ? " is-on" : ""}" data-gp-chip="${escapeHtml(chip.k)}">${escapeHtml(chip.label)}</button>`).join("")}
               </div>
               ${activity.feedback ? `<div class="gp-fb${activity.feedback === "That is right." ? " is-ok" : " is-hint"}">${escapeHtml(activity.feedback)}</div>` : ""}
-              <button type="button" class="gp-cta gp-cta-plum" data-gp="finish-fix" ${activity.ok >= totalSlots ? "" : "disabled"}>Finish session</button>
+              <button type="button" class="gp-cta gp-cta-plum" data-gp="finish-fix" ${isComplete ? "" : "disabled"}>${escapeHtml(activity.i >= totalSentences - 1 ? "Finish session" : "Next sentence")}</button>
             </div>
           </div>
         </div>
@@ -1532,6 +1694,7 @@ export function createGrammarProgram({
       const total = latest?.total || 0;
       const roundScores = Array.isArray(latest?.details?.roundScores) ? latest.details.roundScores : [];
       const missedWords = Array.isArray(latest?.details?.missed) ? latest.details.missed : [];
+      const hasNextActivity = G.done < GP_SESSIONS.length;
       return `
         <div class="gp-view" data-gp-view="activity">
           <header class="gp-chrome">
@@ -1558,8 +1721,9 @@ export function createGrammarProgram({
                   </div>`
                 : ""}
               <div class="gp-results-actions">
+                ${hasNextActivity ? `<button type="button" class="gp-cta gp-cta-plum" data-gp="open-ready">Next activity</button>` : ""}
                 <button type="button" class="gp-cta gp-cta-plum" data-gp-tab="property">Visit the property</button>
-                <button type="button" class="gp-pill-btn" data-gp="back">Back to sessions</button>
+                <button type="button" class="gp-pill-btn" data-gp="back">Back to grammar</button>
               </div>
             </div>
           </div>
@@ -1771,6 +1935,9 @@ export function createGrammarProgram({
           return;
         }
         if (target.dataset.gpTab) {
+          if (sessionConfig && view !== "results" && sessionConfig.n > G.done) {
+            persistCurrentProgress();
+          }
           stopAll();
           tab = target.dataset.gpTab;
           if (tab === "hub") {
@@ -1810,6 +1977,9 @@ export function createGrammarProgram({
         }
 
         switch (target.dataset.gp) {
+          case "open-ready":
+            openReadySession();
+            return;
           case "play-audio":
             if (view === "intro") {
               playTeachAudio();
@@ -1864,6 +2034,9 @@ export function createGrammarProgram({
             finishFix();
             return;
           case "back":
+            if (sessionConfig && view !== "results" && sessionConfig.n > G.done) {
+              persistCurrentProgress();
+            }
             stopAll();
             tab = "hub";
             view = "hub";
@@ -1886,11 +2059,13 @@ export function createGrammarProgram({
         if (sessionConfig?.act === "write") {
           activity.text = writer.value;
           activity.submitted = false;
+          persistCurrentProgress();
           return;
         }
         if (sessionConfig?.act === "rewrite") {
           activity.text = writer.value;
           activity.checked = false;
+          persistCurrentProgress();
         }
       });
     }

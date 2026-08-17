@@ -197,16 +197,82 @@ export const GP_TENSE = {
 
 export const GP_FIX = {
   para1: {
-    tokens: [
-      { t: "my", slot: "cap1", need: "cap" },
-      { t: "pony" }, { t: "is" }, { t: "called" }, { t: "Willow" },
-      { slot: "end1", need: "end" },
-      { t: "She" }, { t: "lives" }, { t: "in" }, { t: "the" }, { t: "back" }, { t: "paddock" },
-      { slot: "end2", need: "end" },
-      { t: "When" }, { t: "I" }, { t: "call" }, { t: "her" },
-      { slot: "comma1", need: "comma" },
-      { t: "she" }, { t: "walks" }, { t: "to" }, { t: "the" }, { t: "gate" },
-      { slot: "end3", need: "end" }
+    items: [
+      {
+        tokens: [
+          { t: "my", slot: "cap1", need: "cap" },
+          { t: "pony" }, { t: "waits" }, { t: "by" }, { t: "the" }, { t: "gate" },
+          { slot: "end1", need: "end" }
+        ]
+      },
+      {
+        tokens: [
+          { t: "after", slot: "cap1", need: "cap" },
+          { t: "the" }, { t: "lesson" }, { slot: "comma1", need: "comma" },
+          { t: "we" }, { t: "brushed" }, { t: "Willow" },
+          { slot: "end1", need: "end" }
+        ]
+      },
+      {
+        tokens: [
+          { t: "the", slot: "cap1", need: "cap" },
+          { t: "rider" }, { t: "borrowed" }, { t: "her" }, { t: "cousins", slot: "apos1", need: "apos", c: "cousin's" }, { t: "saddle" },
+          { slot: "end1", need: "end" }
+        ]
+      },
+      {
+        tokens: [
+          { t: "when", slot: "cap1", need: "cap" },
+          { t: "the" }, { t: "rain" }, { t: "stopped" }, { slot: "comma1", need: "comma" },
+          { t: "we" }, { t: "opened" }, { t: "the" }, { t: "stable" },
+          { slot: "end1", need: "end" }
+        ]
+      },
+      {
+        tokens: [
+          { t: "i", slot: "cap1", need: "cap" },
+          { t: "filled" }, { t: "the" }, { t: "buckets" }, { slot: "comma1", need: "comma" },
+          { t: "then" }, { t: "I" }, { t: "swept" }, { t: "the" }, { t: "aisle" },
+          { slot: "end1", need: "end" }
+        ]
+      },
+      {
+        tokens: [
+          { t: "the", slot: "cap1", need: "cap" },
+          { t: "riders", slot: "apos1", need: "apos", c: "rider's" }, { t: "helmet" }, { t: "sat" }, { t: "on" }, { t: "the" }, { t: "bench" },
+          { slot: "end1", need: "end" }
+        ]
+      },
+      {
+        tokens: [
+          { t: "before", slot: "cap1", need: "cap" },
+          { t: "the" }, { t: "jump" }, { slot: "comma1", need: "comma" },
+          { t: "the" }, { t: "pony" }, { t: "snorted" }, { t: "loudly" },
+          { slot: "end1", need: "end" }
+        ]
+      },
+      {
+        tokens: [
+          { t: "the", slot: "cap1", need: "cap" },
+          { t: "bridles", slot: "apos1", need: "apos", c: "bridle's" }, { t: "straps" }, { t: "were" }, { t: "muddy" },
+          { slot: "end1", need: "end" }
+        ]
+      },
+      {
+        tokens: [
+          { t: "when", slot: "cap1", need: "cap" },
+          { t: "we" }, { t: "arrived" }, { slot: "comma1", need: "comma" },
+          { t: "the" }, { t: "farrier" }, { t: "waved" },
+          { slot: "end1", need: "end" }
+        ]
+      },
+      {
+        tokens: [
+          { t: "the", slot: "cap1", need: "cap" },
+          { t: "tack" }, { t: "room" }, { t: "door" }, { t: "was" }, { t: "open" },
+          { slot: "end1", need: "end" }
+        ]
+      }
     ],
     chips: [
       { k: "cap", label: "Capital letter", skill: "capitals" },
