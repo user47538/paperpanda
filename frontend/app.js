@@ -1,3 +1,6 @@
+import { GP_SESSIONS } from "./grammar-content.js";
+import { createGrammarProgram } from "./grammar-runtime.js";
+
 const accountsStorageKey = "studylift-accounts";
 const sessionStorageKey = "studylift-session";
 const authTokenStorageKey = "paperpanda-session-token";
@@ -477,6 +480,7 @@ const FOCUS_AREAS = [
   { id: "reader", icon: "📖", label: "Read", blurb: "Read & listen" },
   { id: "homework", icon: "✎", label: "Homework", blurb: "Tasks to do" },
   { id: "spelling", icon: "Aa", label: "Practice", blurb: "Targeted spelling practice" },
+  { id: "grammar", icon: "✦", label: "Grammar", blurb: "Session-based grammar practice" },
   { id: "writing", icon: "✍", label: "Writing", blurb: "Build a story" },
   { id: "watch", icon: "▶", label: "Watch", blurb: "Class videos" },
   { id: "assessments", icon: "🎯", label: "Assessments", blurb: "Tests & due dates" }
@@ -1578,6 +1582,7 @@ const elements = {
   tabCountReader: document.getElementById("tab-count-reader"),
   tabCountHomework: document.getElementById("tab-count-homework"),
   tabCountSpelling: document.getElementById("tab-count-spelling"),
+  tabCountGrammar: document.getElementById("tab-count-grammar"),
   tabCountWriting: document.getElementById("tab-count-writing"),
   tabCountWatch: document.getElementById("tab-count-watch"),
   tabCountAssessments: document.getElementById("tab-count-assessments"),
@@ -1585,10 +1590,12 @@ const elements = {
   viewerPanelReader: document.getElementById("viewer-panel-reader"),
   viewerPanelHomework: document.getElementById("viewer-panel-homework"),
   viewerPanelSpelling: document.getElementById("viewer-panel-spelling"),
+  viewerPanelGrammar: document.getElementById("viewer-panel-grammar"),
   viewerPanelWriting: document.getElementById("viewer-panel-writing"),
   viewerPanelWatch: document.getElementById("viewer-panel-watch"),
   watchAddLinkButton: document.getElementById("watch-add-link-button"),
   viewerPanelAssessments: document.getElementById("viewer-panel-assessments"),
+  grammarSection: document.getElementById("grammar-section"),
   writingSection: document.getElementById("writing-section"),
   documentsBody: document.getElementById("documents-body"),
   documentsToggleButton: document.getElementById("documents-toggle-button"),
@@ -1754,6 +1761,7 @@ function createBaseSubjects() {
     hiddenWatchUrls: [],
     askHistory: [],
     savedRevisionTests: [],
+    grammar: createDefaultGrammarState(subject.id),
     spelling: createDefaultSpellingState(subject.id, subject.name),
     writing: createDefaultWritingState(subject.id)
   }));
@@ -1768,6 +1776,7 @@ function createInitialSubjectsForAccount(account) {
     hiddenWatchUrls: [],
     askHistory: [],
     savedRevisionTests: [],
+    grammar: createDefaultGrammarState(subject.id),
     spelling: createDefaultSpellingState(subject.id, subject.name),
     writing: createDefaultWritingState(subject.id)
   }));
@@ -4054,6 +4063,7 @@ function renderSubjectTabs() {
     reader: getAllDocumentBundles(subject).length,
     homework: getHomeworkBundles(subject).length,
     spelling: getSpellingPendingActivityCount(subject),
+    grammar: getSubjectGrammarPendingSessionCount(subject),
     writing: getSubjectWritingPendingSectionCount(subject),
     watch: getSubjectWatchItems(subject).length,
     assessments: Array.isArray(subject.assessments) ? subject.assessments.filter((assessment) => !assessment.completed).length : 0
@@ -4062,6 +4072,7 @@ function renderSubjectTabs() {
   elements.tabCountReader.textContent = String(counts.reader);
   elements.tabCountHomework.textContent = String(counts.homework);
   elements.tabCountSpelling.textContent = String(counts.spelling);
+  elements.tabCountGrammar.textContent = String(counts.grammar);
   elements.tabCountWriting.textContent = String(counts.writing);
   elements.tabCountWatch.textContent = String(counts.watch);
   elements.tabCountAssessments.textContent = String(counts.assessments);
@@ -4073,6 +4084,7 @@ function renderSubjectTabs() {
   elements.viewerPanelReader.classList.toggle("hidden", state.activeSubjectTab !== "reader");
   elements.viewerPanelHomework.classList.toggle("hidden", state.activeSubjectTab !== "homework");
   elements.viewerPanelSpelling.classList.toggle("hidden", state.activeSubjectTab !== "spelling");
+  elements.viewerPanelGrammar.classList.toggle("hidden", state.activeSubjectTab !== "grammar");
   elements.viewerPanelWriting.classList.toggle("hidden", state.activeSubjectTab !== "writing");
   elements.viewerPanelWatch.classList.toggle("hidden", state.activeSubjectTab !== "watch");
   elements.viewerPanelAssessments.classList.toggle("hidden", state.activeSubjectTab !== "assessments");
@@ -4555,6 +4567,15 @@ function renderDockContext() {
         </article>
       `
       : `<div class="empty-state empty-state--compact">Open the Practice subject to train this lesson.</div>`;
+    return;
+  }
+
+  if (state.activeSubjectTab === "grammar") {
+    const grammar = getSubjectGrammarState(subject);
+    elements.dockContextTitle.textContent = "Grammar";
+    elements.dockContextBody.innerHTML = subject.id === "english"
+      ? `<article class="dock-tile dock-tile--mint"><div class="dock-tile__copy"><strong>${escapeHtml(`${grammar.done}/${GP_SESSIONS.length} sessions complete`)}</strong><span>${escapeHtml(grammar.done < GP_SESSIONS.length ? `Session ${grammar.done + 1} is ready to start.` : "All current grammar sessions are complete.")}</span></div></article>`
+      : `<div class="empty-state empty-state--compact">Open English to continue the grammar sessions.</div>`;
     return;
   }
 
@@ -5755,6 +5776,7 @@ function hydrateStoredSubject(subject, index) {
     savedRevisionTests: Array.isArray(subject.savedRevisionTests)
       ? subject.savedRevisionTests.map(normaliseSavedRevisionTest)
       : [],
+    grammar: normaliseGrammarState(subject.grammar, resolvedSubjectId),
     spelling: normaliseSpellingState(subject.spelling, resolvedSubjectId, subject.name),
     writing: normaliseWritingState(subject.writing, resolvedSubjectId),
     practice: Array.isArray(subject.practice)
@@ -6028,6 +6050,65 @@ function createDefaultWritingState(subjectId = "") {
     isGeneratingIllustrations: false,
     illustrationError: "",
     sections: createDefaultWritingSections()
+  };
+}
+
+function createDefaultGrammarState(subjectId = "") {
+  const enabled = subjectId === "english";
+  return {
+    enabled,
+    done: 0,
+    audioHeard: [],
+    skills: {},
+    results: []
+  };
+}
+
+function normaliseGrammarState(grammar, subjectId = "") {
+  const base = createDefaultGrammarState(subjectId);
+  const next = grammar && typeof grammar === "object" && !Array.isArray(grammar) ? grammar : {};
+  const skills = next.skills && typeof next.skills === "object" && !Array.isArray(next.skills) ? next.skills : {};
+  const normaliseResultDetails = (details) => {
+    const source = details && typeof details === "object" && !Array.isArray(details) ? details : {};
+    return {
+      roundScores: Array.isArray(source.roundScores)
+        ? source.roundScores.map((score) => Math.max(0, Number(score || 0) || 0))
+        : [],
+      missed: Array.isArray(source.missed)
+        ? [...new Set(source.missed.map((value) => String(value || "").trim()).filter(Boolean))]
+        : [],
+      replayEvidence: String(source.replayEvidence || "")
+    };
+  };
+  return {
+    ...base,
+    ...next,
+    enabled: subjectId === "english",
+    done: Math.max(0, Math.min(GP_SESSIONS.length, Number(next.done || 0) || 0)),
+    audioHeard: Array.isArray(next.audioHeard)
+      ? [...new Set(next.audioHeard.map((value) => String(value || "")).filter(Boolean))]
+      : [],
+    skills: Object.fromEntries(
+      Object.entries(skills).map(([skillKey, tally]) => [
+        String(skillKey || ""),
+        {
+          right: Math.max(0, Number(tally?.right || 0) || 0),
+          wrong: Math.max(0, Number(tally?.wrong || 0) || 0),
+          lastSession: Math.max(0, Number(tally?.lastSession || 0) || 0)
+        }
+      ]).filter(([skillKey]) => skillKey)
+    ),
+    results: Array.isArray(next.results)
+      ? next.results
+          .map((entry) => ({
+            n: Math.max(1, Math.min(GP_SESSIONS.length, Number(entry?.n || 0) || 1)),
+            score: Math.max(0, Number(entry?.score || 0) || 0),
+            total: Math.max(0, Number(entry?.total || 0) || 0),
+            at: String(entry?.at || ""),
+            details: normaliseResultDetails(entry?.details)
+          }))
+          .filter((entry) => entry.n && entry.total >= 0)
+      : []
   };
 }
 
@@ -6448,6 +6529,19 @@ function getSubjectWritingState(subject) {
   }
   subject.writing = normaliseWritingState(subject.writing, subject.id);
   return subject.writing;
+}
+
+function getSubjectGrammarState(subject) {
+  if (!subject) {
+    return createDefaultGrammarState("");
+  }
+  subject.grammar = normaliseGrammarState(subject.grammar, subject.id);
+  return subject.grammar;
+}
+
+function getSubjectGrammarPendingSessionCount(subject) {
+  const grammar = getSubjectGrammarState(subject);
+  return grammar.enabled ? Math.max(0, GP_SESSIONS.length - grammar.done) : 0;
 }
 
 function normalizeSpellingAttempt(value) {
@@ -9019,8 +9113,12 @@ const RewardProperty = (function () {
   let drag = null;
   let pan = null;
 
+  function getDerivedStage(grammarSessions = 0) {
+    return Math.max(0, Math.min(RP_STAGES.length - 1, Math.floor(Math.max(0, Number(grammarSessions || 0) || 0) / 2)));
+  }
+
   function defaultState() {
-    return { stage: 0, owned: 2, sessions: 0, horses: [], arenaJumps: [] };
+    return { stage: 0, owned: 2, sessions: 0, grammarSessions: 0, horses: [], arenaJumps: [] };
   }
 
   function clampZone(x, y) {
@@ -9082,12 +9180,14 @@ const RewardProperty = (function () {
 
   function rewardPhaseUnlocked() {
     ensureLoaded();
-    return S.sessions >= RP_REWARD_REQUIRED_SESSIONS && S.stage >= RP_REWARD_READY_STAGE;
+    return Math.max(S.sessions, S.horses.length) >= RP_REWARD_REQUIRED_SESSIONS;
   }
 
   function rewardSessionCount() {
     ensureLoaded();
-    return rewardPhaseUnlocked() ? Math.max(0, S.sessions - RP_REWARD_REQUIRED_SESSIONS) : 0;
+    return rewardPhaseUnlocked()
+      ? Math.max(0, Math.max(S.sessions, S.horses.length) - RP_REWARD_REQUIRED_SESSIONS)
+      : 0;
   }
 
   function ownedTack() {
@@ -9114,16 +9214,9 @@ const RewardProperty = (function () {
   }
 
   function getRewardMilestoneMessage() {
-    const sessionShortfall = Math.max(0, RP_REWARD_REQUIRED_SESSIONS - S.sessions);
-    const stageShortfall = Math.max(0, RP_REWARD_READY_STAGE - S.stage);
+    const sessionShortfall = Math.max(0, RP_REWARD_REQUIRED_SESSIONS - Math.max(S.sessions, S.horses.length));
     if (!rewardPhaseUnlocked()) {
-      if (sessionShortfall > 0 && stageShortfall > 0) {
-        return `Collect ${RP_REWARD_REQUIRED_SESSIONS} horses and renovate through the fencing stage to start earning tack and jumps.`;
-      }
-      if (sessionShortfall > 0) {
-        return `Complete ${sessionShortfall} more practice session${sessionShortfall === 1 ? "" : "s"} to start the reward tack and jump collection.`;
-      }
-      return `Finish ${stageShortfall} more renovation stage${stageShortfall === 1 ? "" : "s"} to open the tack room rewards and arena jumps.`;
+      return `Complete ${sessionShortfall} more practice session${sessionShortfall === 1 ? "" : "s"} to start the reward tack and jump collection.`;
     }
     if (rewardSessionCount() >= RP_TACK.length) {
       return `All four tack rewards are unlocked. Keep completing sessions to collect and place more jumps.`;
@@ -9198,10 +9291,13 @@ const RewardProperty = (function () {
       saved = null;
     }
     const base = saved && typeof saved === "object" ? saved : defaultState();
+    const grammarSessions = Math.max(0, Number(base.grammarSessions || 0) || 0);
+    const savedStage = Math.max(0, Math.min(RP_STAGES.length - 1, Number(base.stage || 0) || 0));
     S = {
-      stage: Math.max(0, Math.min(RP_STAGES.length - 1, Number(base.stage || 0) || 0)),
+      stage: Math.max(savedStage, getDerivedStage(grammarSessions)),
       owned: Math.max(2, Math.min(RP_TACK.length, Number(base.owned || 2) || 2)),
       sessions: Math.max(0, Number(base.sessions || 0) || 0),
+      grammarSessions,
       horses: Array.isArray(base.horses) ? base.horses.map((horse, index) => normaliseHorse(horse, index)) : [],
       arenaJumps: Array.isArray(base.arenaJumps) ? base.arenaJumps.map((jump, index) => normaliseArenaJump(jump, index)) : []
     };
@@ -9219,6 +9315,21 @@ const RewardProperty = (function () {
       localStorage.setItem(RP_STORAGE_KEY, JSON.stringify(S));
     } catch (error) {
       // Ignore storage write failures.
+    }
+  }
+
+  function setGrammarSessions(doneCount = 0) {
+    ensureLoaded();
+    const nextGrammarSessions = Math.max(0, Number(doneCount || 0) || 0);
+    const nextStage = Math.max(S.stage, getDerivedStage(nextGrammarSessions));
+    const changed = nextGrammarSessions !== S.grammarSessions || nextStage !== S.stage;
+    S.grammarSessions = nextGrammarSessions;
+    S.stage = nextStage;
+    if (changed) {
+      save();
+      if (root?.isConnected) {
+        render();
+      }
     }
   }
 
@@ -9324,6 +9435,7 @@ const RewardProperty = (function () {
     const nextStage = Math.min(RP_STAGES.length - 1, S.stage + 1);
     if (nextStage !== S.stage) {
       S.stage = nextStage;
+      S.grammarSessions = Math.max(S.grammarSessions, nextStage * 2);
       save();
     }
     render();
@@ -9851,8 +9963,13 @@ const RewardProperty = (function () {
   function mount(element, options = {}) {
     root = element;
     ensureLoaded();
-    if (options.subject) {
-      syncPracticeState(options.subject);
+    if (options.practiceSubject || options.subject) {
+      syncPracticeState(options.practiceSubject || options.subject);
+    }
+    if (Number.isFinite(Number(options.grammarSessions))) {
+      const nextGrammarSessions = Math.max(0, Number(options.grammarSessions || 0) || 0);
+      S.grammarSessions = nextGrammarSessions;
+      S.stage = Math.max(S.stage, getDerivedStage(nextGrammarSessions));
     }
     bind();
     render();
@@ -9863,6 +9980,7 @@ const RewardProperty = (function () {
     addHorse,
     renovate,
     reset,
+    setGrammarSessions,
     syncPracticeState,
     get state() {
       ensureLoaded();
@@ -9876,8 +9994,29 @@ function mountRewardProperty(subject, host) {
   if (!root) {
     return;
   }
-  RewardProperty.mount(root, { subject });
+  const practiceSubject = state.subjects.find((item) => item.id === "spelling") || subject;
+  const englishSubject = state.subjects.find((item) => item.id === "english") || subject;
+  if (RewardProperty.setGrammarSessions) {
+    RewardProperty.setGrammarSessions(getSubjectGrammarState(englishSubject).done);
+  }
+  if (RewardProperty.syncPracticeState) {
+    RewardProperty.syncPracticeState(practiceSubject);
+  }
+  RewardProperty.mount(root, {
+    subject: practiceSubject,
+    practiceSubject,
+    grammarSessions: getSubjectGrammarState(englishSubject).done
+  });
 }
+
+const GrammarProgram = createGrammarProgram({
+  escapeHtml,
+  persistSubjects,
+  getSubjectGrammarState,
+  buildRewardPropertyMarkup,
+  mountRewardProperty,
+  RewardProperty
+});
 
 function buildSpellingSurfaceTabs(activeTab) {
   const tabs = [
@@ -12495,6 +12634,7 @@ function getSubjectTabCounts(subject) {
     reader: getReaderDocuments(subject).length,
     homework: getSubjectHomeworkBundles(subject).length,
     spelling: getSpellingPendingActivityCount(subject),
+    grammar: getSubjectGrammarPendingSessionCount(subject),
     writing: getSubjectWritingPendingSectionCount(subject),
     watch: getSubjectWatchLinks(subject).length,
     assessments: getActiveSubjectAssessments(subject).length
@@ -12505,7 +12645,7 @@ function getAvailableSubjectTabs(subject) {
   return subject?.id === "spelling"
     ? ["spelling"]
     : subject?.id === "english"
-      ? ["reader", "writing", "homework", "watch", "assessments"]
+      ? ["reader", "grammar", "writing", "homework", "watch", "assessments"]
       : ["reader", "homework", "watch", "assessments"];
 }
 
@@ -12520,6 +12660,10 @@ function getPreferredSubjectTab(subject) {
     !counts.assessments
   ) {
     return "spelling";
+  }
+
+  if (subject?.id === "english" && counts.grammar) {
+    return "grammar";
   }
 
   return getAvailableSubjectTabs(subject)[0] || "reader";
@@ -12564,10 +12708,15 @@ function getHomeFocusSubjectStatus(subject) {
   ).length;
   const activeAssessmentCount = getActiveSubjectAssessments(subject).length;
   const spellingPendingCount = getSpellingPendingActivityCount(subject);
-  const waitingCount = unreadCount + remainingHomeworkCount + activeAssessmentCount + spellingPendingCount;
-  const summary = spellingPendingCount && waitingCount === spellingPendingCount
-    ? `${spellingPendingCount} spelling ${spellingPendingCount === 1 ? "stage" : "stages"}`
-    : spellingPendingCount
+  const grammarPendingCount = getSubjectGrammarPendingSessionCount(subject);
+  const waitingCount = unreadCount + remainingHomeworkCount + activeAssessmentCount + spellingPendingCount + grammarPendingCount;
+  const summary = subject?.id === "english" && grammarPendingCount && waitingCount === grammarPendingCount
+    ? `${grammarPendingCount} grammar session${grammarPendingCount === 1 ? "" : "s"}`
+    : spellingPendingCount && waitingCount === spellingPendingCount
+      ? `${spellingPendingCount} spelling ${spellingPendingCount === 1 ? "stage" : "stages"}`
+      : grammarPendingCount
+        ? `${waitingCount} to do · ${grammarPendingCount} grammar session${grammarPendingCount === 1 ? "" : "s"}`
+        : spellingPendingCount
       ? `${waitingCount} to do · ${spellingPendingCount} spelling stage${spellingPendingCount === 1 ? "" : "s"}`
       : waitingCount
         ? `${waitingCount} to do`
@@ -12586,6 +12735,7 @@ function getSubjectHeroCopy(subject, tab) {
   const nextAssessment = getNextSubjectAssessment(subject);
   const homeworkBundles = getSubjectHomeworkBundles(subject);
   const spellingPending = getSpellingPendingActivityCount(subject);
+  const grammarPending = getSubjectGrammarPendingSessionCount(subject);
   const watchCount = getSubjectWatchLinks(subject).length;
   const activeAssessments = getActiveSubjectAssessments(subject);
 
@@ -12623,6 +12773,17 @@ function getSubjectHeroCopy(subject, tab) {
           ? `left in ${SPELLING_UNIT_SEED.title} — current focus: ${SPELLING_STAGE_LABELS[stageId].toLowerCase()}.`
           : ""
         : "ready in the Practice subject when you want focused pattern practice."
+    };
+  }
+
+  if (tab === "grammar") {
+    const grammar = getSubjectGrammarState(subject);
+    const nextSessionNumber = Math.min(GP_SESSIONS.length, grammar.done + 1);
+    return {
+      big: `${grammarPending} ${grammarPending === 1 ? "session" : "sessions"}`,
+      rest: grammarPending
+        ? `left in Grammar — next up: session ${nextSessionNumber}.`
+        : "complete in Grammar right now."
     };
   }
 
@@ -16724,6 +16885,30 @@ function renderWriting() {
   });
 }
 
+function renderGrammar() {
+  const host = elements.grammarSection;
+  const subject = getSelectedSubject();
+  if (!host || !subject) {
+    return;
+  }
+
+  const grammar = getSubjectGrammarState(subject);
+  if (!grammar.enabled) {
+    host.innerHTML = `
+      <section class="gp-shell-empty">
+        <article class="gp-empty-card">
+          <p class="eyebrow">Grammar</p>
+          <h3>Open English to work through grammar sessions</h3>
+          <p>The grammar program lives in the English workspace so session progress, skill tracking, and renovation rewards stay linked.</p>
+        </article>
+      </section>
+    `;
+    return;
+  }
+
+  GrammarProgram.mount(host, { subject });
+}
+
 function renderSpelling() {
   const host = elements.spellingSection;
   const subject = getSelectedSubject();
@@ -19614,6 +19799,7 @@ function render() {
   renderAskContext();
   renderSavedRevisionTests();
   renderAssessments();
+  renderGrammar();
   renderWriting();
   renderSpelling();
   renderPractice();
