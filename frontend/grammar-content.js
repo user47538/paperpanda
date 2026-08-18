@@ -2,25 +2,25 @@ export const GP_ACTIVITIES_PER_SESSION = 3;
 
 export const GP_SESSIONS = [
   { n: 1, title: "Fix the Paragraph", meta: "Punctuation · drag-and-drop", act: "fix", content: "para1" },
-  { n: 2, title: "Find the Nouns", meta: "Nouns · 10 word selection", act: "pick", content: "noun" },
+  { n: 2, title: "Find the Nouns", meta: "Nouns · 5 sentence selection", act: "pick", content: "noun" },
   { n: 3, title: "What's Wrong?", meta: "Correction · 10 questions", act: "mc", content: "correct1" },
   { n: 4, title: "Comprehension 1", meta: "Short story · 6 questions", act: "comp", content: "passage1" },
-  { n: 5, title: "Find the Verbs", meta: "Verbs · 10 word selection", act: "pick", content: "verb" },
+  { n: 5, title: "Find the Verbs", meta: "Verbs · 5 sentence selection", act: "pick", content: "verb" },
   { n: 6, title: "When Did It Happen?", meta: "Tense · selector", act: "tense", content: "tense1" },
   { n: 7, title: "Write a Sentence", meta: "Construction · writing", act: "write", content: "write1" },
-  { n: 8, title: "Find the Adjectives", meta: "Adjectives · 10 word selection", act: "pick", content: "adjective" },
+  { n: 8, title: "Find the Adjectives", meta: "Adjectives · 5 sentence selection", act: "pick", content: "adjective" },
   { n: 9, title: "Comprehension 2", meta: "Folktale · 6 questions", act: "comp", content: "passage2" },
   { n: 10, title: "Change the Tense", meta: "Tense · multiple choice", act: "mc", content: "tense2" },
   { n: 11, title: "Fix the Paragraph II", meta: "Punctuation · drag-and-drop", act: "fix", content: "para2" },
-  { n: 12, title: "Find the Pronouns", meta: "Pronouns · 10 word selection", act: "pick", content: "pronoun" },
+  { n: 12, title: "Find the Pronouns", meta: "Pronouns · 5 sentence selection", act: "pick", content: "pronoun" },
   { n: 13, title: "Sentence or Not?", meta: "Fragments · binary choice", act: "binary", content: "frag1" },
   { n: 14, title: "Comprehension 3", meta: "Non-fiction · 6 questions", act: "comp", content: "passage3" },
-  { n: 15, title: "Find the Adverbs", meta: "Adverbs · 10 word selection", act: "pick", content: "adverb" },
+  { n: 15, title: "Find the Adverbs", meta: "Adverbs · 5 sentence selection", act: "pick", content: "adverb" },
   { n: 16, title: "Write It in Another Tense", meta: "Tense · sentence rewrite", act: "rewrite", content: "rewrite1" },
-  { n: 17, title: "Find the Conjunctions", meta: "Conjunctions · 10 word selection", act: "pick", content: "conjunction" },
+  { n: 17, title: "Find the Conjunctions", meta: "Conjunctions · 5 sentence selection", act: "pick", content: "conjunction" },
   { n: 18, title: "Join the Sentences", meta: "Compound · drag-and-drop", act: "join", content: "join1" },
   { n: 19, title: "Comprehension 4", meta: "Narrative · 6–8 questions", act: "comp", content: "passage4" },
-  { n: 20, title: "Find the Prepositions", meta: "Prepositions · 10 word selection", act: "pick", content: "preposition" },
+  { n: 20, title: "Find the Prepositions", meta: "Prepositions · 5 sentence selection", act: "pick", content: "preposition" },
   { n: 21, title: "Who Did What?", meta: "Subject + verb · highlight", act: "select", content: "subverb1" },
   { n: 22, title: "Fix the Sentence II", meta: "Mixed review · 10 questions", act: "mc", content: "mixed1" },
   { n: 23, title: "Make It Better", meta: "Expansion · builder", act: "build", content: "expand1" },
@@ -57,11 +57,13 @@ export const GP_TERMS = {
     definition: "A noun names a person, a place, a thing or an idea.",
     examples: ["The rider opened the gate.", "Her saddle sat on the rail.", "Courage helped her try again."],
     audioText: "A noun names a person, a place, a thing or an idea. Rider is a noun. Gate is a noun. Courage is a noun, even though you cannot touch it. In this activity you will select only the nouns.",
-    instruction: "Tap the nouns",
-    rounds: [
-      [["horse", 1], ["quickly", 0], ["saddle", 1], ["jumped", 0], ["barn", 1], ["softly", 0], ["rider", 1], ["field", 1], ["stable", 1], ["bright", 0]],
-      [["paddock", 1], ["carefully", 0], ["halter", 1], ["green", 0], ["fence", 1], ["trotted", 0], ["groom", 1], ["bucket", 1], ["arena", 1], ["gentle", 0]],
-      [["courage", 1], ["gently", 0], ["freedom", 1], ["brave", 0], ["silence", 1], ["eagerly", 0], ["journey", 1], ["kindness", 1], ["friendship", 1], ["restless", 0]]
+    instruction: "Select the noun in each sentence.",
+    items: [
+      { words: ["The", "rider", "opened", "the", "gate."], a: 1, skill: "nouns", why: "Rider is the naming word in this sentence." },
+      { words: ["Her", "saddle", "slipped", "off", "the", "rail."], a: 1, skill: "nouns", why: "Saddle names the thing." },
+      { words: ["Courage", "helped", "Mia", "finish", "the", "jump."], a: 0, skill: "nouns", why: "Courage is the idea being named." },
+      { words: ["The", "stable", "stayed", "cool", "all", "afternoon."], a: 1, skill: "nouns", why: "Stable names the place." },
+      { words: ["A", "helmet", "rested", "beside", "the", "bucket."], a: 1, skill: "nouns", why: "Helmet is the naming word here." }
     ]
   },
   verb: {
@@ -69,11 +71,13 @@ export const GP_TERMS = {
     definition: "A verb tells you what someone or something does.",
     examples: ["The pony trots to the gate.", "She lifted the saddle.", "They will ride at dawn."],
     audioText: "A verb tells you what someone or something does. Trots is a verb. Lifted is a verb. Will ride is a verb group. In this activity you will select only the verbs.",
-    instruction: "Tap the verbs",
-    rounds: [
-      [["gallops", 1], ["saddle", 0], ["brushed", 1], ["barn", 0], ["jumps", 1], ["quiet", 0], ["feeds", 1], ["climbed", 1], ["waited", 1], ["steady", 0]],
-      [["arrived", 1], ["paddock", 0], ["whinnied", 1], ["muddy", 0], ["carried", 1], ["gate", 0], ["trotted", 1], ["listened", 1], ["leaned", 1], ["gentle", 0]],
-      [["hesitated", 1], ["gentle", 0], ["remembered", 1], ["patient", 0], ["balanced", 1], ["proudly", 0], ["encouraged", 1], ["struggled", 1], ["rested", 1], ["careful", 0]]
+    instruction: "Select the verb in each sentence.",
+    items: [
+      { words: ["The", "pony", "trots", "toward", "the", "gate."], a: 2, skill: "verbs", why: "Trots is the action word." },
+      { words: ["Mia", "lifted", "the", "saddle", "carefully."], a: 1, skill: "verbs", why: "Lifted tells what Mia did." },
+      { words: ["They", "will", "ride", "at", "dawn."], a: 2, skill: "verbs", why: "Ride is the main action word in the verb group." },
+      { words: ["The", "farrier", "checked", "each", "hoof."], a: 2, skill: "verbs", why: "Checked tells the action." },
+      { words: ["Smoke", "waited", "near", "the", "float."], a: 1, skill: "verbs", why: "Waited is the verb." }
     ]
   },
   adjective: {
@@ -81,11 +85,13 @@ export const GP_TERMS = {
     definition: "An adjective describes a noun.",
     examples: ["The grey pony waited by the gate.", "She held the heavy saddle.", "A nervous horse needs a calm rider."],
     audioText: "An adjective describes a noun. Grey tells us about the pony. Heavy tells us about the saddle. Calm tells us about the rider. In this activity you will select only the adjectives.",
-    instruction: "Tap the adjectives",
-    rounds: [
-      [["grey", 1], ["galloped", 0], ["heavy", 1], ["saddle", 0], ["nervous", 1], ["carefully", 0], ["calm", 1], ["barn", 0], ["striped", 1], ["dusty", 1]],
-      [["wooden", 1], ["halter", 0], ["muddy", 1], ["trotted", 0], ["striped", 1], ["quietly", 0], ["sleepy", 1], ["paddock", 0], ["shiny", 1], ["gentle", 1]],
-      [["patient", 1], ["arrived", 0], ["restless", 1], ["bucket", 0], ["fragile", 1], ["softly", 0], ["curious", 1], ["journey", 0], ["brave", 1], ["golden", 1]]
+    instruction: "Select the adjective in each sentence.",
+    items: [
+      { words: ["The", "grey", "pony", "waited", "by", "the", "gate."], a: 1, skill: "adjectives", why: "Grey describes the pony." },
+      { words: ["She", "held", "the", "heavy", "saddle", "steady."], a: 3, skill: "adjectives", why: "Heavy describes the saddle." },
+      { words: ["A", "nervous", "horse", "needs", "a", "calm", "rider."], a: 1, skill: "adjectives", why: "Nervous describes the horse." },
+      { words: ["The", "wooden", "fence", "shook", "in", "the", "wind."], a: 1, skill: "adjectives", why: "Wooden describes the fence." },
+      { words: ["Her", "striped", "scarf", "slid", "off", "the", "bench."], a: 1, skill: "adjectives", why: "Striped describes the scarf." }
     ]
   },
   pronoun: {
@@ -93,11 +99,13 @@ export const GP_TERMS = {
     definition: "A pronoun takes the place of a noun.",
     examples: ["Nina brushed Smoke, then she fed him.", "They opened the gate together."],
     audioText: "A pronoun takes the place of a noun. She can stand for Nina. Him can stand for Smoke. They can stand for more than one person. In this activity you will select only the pronouns.",
-    instruction: "Tap the pronouns",
-    rounds: [
-      [["she", 1], ["Nina", 0], ["him", 1], ["horse", 0], ["they", 1], ["gate", 0], ["we", 1], ["bucket", 0], ["it", 1], ["you", 1]],
-      [["it", 1], ["saddle", 0], ["he", 1], ["trotted", 0], ["them", 1], ["paddock", 0], ["you", 1], ["halter", 0], ["we", 1], ["someone", 1]],
-      [["someone", 1], ["journey", 0], ["herself", 1], ["carefully", 0], ["nobody", 1], ["barn", 0], ["everything", 1], ["whinnied", 0], ["anything", 1], ["they", 1]]
+    instruction: "Select the pronoun in each sentence.",
+    items: [
+      { words: ["Nina", "brushed", "Smoke,", "then", "she", "fed", "him."], a: 4, skill: "pronouns", why: "She takes the place of Nina." },
+      { words: ["They", "opened", "the", "gate", "together."], a: 0, skill: "pronouns", why: "They stands in for more than one person." },
+      { words: ["The", "saddle", "slipped,", "but", "it", "did", "not", "fall."], a: 4, skill: "pronouns", why: "It stands in for the saddle." },
+      { words: ["Luca", "called", "to", "Mia,", "and", "she", "waved", "back."], a: 5, skill: "pronouns", why: "She replaces Mia." },
+      { words: ["We", "stacked", "the", "buckets", "near", "the", "door."], a: 0, skill: "pronouns", why: "We is the pronoun naming the group." }
     ]
   },
   adverb: {
@@ -105,11 +113,13 @@ export const GP_TERMS = {
     definition: "An adverb usually tells how, when, or where something happens.",
     examples: ["The pony moved slowly.", "She checked the gate carefully."],
     audioText: "An adverb often tells how, when, or where something happens. Slowly tells how the pony moved. Carefully tells how she checked the gate. In this activity you will select only the adverbs.",
-    instruction: "Tap the adverbs",
-    rounds: [
-      [["slowly", 1], ["pony", 0], ["carefully", 1], ["saddle", 0], ["quietly", 1], ["gate", 0], ["softly", 1], ["halter", 0], ["boldly", 1], ["neatly", 1]],
-      [["bravely", 1], ["trotted", 0], ["suddenly", 1], ["field", 0], ["patiently", 1], ["rider", 0], ["neatly", 1], ["barn", 0], ["warmly", 1], ["gracefully", 1]],
-      [["gracefully", 1], ["journey", 0], ["steadily", 1], ["bucket", 0], ["anxiously", 1], ["arrived", 0], ["warmly", 1], ["paddock", 0], ["carefully", 1], ["swiftly", 1]]
+    instruction: "Select the adverb in each sentence.",
+    items: [
+      { words: ["The", "pony", "moved", "slowly", "through", "the", "yard."], a: 3, skill: "adverbs", why: "Slowly tells how the pony moved." },
+      { words: ["She", "checked", "the", "gate", "carefully", "before", "leaving."], a: 4, skill: "adverbs", why: "Carefully tells how she checked." },
+      { words: ["Smoke", "waited", "quietly", "by", "the", "float."], a: 2, skill: "adverbs", why: "Quietly tells how Smoke waited." },
+      { words: ["The", "rider", "spoke", "softly", "to", "the", "mare."], a: 3, skill: "adverbs", why: "Softly tells how the rider spoke." },
+      { words: ["The", "class", "ended", "suddenly", "when", "the", "rain", "started."], a: 3, skill: "adverbs", why: "Suddenly tells when or how it happened." }
     ]
   },
   conjunction: {
@@ -117,11 +127,13 @@ export const GP_TERMS = {
     definition: "A conjunction joins words or ideas together.",
     examples: ["Nina waited and Smoke watched.", "She was nervous but determined."],
     audioText: "A conjunction joins words or ideas together. And links two ideas. But shows a contrast. Because gives a reason. In this activity you will select only the conjunctions.",
-    instruction: "Tap the conjunctions",
-    rounds: [
-      [["and", 1], ["bucket", 0], ["but", 1], ["slowly", 0], ["or", 1], ["rider", 0], ["because", 1], ["gate", 0], ["so", 1], ["while", 1]],
-      [["so", 1], ["saddle", 0], ["if", 1], ["quietly", 0], ["while", 1], ["barn", 0], ["unless", 1], ["halter", 0], ["although", 1], ["since", 1]],
-      [["although", 1], ["journey", 0], ["since", 1], ["trotted", 0], ["whereas", 1], ["paddock", 0], ["until", 1], ["carefully", 0], ["because", 1], ["but", 1]]
+    instruction: "Select the conjunction in each sentence.",
+    items: [
+      { words: ["Nina", "waited", "and", "Smoke", "watched."], a: 2, skill: "conjunctions", why: "And joins the two ideas." },
+      { words: ["She", "was", "nervous", "but", "determined."], a: 3, skill: "conjunctions", why: "But links two contrasting ideas." },
+      { words: ["We", "hurried", "inside", "because", "the", "rain", "started."], a: 3, skill: "conjunctions", why: "Because gives the reason." },
+      { words: ["Take", "the", "lead", "rope", "or", "the", "halter."], a: 4, skill: "conjunctions", why: "Or joins the two choices." },
+      { words: ["The", "pony", "stepped", "forward", "while", "Mia", "held", "the", "gate."], a: 4, skill: "conjunctions", why: "While joins the actions happening together." }
     ]
   },
   preposition: {
@@ -129,11 +141,13 @@ export const GP_TERMS = {
     definition: "A preposition shows position, direction, or time.",
     examples: ["The halter hung on the post.", "Smoke walked through the gate."],
     audioText: "A preposition shows position, direction, or time. On tells us where the halter hung. Through tells us how Smoke moved. In this activity you will select only the prepositions.",
-    instruction: "Tap the prepositions",
-    rounds: [
-      [["under", 1], ["galloped", 0], ["behind", 1], ["bucket", 0], ["through", 1], ["carefully", 0], ["beside", 1], ["pony", 0], ["across", 1], ["around", 1]],
-      [["between", 1], ["halter", 0], ["beneath", 1], ["quietly", 0], ["toward", 1], ["field", 0], ["into", 1], ["rider", 0], ["over", 1], ["inside", 1]],
-      [["across", 1], ["journey", 0], ["among", 1], ["arrived", 0], ["within", 1], ["saddle", 0], ["onto", 1], ["softly", 0], ["before", 1], ["below", 1]]
+    instruction: "Select the preposition in each sentence.",
+    items: [
+      { words: ["The", "halter", "hung", "on", "the", "post."], a: 3, skill: "prepositions", why: "On shows where the halter hung." },
+      { words: ["Smoke", "walked", "through", "the", "gate."], a: 2, skill: "prepositions", why: "Through shows direction." },
+      { words: ["The", "bucket", "sat", "under", "the", "bench."], a: 3, skill: "prepositions", why: "Under shows position." },
+      { words: ["We", "waited", "beside", "the", "arena", "rail."], a: 2, skill: "prepositions", why: "Beside shows where we waited." },
+      { words: ["The", "ponies", "trotted", "across", "the", "field."], a: 3, skill: "prepositions", why: "Across shows movement and direction." }
     ]
   }
 };
