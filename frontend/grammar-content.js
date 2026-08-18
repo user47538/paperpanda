@@ -1,3 +1,5 @@
+export const GP_ACTIVITIES_PER_SESSION = 3;
+
 export const GP_SESSIONS = [
   { n: 1, title: "Fix the Paragraph", meta: "Punctuation · drag-and-drop", act: "fix", content: "para1" },
   { n: 2, title: "Find the Nouns", meta: "Nouns · 10 word selection", act: "pick", content: "noun" },

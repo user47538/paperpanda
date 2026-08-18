@@ -1,4 +1,4 @@
-import { GP_SESSIONS } from "./grammar-content.js";
+import { GP_ACTIVITIES_PER_SESSION, GP_SESSIONS } from "./grammar-content.js";
 import { createGrammarProgram } from "./grammar-runtime.js";
 
 const accountsStorageKey = "studylift-accounts";
@@ -6618,6 +6618,10 @@ function getSubjectGrammarPendingSessionCount(subject) {
   return grammar.enabled ? Math.max(0, GP_SESSIONS.length - grammar.done) : 0;
 }
 
+function getCompletedGrammarRewardSessions(doneCount = 0) {
+  return Math.floor(Math.max(0, Number(doneCount || 0) || 0) / GP_ACTIVITIES_PER_SESSION);
+}
+
 function normalizeSpellingAttempt(value) {
   return String(value || "")
     .trim()
@@ -9174,6 +9178,7 @@ function buildRewardPropertyMarkup() {
 }
 
 const RewardProperty = (function () {
+  const RP_GRAMMAR_SESSION_VERSION = 2;
   const START_SPOTS = [[80, 60], [86, 68], [90, 58], [78, 72], [20, 62], [32, 66], [55, 50], [64, 52]];
   let root = null;
   let S = null;
@@ -9188,11 +9193,11 @@ const RewardProperty = (function () {
   let pan = null;
 
   function getDerivedStage(grammarSessions = 0) {
-    return Math.max(0, Math.min(RP_STAGES.length - 1, Math.floor(Math.max(0, Number(grammarSessions || 0) || 0) / 2)));
+    return Math.max(0, Math.min(RP_STAGES.length - 1, Math.max(0, Number(grammarSessions || 0) || 0)));
   }
 
   function defaultState() {
-    return { stage: 0, owned: 2, sessions: 0, grammarSessions: 0, horses: [], arenaJumps: [] };
+    return { stage: 0, owned: 2, sessions: 0, grammarSessions: 0, grammarSessionVersion: RP_GRAMMAR_SESSION_VERSION, horses: [], arenaJumps: [] };
   }
 
   function clampZone(x, y) {
@@ -9365,13 +9370,18 @@ const RewardProperty = (function () {
       saved = null;
     }
     const base = saved && typeof saved === "object" ? saved : defaultState();
-    const grammarSessions = Math.max(0, Number(base.grammarSessions || 0) || 0);
+    const grammarSessionVersion = Math.max(0, Number(base.grammarSessionVersion || 0) || 0);
+    const rawGrammarSessions = Math.max(0, Number(base.grammarSessions || 0) || 0);
+    const grammarSessions = grammarSessionVersion >= RP_GRAMMAR_SESSION_VERSION
+      ? rawGrammarSessions
+      : getCompletedGrammarRewardSessions(rawGrammarSessions);
     const savedStage = Math.max(0, Math.min(RP_STAGES.length - 1, Number(base.stage || 0) || 0));
     S = {
       stage: Math.max(savedStage, getDerivedStage(grammarSessions)),
       owned: Math.max(2, Math.min(RP_TACK.length, Number(base.owned || 2) || 2)),
       sessions: Math.max(0, Number(base.sessions || 0) || 0),
       grammarSessions,
+      grammarSessionVersion: RP_GRAMMAR_SESSION_VERSION,
       horses: Array.isArray(base.horses) ? base.horses.map((horse, index) => normaliseHorse(horse, index)) : [],
       arenaJumps: Array.isArray(base.arenaJumps) ? base.arenaJumps.map((jump, index) => normaliseArenaJump(jump, index)) : []
     };
@@ -9398,6 +9408,7 @@ const RewardProperty = (function () {
     const nextStage = Math.max(S.stage, getDerivedStage(nextGrammarSessions));
     const changed = nextGrammarSessions !== S.grammarSessions || nextStage !== S.stage;
     S.grammarSessions = nextGrammarSessions;
+    S.grammarSessionVersion = RP_GRAMMAR_SESSION_VERSION;
     S.stage = nextStage;
     if (changed) {
       save();
@@ -9509,7 +9520,8 @@ const RewardProperty = (function () {
     const nextStage = Math.min(RP_STAGES.length - 1, S.stage + 1);
     if (nextStage !== S.stage) {
       S.stage = nextStage;
-      S.grammarSessions = Math.max(S.grammarSessions, nextStage * 2);
+      S.grammarSessions = Math.max(S.grammarSessions, nextStage);
+      S.grammarSessionVersion = RP_GRAMMAR_SESSION_VERSION;
       save();
     }
     render();
@@ -10043,6 +10055,7 @@ const RewardProperty = (function () {
     if (Number.isFinite(Number(options.grammarSessions))) {
       const nextGrammarSessions = Math.max(0, Number(options.grammarSessions || 0) || 0);
       S.grammarSessions = nextGrammarSessions;
+      S.grammarSessionVersion = RP_GRAMMAR_SESSION_VERSION;
       S.stage = Math.max(S.stage, getDerivedStage(nextGrammarSessions));
     }
     bind();
@@ -10070,8 +10083,9 @@ function mountRewardProperty(subject, host) {
   }
   const practiceSubject = state.subjects.find((item) => item.id === "spelling") || subject;
   const grammarSubject = state.subjects.find((item) => item.id === "spelling") || subject;
+  const grammarRewardSessions = getCompletedGrammarRewardSessions(getSubjectGrammarState(grammarSubject).done);
   if (RewardProperty.setGrammarSessions) {
-    RewardProperty.setGrammarSessions(getSubjectGrammarState(grammarSubject).done);
+    RewardProperty.setGrammarSessions(grammarRewardSessions);
   }
   if (RewardProperty.syncPracticeState) {
     RewardProperty.syncPracticeState(practiceSubject);
@@ -10079,7 +10093,7 @@ function mountRewardProperty(subject, host) {
   RewardProperty.mount(root, {
     subject: practiceSubject,
     practiceSubject,
-    grammarSessions: getSubjectGrammarState(grammarSubject).done
+    grammarSessions: grammarRewardSessions
   });
 }
 

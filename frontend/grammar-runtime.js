@@ -1,4 +1,5 @@
 import {
+  GP_ACTIVITIES_PER_SESSION,
   GP_BINARY,
   GP_BUILD,
   GP_FIX,
@@ -55,7 +56,7 @@ export function createGrammarProgram({
       subject.grammar = G;
       persistSubjects(options.skipRemoteSync ? { skipRemoteSync: true } : undefined);
       if (RewardProperty.setGrammarSessions) {
-        RewardProperty.setGrammarSessions(G.done);
+        RewardProperty.setGrammarSessions(getCompletedSessionCount());
       }
     }
 
@@ -151,10 +152,91 @@ export function createGrammarProgram({
       }, { strong: 0, developing: 0, practice: 0 });
     }
 
+    function getSessionGroupCount() {
+      return Math.ceil(GP_SESSIONS.length / GP_ACTIVITIES_PER_SESSION);
+    }
+
+    function getCompletedSessionCount(doneCount = G?.done || 0) {
+      const safeDoneCount = Math.max(0, Math.min(GP_SESSIONS.length, Number(doneCount || 0) || 0));
+      return Math.floor(safeDoneCount / GP_ACTIVITIES_PER_SESSION);
+    }
+
+    function getSessionNumberForActivity(activityNumber = 1) {
+      const safeActivity = Math.max(1, Math.min(GP_SESSIONS.length, Number(activityNumber || 1) || 1));
+      return Math.floor((safeActivity - 1) / GP_ACTIVITIES_PER_SESSION) + 1;
+    }
+
+    function getSessionSize(sessionNumber = 1) {
+      const safeSession = Math.max(1, Math.min(getSessionGroupCount(), Number(sessionNumber || 1) || 1));
+      const startActivity = ((safeSession - 1) * GP_ACTIVITIES_PER_SESSION) + 1;
+      return Math.max(0, Math.min(GP_ACTIVITIES_PER_SESSION, GP_SESSIONS.length - startActivity + 1));
+    }
+
+    function getSessionMeta(activityNumber = sessionConfig?.n || 1) {
+      if (!GP_SESSIONS.length) {
+        return null;
+      }
+      const safeActivity = Math.max(1, Math.min(GP_SESSIONS.length, Number(activityNumber || 1) || 1));
+      const sessionNumber = getSessionNumberForActivity(safeActivity);
+      const startActivity = ((sessionNumber - 1) * GP_ACTIVITIES_PER_SESSION) + 1;
+      const size = getSessionSize(sessionNumber);
+      return {
+        sessionNumber,
+        activityNumber: safeActivity,
+        startActivity,
+        size,
+        endActivity: startActivity + size - 1
+      };
+    }
+
+    function getReadySessionMeta() {
+      const readySession = getReadySessionConfig();
+      if (readySession?.n) {
+        return getSessionMeta(readySession.n);
+      }
+      if (GP_SESSIONS.length) {
+        return getSessionMeta(GP_SESSIONS.length);
+      }
+      return null;
+    }
+
+    function getActivityIndexInSession(activityNumber = sessionConfig?.n || 1) {
+      const meta = getSessionMeta(activityNumber);
+      return meta ? (meta.activityNumber - meta.startActivity) + 1 : 1;
+    }
+
+    function getCompletedActivitiesInSession(sessionNumber = 1, doneCount = G?.done || 0) {
+      const safeSession = Math.max(1, Math.min(getSessionGroupCount(), Number(sessionNumber || 1) || 1));
+      const startActivity = ((safeSession - 1) * GP_ACTIVITIES_PER_SESSION) + 1;
+      const size = getSessionSize(safeSession);
+      const safeDoneCount = Math.max(0, Math.min(GP_SESSIONS.length, Number(doneCount || 0) || 0));
+      return Math.max(0, Math.min(size, safeDoneCount - startActivity + 1));
+    }
+
+    function isSessionBoundaryActivity(activityNumber = sessionConfig?.n || 0) {
+      const safeActivity = Math.max(0, Math.min(GP_SESSIONS.length, Number(activityNumber || 0) || 0));
+      return safeActivity > 0 && (safeActivity === GP_SESSIONS.length || safeActivity % GP_ACTIVITIES_PER_SESSION === 0);
+    }
+
+    function didCompleteGroupedSession(activityNumber = sessionConfig?.n || 0) {
+      return isSessionBoundaryActivity(activityNumber) && G.done >= Number(activityNumber || 0);
+    }
+
     function getRewardCopy() {
-      return G.done < GP_SESSIONS.length
-        ? "Next reward build begins after the next grammar activity."
-        : "The current grammar sequence is complete.";
+      if (G.done >= GP_SESSIONS.length) {
+        return "The current grammar program is complete.";
+      }
+      const readyMeta = getReadySessionMeta();
+      if (!readyMeta) {
+        return "The current grammar program is complete.";
+      }
+      const remainingActivities = Math.max(0, readyMeta.size - getCompletedActivitiesInSession(readyMeta.sessionNumber));
+      if (remainingActivities <= 0) {
+        return "This session upgrade is ready in Property.";
+      }
+      return remainingActivities === 1
+        ? "Finish 1 more activity in this session to unlock the next property upgrade."
+        : `Finish ${remainingActivities} more activities in this session to unlock the next property upgrade.`;
     }
 
     function getReadySessionIndex() {
@@ -344,7 +426,7 @@ export function createGrammarProgram({
       if (sessionConfig?.act === "comp") {
         return "Start questions";
       }
-      return "Start session";
+      return "Start activity";
     }
 
     function getIntroListenCopy() {
@@ -357,7 +439,7 @@ export function createGrammarProgram({
       if (sessionConfig?.act === "comp") {
         return "You need to hear this once before the questions.";
       }
-      return "You need to hear this once before the session.";
+      return "You need to hear this once before the activity.";
     }
 
     function openSession(index) {
@@ -1369,27 +1451,35 @@ export function createGrammarProgram({
     }
 
     function buildProgressChips() {
-      return GP_SESSIONS.map((cfg) => {
-        const cls = cfg.n <= G.done ? " is-got" : cfg.n === G.done + 1 ? " is-next" : "";
-        return `<span class="gp-chip${cls}">${escapeHtml(String(cfg.n))}</span>`;
-      }).join("");
+      const meta = getSessionMeta();
+      if (!meta) {
+        return "";
+      }
+      return `<span class="gp-session-meta">${escapeHtml(`Session ${meta.sessionNumber} · activity ${getActivityIndexInSession(meta.activityNumber)} of ${meta.size}`)}</span>`;
     }
 
     function buildHubView() {
       const hasReadySession = Number(G.current?.n || 0) > G.done || G.done < GP_SESSIONS.length;
       const readySession = getReadySessionConfig();
+      const readyMeta = readySession ? getSessionMeta(readySession.n) : null;
       const hasCurrentActivity = Number(G.current?.n || 0) > G.done && readySession?.n === Number(G.current?.n || 0);
       const isComplete = !hasReadySession;
+      const sessionProgress = readyMeta ? getCompletedActivitiesInSession(readyMeta.sessionNumber) : 0;
+      const sessionProgressPercent = readyMeta
+        ? Math.round((sessionProgress / Math.max(1, readyMeta.size)) * 100)
+        : 100;
       const title = hasCurrentActivity
-        ? "Continue your grammar activity"
+        ? `Session ${readyMeta?.sessionNumber || 1} is ready to continue`
         : isComplete
           ? "All current grammar activities are complete"
-          : readySession?.title || "Your next grammar activity is ready";
+          : `Session ${readyMeta?.sessionNumber || 1} is ready`;
       const copy = hasCurrentActivity
-        ? "Your place is saved, so you can jump straight back in."
+        ? `Your place is saved. Activity ${getActivityIndexInSession(readySession?.n || 1)} is ready to continue.`
         : isComplete
           ? "You can revisit the latest activity, open Property, or check Progress."
-          : readySession?.meta || "Open the next activity and the program will move forward automatically when you finish.";
+          : readySession
+            ? `${readySession.title} opens first. Finish all ${readyMeta?.size || GP_ACTIVITIES_PER_SESSION} activities in this session to unlock the next property upgrade.`
+            : "Open the next activity and the program will move forward automatically when you finish.";
       const buttonLabel = hasCurrentActivity
         ? "Continue activity"
         : isComplete
@@ -1407,7 +1497,7 @@ export function createGrammarProgram({
             <div class="gp-eyebrow">Session</div>
             <div class="gp-strong">${escapeHtml(title)}</div>
             <div class="gp-meta">${escapeHtml(copy)}</div>
-            <div class="gp-bar"><div class="gp-bar-fill" style="width:${Math.round((G.done / GP_SESSIONS.length) * 100)}%"></div></div>
+            <div class="gp-bar"><div class="gp-bar-fill" style="width:${sessionProgressPercent}%"></div></div>
             <div class="gp-next-reward gp-meta">${escapeHtml(getRewardCopy())}</div>
             ${readySession && hasReadySession ? `<button type="button" class="gp-cta gp-cta-plum" data-gp="open-ready">${escapeHtml(buttonLabel)}</button>` : ""}
           </div>
@@ -1417,6 +1507,7 @@ export function createGrammarProgram({
 
     function buildIntroView() {
       const lesson = getLessonDefinition();
+      const sessionMeta = getSessionMeta();
       return `
         <div class="gp-view" data-gp-view="activity">
           <header class="gp-chrome">
@@ -1424,12 +1515,12 @@ export function createGrammarProgram({
               <div class="gp-eyebrow-soft">English</div>
               <div class="gp-h2">Grammar</div>
             </div>
-            <span class="gp-pill gp-pill-plum gp-session-pill">Session ${escapeHtml(String(sessionConfig.n))}</span>
+            <span class="gp-pill gp-pill-plum gp-session-pill">Session ${escapeHtml(String(sessionMeta?.sessionNumber || 1))}</span>
           </header>
           <div class="gp-chips">${buildProgressChips()}</div>
           <div class="gp-stage">
             <div class="gp-card gp-intro">
-              <div class="gp-eyebrow">Session ${escapeHtml(String(sessionConfig.n))} · new term</div>
+              <div class="gp-eyebrow">${escapeHtml(`Session ${sessionMeta?.sessionNumber || 1} · activity ${getActivityIndexInSession()} of ${sessionMeta?.size || GP_ACTIVITIES_PER_SESSION}`)}</div>
               <h2 class="gp-term">${escapeHtml(lesson.term)}</h2>
               <p class="gp-def">${escapeHtml(lesson.definition)}</p>
               <div class="gp-examples">
@@ -1652,6 +1743,7 @@ export function createGrammarProgram({
 
     function buildWriteView() {
       const checks = activity.submitted ? buildSentenceChecks(activity.text) : [];
+      const sessionMeta = getSessionMeta();
       return `
         <div class="gp-view" data-gp-view="activity">
           <header class="gp-chrome">
@@ -1659,7 +1751,7 @@ export function createGrammarProgram({
               <div class="gp-eyebrow-soft">English</div>
               <div class="gp-h2">${escapeHtml(sessionConfig.title)}</div>
             </div>
-            <span class="gp-pill gp-pill-plum gp-session-pill">Session ${escapeHtml(String(sessionConfig.n))}</span>
+            <span class="gp-pill gp-pill-plum gp-session-pill">${escapeHtml(`Activity ${getActivityIndexInSession()} of ${sessionMeta?.size || GP_ACTIVITIES_PER_SESSION}`)}</span>
           </header>
           <div class="gp-chips">${buildProgressChips()}</div>
           <div class="gp-stage">
@@ -1829,12 +1921,17 @@ export function createGrammarProgram({
       const roundScores = Array.isArray(latest?.details?.roundScores) ? latest.details.roundScores : [];
       const missedWords = Array.isArray(latest?.details?.missed) ? latest.details.missed : [];
       const hasNextActivity = G.done < GP_SESSIONS.length;
+      const groupedSessionComplete = didCompleteGroupedSession();
+      const resultsTitle = groupedSessionComplete ? "Session complete" : "Activity complete";
+      const summaryCopy = groupedSessionComplete
+        ? `${sessionConfig?.title || "This activity"} completed the session. Your property upgrade is now ready from the shared reward surface.`
+        : `${sessionConfig?.title || "This activity"} is complete. Return to Session and the next activity will open straight away.`;
       return `
         <div class="gp-view" data-gp-view="activity">
           <header class="gp-chrome">
             <div>
               <div class="gp-eyebrow-soft">English</div>
-              <div class="gp-h2">Session complete</div>
+              <div class="gp-h2">${escapeHtml(resultsTitle)}</div>
             </div>
             <span class="gp-pill gp-pill-moss">${escapeHtml(`${score}/${total}`)}</span>
           </header>
@@ -1842,7 +1939,7 @@ export function createGrammarProgram({
           <div class="gp-stage">
             <div class="gp-card">
               <div class="gp-term">${escapeHtml(String(score))}<span class="gp-term__meta"> / ${escapeHtml(String(total))}</span></div>
-              <p class="gp-def">${escapeHtml(`${sessionConfig?.title || "This session"} is complete. Your property can now update from the shared reward surface.`)}</p>
+              <p class="gp-def">${escapeHtml(summaryCopy)}</p>
               ${roundScores.length
                 ? `<div class="gp-results-grid">
                     ${roundScores.map((roundScore, index) => `<div class="gp-results-chip">Round ${escapeHtml(String(index + 1))}: ${escapeHtml(String(roundScore))}</div>`).join("")}
@@ -1896,8 +1993,8 @@ export function createGrammarProgram({
             </div>
           </header>
           <div class="gp-stats">
-            <div class="gp-stat"><div class="gp-strong">${escapeHtml(String(G.done))}</div><div class="gp-meta">Sessions done</div></div>
-            <div class="gp-stat"><div class="gp-strong">${escapeHtml(String(Math.min(12, Math.floor(G.done / 2))))}</div><div class="gp-meta">Property stages built</div></div>
+            <div class="gp-stat"><div class="gp-strong">${escapeHtml(String(G.done))}</div><div class="gp-meta">Activities done</div></div>
+            <div class="gp-stat"><div class="gp-strong">${escapeHtml(String(Math.min(getSessionGroupCount(), getCompletedSessionCount())))}</div><div class="gp-meta">Session upgrades earned</div></div>
           </div>
           <div class="gp-bands">
             <div class="gp-band"><div class="gp-strong">${escapeHtml(String(skillBands.strong))}</div><div class="gp-meta">Strong</div></div>
@@ -2230,7 +2327,7 @@ export function createGrammarProgram({
       subject = options.subject || subject;
       refreshState();
       if (RewardProperty.setGrammarSessions) {
-        RewardProperty.setGrammarSessions(G.done);
+        RewardProperty.setGrammarSessions(getCompletedSessionCount());
       }
       bind();
       if (tab === "hub") {
