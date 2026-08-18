@@ -6100,7 +6100,8 @@ function createDefaultGrammarState(subjectId = "") {
     audioHeard: [],
     skills: {},
     results: [],
-    current: null
+    current: null,
+    pendingResult: null
   };
 }
 
@@ -6109,6 +6110,7 @@ function normaliseGrammarState(grammar, subjectId = "") {
   const next = grammar && typeof grammar === "object" && !Array.isArray(grammar) ? grammar : {};
   const skills = next.skills && typeof next.skills === "object" && !Array.isArray(next.skills) ? next.skills : {};
   const current = next.current && typeof next.current === "object" && !Array.isArray(next.current) ? next.current : null;
+  const pendingResult = Math.max(0, Number(next.pendingResult || 0) || 0);
   const normaliseResultDetails = (details) => {
     const source = details && typeof details === "object" && !Array.isArray(details) ? details : {};
     return {
@@ -6150,6 +6152,9 @@ function normaliseGrammarState(grammar, subjectId = "") {
           }))
           .filter((entry) => entry.n && entry.total >= 0)
       : [],
+    pendingResult: pendingResult > 0
+      ? Math.max(1, Math.min(GP_SESSIONS.length, pendingResult))
+      : null,
     current: current && Number.isFinite(Number(current.n))
       ? {
           n: Math.max(1, Math.min(GP_SESSIONS.length, Number(current.n || 0) || 1)),

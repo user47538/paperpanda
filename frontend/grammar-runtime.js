@@ -366,8 +366,14 @@ export function createGrammarProgram({
         .replace(/\s+/g, " ");
     }
 
+    function getSessionIntroTopic(cfg = sessionConfig) {
+      const introMap = { 9: "compare", 13: "purpose" };
+      return cfg ? String(introMap[cfg.n] || "") : "";
+    }
+
     function usesWrittenOnlyIntro(cfg = sessionConfig) {
-      return cfg?.act === "pick";
+      const introTopic = getSessionIntroTopic(cfg);
+      return cfg?.act === "pick" || introTopic === "compare" || introTopic === "purpose";
     }
 
     function getSessionIntroKey(cfg = sessionConfig) {
@@ -380,8 +386,7 @@ export function createGrammarProgram({
       if (cfg.act === "game" && !hasHeard(cfg.content)) {
         return cfg.content;
       }
-      const introMap = { 9: "compare", 14: "purpose" };
-      const key = introMap[cfg.n];
+      const key = getSessionIntroTopic(cfg);
       return key && !hasHeard(key) ? key : "";
     }
 
@@ -652,6 +657,7 @@ export function createGrammarProgram({
       }
       G.done = nextDone;
       G.current = null;
+      G.pendingResult = sessionConfig.n;
       G.results = [
         ...G.results.filter((entry) => Number(entry.n || 0) !== sessionConfig.n),
         { n: sessionConfig.n, score, total, at: new Date().toISOString(), details: nextDetails }
@@ -2028,9 +2034,36 @@ export function createGrammarProgram({
       `;
     }
 
-    function goToSessionSurface() {
+    function openPendingResult(resultNumber = G.pendingResult) {
+      const targetNumber = Math.max(0, Number(resultNumber || 0) || 0);
+      if (!targetNumber) {
+        return false;
+      }
+      const index = GP_SESSIONS.findIndex((cfg) => cfg.n === targetNumber);
+      if (index < 0) {
+        return false;
+      }
       stopAll();
       tab = "hub";
+      sessionIndex = index;
+      sessionConfig = getSessionConfig(index);
+      lessonKey = "";
+      activity = null;
+      view = "results";
+      paint();
+      return true;
+    }
+
+    function goToSessionSurface({ clearPendingResult = false } = {}) {
+      stopAll();
+      tab = "hub";
+      if (clearPendingResult && G.pendingResult) {
+        G.pendingResult = null;
+        saveState({ skipRemoteSync: true });
+      }
+      if (!clearPendingResult && G.pendingResult && openPendingResult(G.pendingResult)) {
+        return;
+      }
       sessionIndex = -1;
       sessionConfig = null;
       lessonKey = "";
@@ -2257,7 +2290,7 @@ export function createGrammarProgram({
             if (sessionConfig && view !== "results" && sessionConfig.n > G.done) {
               persistCurrentProgress();
             }
-            goToSessionSurface();
+            goToSessionSurface({ clearPendingResult: view === "results" });
             return;
           default:
             return;

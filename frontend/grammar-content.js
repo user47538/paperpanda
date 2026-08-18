@@ -13,19 +13,18 @@ export const GP_SESSIONS = [
   { n: 10, title: "Change the Tense", meta: "Tense · multiple choice", act: "mc", content: "tense2" },
   { n: 11, title: "Fix the Paragraph II", meta: "Punctuation · drag-and-drop", act: "fix", content: "para2" },
   { n: 12, title: "Find the Pronouns", meta: "Pronouns · 5 sentence selection", act: "pick", content: "pronoun" },
-  { n: 13, title: "Sentence or Not?", meta: "Fragments · binary choice", act: "binary", content: "frag1" },
-  { n: 14, title: "Comprehension 3", meta: "Non-fiction · 6 questions", act: "comp", content: "passage3" },
-  { n: 15, title: "Find the Adverbs", meta: "Adverbs · 5 sentence selection", act: "pick", content: "adverb" },
-  { n: 16, title: "Write It in Another Tense", meta: "Tense · sentence rewrite", act: "rewrite", content: "rewrite1" },
-  { n: 17, title: "Find the Conjunctions", meta: "Conjunctions · 5 sentence selection", act: "pick", content: "conjunction" },
-  { n: 18, title: "Join the Sentences", meta: "Compound · drag-and-drop", act: "join", content: "join1" },
-  { n: 19, title: "Comprehension 4", meta: "Narrative · 6–8 questions", act: "comp", content: "passage4" },
-  { n: 20, title: "Find the Prepositions", meta: "Prepositions · 5 sentence selection", act: "pick", content: "preposition" },
-  { n: 21, title: "Who Did What?", meta: "Subject + verb · highlight", act: "select", content: "subverb1" },
-  { n: 22, title: "Fix the Sentence II", meta: "Mixed review · 10 questions", act: "mc", content: "mixed1" },
-  { n: 23, title: "Make It Better", meta: "Expansion · builder", act: "build", content: "expand1" },
-  { n: 24, title: "Comprehension Challenge", meta: "Mixed · 10–12 questions", act: "comp", content: "passage5" },
-  { n: 25, title: "Grammar Challenge", meta: "Review · mixed mini-games", act: "mixed", content: "review1" }
+  { n: 13, title: "Comprehension 3", meta: "Non-fiction · 6 questions", act: "comp", content: "passage3" },
+  { n: 14, title: "Find the Adverbs", meta: "Adverbs · 5 sentence selection", act: "pick", content: "adverb" },
+  { n: 15, title: "Write It in Another Tense", meta: "Tense · sentence rewrite", act: "rewrite", content: "rewrite1" },
+  { n: 16, title: "Find the Conjunctions", meta: "Conjunctions · 5 sentence selection", act: "pick", content: "conjunction" },
+  { n: 17, title: "Join the Sentences", meta: "Compound · drag-and-drop", act: "join", content: "join1" },
+  { n: 18, title: "Comprehension 4", meta: "Narrative · 6–8 questions", act: "comp", content: "passage4" },
+  { n: 19, title: "Find the Prepositions", meta: "Prepositions · 5 sentence selection", act: "pick", content: "preposition" },
+  { n: 20, title: "Who Did What?", meta: "Subject + verb · highlight", act: "select", content: "subverb1" },
+  { n: 21, title: "Fix the Sentence II", meta: "Mixed review · 10 questions", act: "mc", content: "mixed1" },
+  { n: 22, title: "Make It Better", meta: "Expansion · builder", act: "build", content: "expand1" },
+  { n: 23, title: "Comprehension Challenge", meta: "Mixed · 10–12 questions", act: "comp", content: "passage5" },
+  { n: 24, title: "Grammar Challenge", meta: "Review · mixed mini-games", act: "mixed", content: "review1" }
 ];
 
 export const GP_LESSON_INTROS = {
@@ -579,12 +578,12 @@ export const GP_SKILLS = [
   { k: "construction", name: "Sentence construction", strand: "grammar", from: 7 },
   { k: "adjectives", name: "Adjectives", strand: "grammar", from: 8 },
   { k: "pronouns", name: "Pronouns", strand: "grammar", from: 12 },
-  { k: "adverbs", name: "Adverbs", strand: "grammar", from: 15 },
-  { k: "conjunctions", name: "Conjunctions", strand: "grammar", from: 17 },
-  { k: "compound", name: "Joining ideas", strand: "grammar", from: 18 },
-  { k: "prepositions", name: "Prepositions", strand: "grammar", from: 20 },
-  { k: "subject-verb", name: "Subject and verb", strand: "grammar", from: 21 },
-  { k: "sentence-expansion", name: "Sentence expansion", strand: "grammar", from: 23 },
+  { k: "adverbs", name: "Adverbs", strand: "grammar", from: 14 },
+  { k: "conjunctions", name: "Conjunctions", strand: "grammar", from: 16 },
+  { k: "compound", name: "Joining ideas", strand: "grammar", from: 17 },
+  { k: "prepositions", name: "Prepositions", strand: "grammar", from: 19 },
+  { k: "subject-verb", name: "Subject and verb", strand: "grammar", from: 20 },
+  { k: "sentence-expansion", name: "Sentence expansion", strand: "grammar", from: 22 },
   { k: "facts", name: "Facts & details", strand: "comp", from: 4 },
   { k: "sequence", name: "Sequence", strand: "comp", from: 4 },
   { k: "cause", name: "Cause & effect", strand: "comp", from: 4 },
@@ -592,5 +591,5 @@ export const GP_SKILLS = [
   { k: "inference", name: "Inference", strand: "comp", from: 4 },
   { k: "main-idea", name: "Main idea", strand: "comp", from: 4 },
   { k: "compare", name: "Compare & contrast", strand: "comp", from: 9 },
-  { k: "purpose", name: "Author's purpose", strand: "comp", from: 14 }
+  { k: "purpose", name: "Author's purpose", strand: "comp", from: 13 }
 ];
