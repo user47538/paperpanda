@@ -642,11 +642,19 @@ export function createGrammarProgram({
       if (!sessionConfig) {
         return;
       }
-      G.done = Math.max(G.done, sessionConfig.n);
+      const previousDone = G.done;
+      const previousCompletedSessions = getCompletedSessionCount(previousDone);
+      const nextDone = Math.max(G.done, sessionConfig.n);
+      const nextCompletedSessions = getCompletedSessionCount(nextDone);
+      const nextDetails = { ...details };
+      if (isSessionBoundaryActivity(sessionConfig.n) && nextCompletedSessions > previousCompletedSessions && RewardProperty.getGrammarUpgradeSummary) {
+        nextDetails.propertyUpgrade = RewardProperty.getGrammarUpgradeSummary(previousCompletedSessions, nextCompletedSessions);
+      }
+      G.done = nextDone;
       G.current = null;
       G.results = [
         ...G.results.filter((entry) => Number(entry.n || 0) !== sessionConfig.n),
-        { n: sessionConfig.n, score, total, at: new Date().toISOString(), details }
+        { n: sessionConfig.n, score, total, at: new Date().toISOString(), details: nextDetails }
       ].sort((a, b) => a.n - b.n);
       saveState();
       view = "results";
@@ -1859,13 +1867,19 @@ export function createGrammarProgram({
       const latest = G.results.find((entry) => entry.n === sessionConfig?.n);
       const score = latest?.score || 0;
       const total = latest?.total || 0;
+      const sessionMeta = getSessionMeta(sessionConfig?.n || 1);
       const roundScores = Array.isArray(latest?.details?.roundScores) ? latest.details.roundScores : [];
       const missedWords = Array.isArray(latest?.details?.missed) ? latest.details.missed : [];
+      const propertyUpgrade = latest?.details?.propertyUpgrade || null;
       const hasNextActivity = G.done < GP_SESSIONS.length;
       const groupedSessionComplete = didCompleteGroupedSession();
-      const resultsTitle = groupedSessionComplete ? "Session complete" : "Activity complete";
+      const resultsTitle = groupedSessionComplete
+        ? `Session ${sessionMeta?.sessionNumber || ""} complete`
+        : "Activity complete";
       const summaryCopy = groupedSessionComplete
-        ? `${sessionConfig?.title || "This activity"} completed the session. Your property upgrade is now ready from the shared reward surface.`
+        ? propertyUpgrade?.earned
+          ? `${sessionConfig?.title || "This activity"} completed this session. ${propertyUpgrade.label || propertyUpgrade.title || "The next stage"} has been added to your property.`
+          : `${sessionConfig?.title || "This activity"} completed this session. ${propertyUpgrade?.statusNote || "Your property stays at its current stage."}`
         : `${sessionConfig?.title || "This activity"} is complete. Return to Session and the next activity will open straight away.`;
       return `
         <div class="gp-view" data-gp-view="activity">
@@ -1881,6 +1895,19 @@ export function createGrammarProgram({
             <div class="gp-card">
               <div class="gp-term">${escapeHtml(String(score))}<span class="gp-term__meta"> / ${escapeHtml(String(total))}</span></div>
               <p class="gp-def">${escapeHtml(summaryCopy)}</p>
+              ${groupedSessionComplete && propertyUpgrade
+                ? `<article class="gp-upgrade-card">
+                    <div class="gp-upgrade-card__image">
+                      <img src="${escapeHtml(propertyUpgrade.image || "")}" alt="${escapeHtml(propertyUpgrade.title || "Property upgrade")}" loading="lazy" />
+                    </div>
+                    <div class="gp-upgrade-card__copy">
+                      <div class="gp-label ${propertyUpgrade.earned ? "" : "gp-label-warm"}">${escapeHtml(propertyUpgrade.heading || "Property update")}</div>
+                      <div class="gp-strong">${escapeHtml(propertyUpgrade.title || "Property stage")}</div>
+                      <p class="gp-meta">${escapeHtml(propertyUpgrade.description || "")}</p>
+                      <p class="gp-meta">${escapeHtml(propertyUpgrade.statusNote || "")}</p>
+                    </div>
+                  </article>`
+                : ""}
               ${roundScores.length
                 ? `<div class="gp-results-grid">
                     ${roundScores.map((roundScore, index) => `<div class="gp-results-chip">Round ${escapeHtml(String(index + 1))}: ${escapeHtml(String(roundScore))}</div>`).join("")}

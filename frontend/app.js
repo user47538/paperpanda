@@ -9196,6 +9196,41 @@ const RewardProperty = (function () {
     return Math.max(0, Math.min(RP_STAGES.length - 1, Math.max(0, Number(grammarSessions || 0) || 0)));
   }
 
+  function getStageSummary(stageIndex = 0) {
+    const safeStageIndex = Math.max(0, Math.min(RP_STAGES.length - 1, Number(stageIndex || 0) || 0));
+    const stage = RP_STAGES[safeStageIndex] || RP_STAGES[0] || ["", "", ""];
+    return {
+      stageIndex: safeStageIndex,
+      stageNumber: safeStageIndex + 1,
+      image: String(stage[0] || ""),
+      title: String(stage[1] || ""),
+      label: String(stage[1] || "").replace(/^Stage\s+\d+\s*-\s*/i, "").trim(),
+      description: String(stage[2] || "")
+    };
+  }
+
+  function getGrammarUpgradeSummary(previousGrammarSessions = 0, nextGrammarSessions = previousGrammarSessions) {
+    const previousStage = getDerivedStage(previousGrammarSessions);
+    const nextStage = getDerivedStage(nextGrammarSessions);
+    const summary = getStageSummary(nextStage);
+    if (nextStage > previousStage) {
+      return {
+        earned: true,
+        heading: "Property upgrade awarded",
+        statusNote: "This session unlocked the next renovation stage for the property.",
+        ...summary
+      };
+    }
+    return {
+      earned: false,
+      heading: nextStage >= RP_STAGES.length - 1 ? "Property fully upgraded" : "Property unchanged",
+      statusNote: nextStage >= RP_STAGES.length - 1
+        ? "The property has already reached its highest current renovation stage."
+        : "This session did not unlock a new renovation stage.",
+      ...summary
+    };
+  }
+
   function defaultState() {
     return { stage: 0, owned: 2, sessions: 0, grammarSessions: 0, grammarSessionVersion: RP_GRAMMAR_SESSION_VERSION, horses: [], arenaJumps: [] };
   }
@@ -10065,6 +10100,7 @@ const RewardProperty = (function () {
   return {
     mount,
     addHorse,
+    getGrammarUpgradeSummary,
     renovate,
     reset,
     setGrammarSessions,
