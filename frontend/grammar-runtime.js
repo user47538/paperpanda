@@ -656,9 +656,9 @@ export function createGrammarProgram({
         ...G.results.filter((entry) => Number(entry.n || 0) !== sessionConfig.n),
         { n: sessionConfig.n, score, total, at: new Date().toISOString(), details: nextDetails }
       ].sort((a, b) => a.n - b.n);
-      saveState();
       view = "results";
       stopAll();
+      saveState();
       paint();
     }
 
@@ -2291,7 +2291,7 @@ export function createGrammarProgram({
         RewardProperty.setGrammarSessions(getCompletedSessionCount());
       }
       bind();
-      if (tab === "hub") {
+      if (tab === "hub" && (!sessionConfig || view === "hub")) {
         goToSessionSurface();
         return;
       }
