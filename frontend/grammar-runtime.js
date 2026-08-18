@@ -288,7 +288,7 @@ export function createGrammarProgram({
       if (!cfg) {
         return "";
       }
-      if (cfg.act === "game" && !hasHeard(cfg.content)) {
+      if ((cfg.act === "game" || cfg.act === "pick") && !hasHeard(cfg.content)) {
         return cfg.content;
       }
       const introMap = { 9: "compare", 14: "purpose" };
@@ -338,7 +338,7 @@ export function createGrammarProgram({
     }
 
     function getIntroStartLabel() {
-      if (sessionConfig?.act === "game") {
+      if (sessionConfig?.act === "game" || sessionConfig?.act === "pick") {
         return "Start round 1";
       }
       if (sessionConfig?.act === "comp") {
@@ -350,6 +350,9 @@ export function createGrammarProgram({
     function getIntroListenCopy() {
       if (sessionConfig?.act === "game") {
         return "You need to hear this once before the game.";
+      }
+      if (sessionConfig?.act === "pick") {
+        return "You need to hear this once before the word selection rounds.";
       }
       if (sessionConfig?.act === "comp") {
         return "You need to hear this once before the questions.";
@@ -482,6 +485,9 @@ export function createGrammarProgram({
       }
       if (sessionConfig.act === "tense") {
         return { items: GP_TENSE[sessionConfig.content] || [], i: 0, picked: null, attempts: 0, right: 0, feedback: "" };
+      }
+      if (sessionConfig.act === "pick") {
+        return { rounds: GP_TERMS[sessionConfig.content]?.rounds || [], round: 0, selected: [], checked: false, score: 0, wrong: 0, roundScores: [], missed: [], feedback: "", perfect: false };
       }
       if (sessionConfig.act === "fix") {
         const data = GP_FIX[sessionConfig.content] || {};
@@ -775,6 +781,93 @@ export function createGrammarProgram({
         roundScores: [...game.roundScores],
         missed: [...new Set(game.missed)]
       });
+    }
+
+    function getCurrentPickRound() {
+      return activity?.rounds?.[activity.round] || [];
+    }
+
+    function pickBubbleWord(index) {
+      if (!activity || activity.checked) {
+        return;
+      }
+      const selected = new Set(activity.selected || []);
+      if (selected.has(index)) {
+        selected.delete(index);
+      } else {
+        selected.add(index);
+      }
+      activity.selected = [...selected].sort((left, right) => left - right);
+      activity.feedback = "";
+      persistCurrentProgress();
+      paint();
+    }
+
+    function submitPick() {
+      if (!activity) {
+        return;
+      }
+      const round = getCurrentPickRound();
+      if (!round.length) {
+        return;
+      }
+      if (activity.checked) {
+        const totalTargets = activity.rounds.reduce((sum, items) => sum + items.filter((entry) => entry[1]).length, 0);
+        if (activity.round >= activity.rounds.length - 1) {
+          finishSession(activity.score, totalTargets, {
+            roundScores: [...activity.roundScores],
+            missed: [...new Set(activity.missed)]
+          });
+          return;
+        }
+        activity.round += 1;
+        activity.selected = [];
+        activity.checked = false;
+        activity.feedback = "";
+        activity.perfect = false;
+        persistCurrentProgress();
+        paint();
+        return;
+      }
+      if (!activity.selected.length) {
+        activity.feedback = "Select the matching words first.";
+        paint();
+        return;
+      }
+      const chosen = new Set(activity.selected);
+      let roundScore = 0;
+      let wrongSelections = 0;
+      const missedWords = [];
+      round.forEach(([word, isTarget], index) => {
+        const picked = chosen.has(index);
+        if (isTarget && picked) {
+          roundScore += 1;
+          tallySkill(`${sessionConfig.content}s`, true);
+          return;
+        }
+        if (isTarget && !picked) {
+          missedWords.push(word);
+          tallySkill(`${sessionConfig.content}s`, false);
+          return;
+        }
+        if (!isTarget && picked) {
+          wrongSelections += 1;
+          tallySkill(`${sessionConfig.content}s`, false);
+        }
+      });
+      activity.score += roundScore;
+      activity.wrong += wrongSelections + missedWords.length;
+      activity.roundScores[activity.round] = roundScore;
+      activity.missed = [...activity.missed, ...missedWords];
+      activity.checked = true;
+      activity.perfect = !wrongSelections && !missedWords.length;
+      activity.feedback = !wrongSelections && !missedWords.length
+        ? "Nice spotting. You found all six matching words."
+        : missedWords.length
+          ? `${missedWords.join(", ")} still belong in the correct word group.`
+          : "One or more selected words do not match the target word group.";
+      persistCurrentProgress();
+      paint();
     }
 
     function getRetryHint(item, skillKey = "", act = "") {
@@ -1233,7 +1326,11 @@ export function createGrammarProgram({
       }
       if (note) {
         note.textContent = audio.done
-          ? (sessionConfig?.act === "game" ? "Three rounds: easy, standard, challenge." : "The explanation is complete. You can begin now.")
+          ? (sessionConfig?.act === "game"
+            ? "Three rounds: easy, standard, challenge."
+            : sessionConfig?.act === "pick"
+              ? "Three rounds of 10 words are ready."
+              : "The explanation is complete. You can begin now.")
           : "START unlocks when the explanation finishes.";
       }
     }
@@ -1279,19 +1376,20 @@ export function createGrammarProgram({
     }
 
     function buildHubView() {
+      const hasReadySession = Number(G.current?.n || 0) > G.done || G.done < GP_SESSIONS.length;
       const readySession = getReadySessionConfig();
       const hasCurrentActivity = Number(G.current?.n || 0) > G.done && readySession?.n === Number(G.current?.n || 0);
-      const isComplete = G.done >= GP_SESSIONS.length;
+      const isComplete = !hasReadySession;
       const title = hasCurrentActivity
         ? "Continue your grammar activity"
         : isComplete
           ? "All current grammar activities are complete"
-          : "Your next grammar activity is ready";
+          : readySession?.title || "Your next grammar activity is ready";
       const copy = hasCurrentActivity
         ? "Your place is saved, so you can jump straight back in."
         : isComplete
           ? "You can revisit the latest activity, open Property, or check Progress."
-          : "Open the next activity and the program will move forward automatically when you finish.";
+          : readySession?.meta || "Open the next activity and the program will move forward automatically when you finish.";
       const buttonLabel = hasCurrentActivity
         ? "Continue activity"
         : isComplete
@@ -1311,7 +1409,7 @@ export function createGrammarProgram({
             <div class="gp-meta">${escapeHtml(copy)}</div>
             <div class="gp-bar"><div class="gp-bar-fill" style="width:${Math.round((G.done / GP_SESSIONS.length) * 100)}%"></div></div>
             <div class="gp-next-reward gp-meta">${escapeHtml(getRewardCopy())}</div>
-            ${readySession ? `<button type="button" class="gp-cta gp-cta-plum" data-gp="open-ready">${escapeHtml(buttonLabel)}</button>` : ""}
+            ${readySession && hasReadySession ? `<button type="button" class="gp-cta gp-cta-plum" data-gp="open-ready">${escapeHtml(buttonLabel)}</button>` : ""}
           </div>
         </div>
       `;
@@ -1346,7 +1444,7 @@ export function createGrammarProgram({
                 <div class="gp-bar"><div class="gp-bar-fill" style="width:${audio.prog}%"></div></div>
               </div>
               <button type="button" class="gp-cta" data-gp="start" ${audio.done ? "" : "disabled"}>${escapeHtml(getIntroStartLabel())}</button>
-              <div class="gp-gate-note">${audio.done ? (sessionConfig.act === "game" ? "Three rounds: easy, standard, challenge." : "The explanation is complete. You can begin now.") : "START unlocks when the explanation finishes."}</div>
+              <div class="gp-gate-note">${audio.done ? (sessionConfig.act === "game" ? "Three rounds: easy, standard, challenge." : sessionConfig.act === "pick" ? "Three rounds of 10 words are ready." : "The explanation is complete. You can begin now.") : "START unlocks when the explanation finishes."}</div>
             </div>
           </div>
         </div>
@@ -1376,6 +1474,42 @@ export function createGrammarProgram({
                 <div class="gp-miss" hidden></div>
                 <div class="gp-flash" hidden></div>
               </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function buildPickView() {
+      const term = GP_TERMS[sessionConfig.content];
+      const round = getCurrentPickRound();
+      const chosen = new Set(activity.selected || []);
+      return `
+        <div class="gp-view" data-gp-view="activity">
+          <header class="gp-chrome">
+            <div>
+              <div class="gp-eyebrow-soft">English</div>
+              <div class="gp-h2">${escapeHtml(sessionConfig.title)}</div>
+            </div>
+            <span class="gp-pill gp-pill-plum gp-session-pill">${escapeHtml(`Round ${activity.round + 1} of ${activity.rounds.length}`)}</span>
+          </header>
+          <div class="gp-chips">${buildProgressChips()}</div>
+          <div class="gp-stage">
+            <div class="gp-card">
+              <div class="gp-row-baseline">
+                <div class="gp-strong">${escapeHtml(term.instruction)}</div>
+                <div class="gp-meta">Select the six correct words.</div>
+              </div>
+              <div class="gp-token-grid">
+                ${round.map(([word, isTarget], index) => {
+                  const isChosen = chosen.has(index);
+                  const isRight = activity.checked && isTarget;
+                  const isWrong = activity.checked && isChosen && !isTarget;
+                  return `<button type="button" class="gp-token-btn${isChosen ? " is-on" : ""}${isRight ? " is-right" : ""}${isWrong ? " is-wrong" : ""}" data-gp-pick-token="${index}">${escapeHtml(word)}</button>`;
+                }).join("")}
+              </div>
+              ${activity.feedback ? `<div class="gp-fb${activity.checked && activity.perfect ? " is-ok" : " is-hint"}">${escapeHtml(activity.feedback)}</div>` : ""}
+              <button type="button" class="gp-cta gp-cta-plum" data-gp="submit-pick">${activity.checked ? (activity.round >= activity.rounds.length - 1 ? "Finish session" : "Next round") : "Check my choices"}</button>
             </div>
           </div>
         </div>
@@ -1721,9 +1855,8 @@ export function createGrammarProgram({
                   </div>`
                 : ""}
               <div class="gp-results-actions">
-                ${hasNextActivity ? `<button type="button" class="gp-cta gp-cta-plum" data-gp="open-ready">Next activity</button>` : ""}
                 <button type="button" class="gp-cta gp-cta-plum" data-gp-tab="property">Visit the property</button>
-                <button type="button" class="gp-pill-btn" data-gp="back">Back to grammar</button>
+                <button type="button" class="gp-pill-btn" data-gp="back">${escapeHtml(hasNextActivity ? "Back to session" : "Back to grammar")}</button>
               </div>
             </div>
           </div>
@@ -1830,6 +1963,22 @@ export function createGrammarProgram({
       `;
     }
 
+    function goToSessionSurface() {
+      stopAll();
+      tab = "hub";
+      sessionIndex = -1;
+      sessionConfig = null;
+      lessonKey = "";
+      activity = null;
+      const hasReadySession = Number(G.current?.n || 0) > G.done || G.done < GP_SESSIONS.length;
+      if (hasReadySession) {
+        openReadySession();
+        return;
+      }
+      view = "hub";
+      paint();
+    }
+
     function paint() {
       if (!root || !subject) {
         return;
@@ -1861,6 +2010,10 @@ export function createGrammarProgram({
         root.innerHTML = buildShell(buildGameView());
         syncGameWords();
         updateGameUi();
+        return;
+      }
+      if (sessionConfig.act === "pick") {
+        root.innerHTML = buildShell(buildPickView());
         return;
       }
       if (sessionConfig.act === "mc") {
@@ -1930,7 +2083,7 @@ export function createGrammarProgram({
       }
       root.dataset.grammarBound = "true";
       root.addEventListener("click", (event) => {
-        const target = event.target.closest("[data-gp-tab],[data-gp-open-session],[data-gp],[data-gp-opt],[data-gp-slot],[data-gp-chip],[data-gp-word],[data-gp-select-token],[data-gp-build-option]");
+        const target = event.target.closest("[data-gp-tab],[data-gp-open-session],[data-gp],[data-gp-opt],[data-gp-slot],[data-gp-chip],[data-gp-word],[data-gp-pick-token],[data-gp-select-token],[data-gp-build-option]");
         if (!target || !root.contains(target)) {
           return;
         }
@@ -1938,11 +2091,13 @@ export function createGrammarProgram({
           if (sessionConfig && view !== "results" && sessionConfig.n > G.done) {
             persistCurrentProgress();
           }
+          if (target.dataset.gpTab === "hub") {
+            goToSessionSurface();
+            return;
+          }
           stopAll();
           tab = target.dataset.gpTab;
-          if (tab === "hub") {
-            view = "hub";
-          }
+          view = "hub";
           paint();
           return;
         }
@@ -1952,6 +2107,10 @@ export function createGrammarProgram({
         }
         if (target.dataset.gpWord) {
           tapGameWord(Number(target.dataset.gpWord));
+          return;
+        }
+        if (target.dataset.gpPickToken) {
+          pickBubbleWord(Number(target.dataset.gpPickToken));
           return;
         }
         if (target.dataset.gpOpt) {
@@ -2027,6 +2186,9 @@ export function createGrammarProgram({
           case "submit-select":
             submitSelect();
             return;
+          case "submit-pick":
+            submitPick();
+            return;
           case "submit-build":
             submitBuild();
             return;
@@ -2037,14 +2199,7 @@ export function createGrammarProgram({
             if (sessionConfig && view !== "results" && sessionConfig.n > G.done) {
               persistCurrentProgress();
             }
-            stopAll();
-            tab = "hub";
-            view = "hub";
-            sessionIndex = -1;
-            sessionConfig = null;
-            lessonKey = "";
-            activity = null;
-            paint();
+            goToSessionSurface();
             return;
           default:
             return;
@@ -2078,6 +2233,10 @@ export function createGrammarProgram({
         RewardProperty.setGrammarSessions(G.done);
       }
       bind();
+      if (tab === "hub") {
+        goToSessionSurface();
+        return;
+      }
       paint();
     }
 
