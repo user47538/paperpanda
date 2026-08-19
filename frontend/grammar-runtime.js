@@ -43,6 +43,7 @@ export function createGrammarProgram({
     let gameSpawnTimer = null;
     let gameFrame = 0;
     let gameFlashTimer = null;
+    let recentCompletedResultNumber = 0;
 
     function refreshState() {
       G = getSubjectGrammarState(subject);
@@ -480,6 +481,7 @@ export function createGrammarProgram({
       if (!cfg) {
         return;
       }
+      recentCompletedResultNumber = 0;
       const savedCurrent = G.current && Number(G.current.n || 0) === cfg.n ? G.current : null;
       stopAll();
       sessionIndex = index;
@@ -1070,7 +1072,7 @@ export function createGrammarProgram({
     }
 
     function getFixItemSlotTotal(item = getCurrentFixItem()) {
-      return (item?.tokens || []).filter((entry) => entry.slot).length;
+      return (item?.tokens || []).filter((entry) => entry.slot && entry.need && entry.need !== "none").length;
     }
 
     function isCurrentFixItemComplete() {
@@ -1428,28 +1430,46 @@ export function createGrammarProgram({
       const readySession = getReadySessionConfig();
       const readyMeta = readySession ? getSessionMeta(readySession.n) : null;
       const hasCurrentActivity = Number(G.current?.n || 0) > G.done && readySession?.n === Number(G.current?.n || 0);
+      const recentCompletedMeta = recentCompletedResultNumber ? getSessionMeta(recentCompletedResultNumber) : null;
+      const showRecentCompletion = Boolean(
+        recentCompletedMeta &&
+        Number(recentCompletedResultNumber || 0) <= G.done &&
+        isSessionBoundaryActivity(recentCompletedResultNumber)
+      );
       const isComplete = !hasReadySession;
       const sessionProgress = readyMeta ? getCompletedActivitiesInSession(readyMeta.sessionNumber) : 0;
-      const sessionProgressPercent = readyMeta
+      const sessionProgressPercent = showRecentCompletion
+        ? 100
+        : readyMeta
         ? Math.round((sessionProgress / Math.max(1, readyMeta.size)) * 100)
         : 100;
-      const title = hasCurrentActivity
-        ? `Session ${readyMeta?.sessionNumber || 1} is ready to continue`
-        : isComplete
-          ? "All current grammar activities are complete"
-          : `Session ${readyMeta?.sessionNumber || 1} is ready`;
-      const copy = hasCurrentActivity
-        ? `Your place is saved. Activity ${getActivityIndexInSession(readySession?.n || 1)} is ready to continue.`
-        : isComplete
-          ? "You can revisit the latest activity, open Property, or check Progress."
-          : readySession
-            ? `${readySession.title} opens first. Finish all ${readyMeta?.size || GP_ACTIVITIES_PER_SESSION} activities in this session to unlock the next property upgrade.`
-            : "Open the next activity and the program will move forward automatically when you finish.";
-      const buttonLabel = hasCurrentActivity
-        ? "Continue activity"
-        : isComplete
-          ? "Review latest activity"
-          : "Start activity";
+      const title = showRecentCompletion
+        ? `Session ${recentCompletedMeta?.sessionNumber || 1} complete`
+        : hasCurrentActivity
+          ? `Session ${readyMeta?.sessionNumber || 1} is ready to continue`
+          : isComplete
+            ? "All current grammar activities are complete"
+            : `Session ${readyMeta?.sessionNumber || 1} is ready`;
+      const copy = showRecentCompletion
+        ? hasReadySession && readyMeta && recentCompletedMeta && readyMeta.sessionNumber > recentCompletedMeta.sessionNumber
+          ? `You finished all ${recentCompletedMeta.size} activities in Session ${recentCompletedMeta.sessionNumber}. Session ${readyMeta.sessionNumber} is ready when you are.`
+          : `You finished all ${recentCompletedMeta?.size || GP_ACTIVITIES_PER_SESSION} activities in this session. You can revisit the latest activity, open Property, or check Progress.`
+        : hasCurrentActivity
+          ? `Your place is saved. Activity ${getActivityIndexInSession(readySession?.n || 1)} is ready to continue.`
+          : isComplete
+            ? "You can revisit the latest activity, open Property, or check Progress."
+            : readySession
+              ? `${readySession.title} opens first. Finish all ${readyMeta?.size || GP_ACTIVITIES_PER_SESSION} activities in this session to unlock the next property upgrade.`
+              : "Open the next activity and the program will move forward automatically when you finish.";
+      const buttonLabel = showRecentCompletion
+        ? hasReadySession && readyMeta && recentCompletedMeta && readyMeta.sessionNumber > recentCompletedMeta.sessionNumber
+          ? `Start Session ${readyMeta.sessionNumber}`
+          : "Review latest activity"
+        : hasCurrentActivity
+          ? "Continue activity"
+          : isComplete
+            ? "Review latest activity"
+            : "Start activity";
       return `
         <div class="gp-view" data-gp-view="hub">
           <header class="gp-head">
@@ -1465,7 +1485,7 @@ export function createGrammarProgram({
             <div class="gp-bar"><div class="gp-bar-fill" style="width:${sessionProgressPercent}%"></div></div>
             <div class="gp-next-reward gp-meta">${escapeHtml(getRewardCopy())}</div>
             <div class="gp-actions">
-              ${readySession && hasReadySession ? `<button type="button" class="gp-cta gp-cta-plum" data-gp="open-ready">${escapeHtml(buttonLabel)}</button>` : ""}
+              ${(readySession && hasReadySession) || showRecentCompletion ? `<button type="button" class="gp-cta gp-cta-plum" data-gp="open-ready">${escapeHtml(buttonLabel)}</button>` : ""}
               <button type="button" class="gp-pill-btn" data-gp="clear-sessions" ${G.done || G.current || G.results.length || Object.keys(G.skills).length || G.pendingResult ? "" : "disabled"}>
                 Clear sessions
               </button>
@@ -1631,7 +1651,7 @@ export function createGrammarProgram({
       return tokens.map((token, index) => {
         if (!token.slot) {
           const next = tokens[index + 1];
-          const needsTightEnd = next?.slot && (next.need === "end" || next.need === "comma");
+          const needsTightEnd = next?.slot && ["end", "comma", "question", "none"].includes(next.need);
           return `${escapeHtml(token.t)}${needsTightEnd ? "" : " "}`;
         }
         const fill = filled[token.slot] || "";
@@ -1641,7 +1661,14 @@ export function createGrammarProgram({
         if (token.need === "apos") {
           return `<span class="gp-slot${fill ? " is-filled" : ""}" data-gp-slot="${escapeHtml(token.slot)}">${escapeHtml(fill ? token.c || token.t : token.t)}</span> `;
         }
-        return `<span class="gp-slot${fill ? " is-filled" : ""}" data-gp-slot="${escapeHtml(token.slot)}">${escapeHtml(fill === "comma" ? "," : fill === "end" ? "." : "＋")}</span>${token.need === "comma" ? " " : ""}`;
+        const fillSymbol = fill === "comma"
+          ? ","
+          : fill === "end"
+            ? "."
+            : fill === "question"
+              ? "?"
+              : "＋";
+        return `<span class="gp-slot${fill ? " is-filled" : ""}" data-gp-slot="${escapeHtml(token.slot)}">${escapeHtml(fillSymbol)}</span>${fill === "comma" ? " " : ""}`;
       }).join("");
     }
 
@@ -2077,10 +2104,11 @@ export function createGrammarProgram({
       return true;
     }
 
-    function goToSessionSurface({ clearPendingResult = false } = {}) {
+    function goToSessionSurface({ clearPendingResult = false, autoOpenReady = !clearPendingResult } = {}) {
       stopAll();
       tab = "hub";
       if (clearPendingResult && G.pendingResult) {
+        recentCompletedResultNumber = G.pendingResult;
         G.pendingResult = null;
         saveState({ skipRemoteSync: true });
       }
@@ -2092,7 +2120,7 @@ export function createGrammarProgram({
       lessonKey = "";
       activity = null;
       const hasReadySession = Number(G.current?.n || 0) > G.done || G.done < GP_SESSIONS.length;
-      if (hasReadySession) {
+      if (hasReadySession && autoOpenReady) {
         openReadySession();
         return;
       }

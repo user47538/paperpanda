@@ -3,7 +3,7 @@ export const GP_ACTIVITIES_PER_SESSION = 3;
 export const GP_SESSIONS = [
   { n: 1, title: "Fix the Paragraph", meta: "Punctuation · drag-and-drop", act: "fix", content: "para1" },
   { n: 2, title: "Find the Nouns", meta: "Nouns · 5 sentence selection", act: "pick", content: "noun" },
-  { n: 3, title: "What's Wrong?", meta: "Correction · 10 questions", act: "mc", content: "correct1" },
+  { n: 3, title: "What's Wrong?", meta: "Punctuation · sentence correction", act: "fix", content: "correct1" },
   { n: 4, title: "Comprehension 1", meta: "Short story · 6 questions", act: "comp", content: "passage1" },
   { n: 5, title: "Find the Verbs", meta: "Verbs · 5 sentence selection", act: "pick", content: "verb" },
   { n: 6, title: "When Did It Happen?", meta: "Tense · selector", act: "tense", content: "tense1" },
@@ -211,6 +211,53 @@ export const GP_TENSE = {
 };
 
 export const GP_FIX = {
+  correct1: {
+    items: [
+      {
+        tokens: [
+          { t: "where" }, { slot: "question1", need: "none" },
+          { t: "did" }, { t: "you" }, { t: "leave" }, { slot: "question2", need: "none" },
+          { t: "the" }, { t: "halter" }, { slot: "question3", need: "question" }
+        ]
+      },
+      {
+        tokens: [
+          { t: "after" }, { t: "the" }, { t: "lesson" }, { slot: "comma1", need: "comma" },
+          { t: "we" }, { slot: "comma2", need: "none" }, { t: "brushed" }, { t: "Willow" }, { slot: "end1", need: "end" }
+        ]
+      },
+      {
+        tokens: [
+          { t: "did" }, { t: "you" }, { slot: "question1", need: "none" },
+          { t: "pack" }, { t: "the" }, { t: "lead" }, { t: "rope" }, { slot: "question2", need: "question" }
+        ]
+      },
+      {
+        tokens: [
+          { t: "before" }, { t: "the" }, { t: "jump" }, { slot: "comma1", need: "comma" },
+          { t: "the" }, { slot: "comma2", need: "none" }, { t: "pony" }, { t: "snorted" }, { t: "loudly" }, { slot: "end1", need: "end" }
+        ]
+      },
+      {
+        tokens: [
+          { t: "the" }, { t: "tack" }, { slot: "end1", need: "none" },
+          { t: "room" }, { t: "door" }, { t: "was" }, { t: "open" }, { slot: "end2", need: "end" }
+        ]
+      },
+      {
+        tokens: [
+          { t: "when" }, { slot: "comma1", need: "none" },
+          { t: "we" }, { t: "arrived" }, { slot: "comma2", need: "comma" },
+          { t: "the" }, { t: "farrier" }, { t: "waved" }, { slot: "end1", need: "end" }
+        ]
+      }
+    ],
+    chips: [
+      { k: "end", label: "Full stop .", skill: "end-punctuation" },
+      { k: "comma", label: "Comma ,", skill: "commas" },
+      { k: "question", label: "Question mark ?", skill: "end-punctuation" }
+    ]
+  },
   para1: {
     items: [
       {
