@@ -5857,6 +5857,7 @@ function hydrateStoredSubject(subject, index) {
     ...structuredClone(subjectSeedEntry || {}),
     ...subject,
     id: resolvedSubjectId,
+    name: String(subjectSeedEntry?.name || subject?.name || "").trim(),
     documents: Array.isArray(subject.documents) ? subject.documents.map(normaliseDocument) : [],
     assessments: Array.isArray(subject.assessments) ? subject.assessments.map(normaliseAssessment) : [],
     watch: Array.isArray(subject.watch)
