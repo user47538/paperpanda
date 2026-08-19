@@ -315,6 +315,24 @@ export function createGrammarProgram({
       saveState({ skipRemoteSync: true });
     }
 
+    function clearAllSessions() {
+      stopAll();
+      G.done = 0;
+      G.audioHeard = [];
+      G.skills = {};
+      G.results = [];
+      G.current = null;
+      G.pendingResult = null;
+      tab = "hub";
+      sessionIndex = -1;
+      sessionConfig = null;
+      lessonKey = "";
+      activity = null;
+      view = "hub";
+      saveState();
+      paint();
+    }
+
     function getSkillAttempts(skillKey = "") {
       const tally = G.skills[skillKey];
       return tally ? tally.right + tally.wrong : 0;
@@ -1446,7 +1464,12 @@ export function createGrammarProgram({
             <div class="gp-meta">${escapeHtml(copy)}</div>
             <div class="gp-bar"><div class="gp-bar-fill" style="width:${sessionProgressPercent}%"></div></div>
             <div class="gp-next-reward gp-meta">${escapeHtml(getRewardCopy())}</div>
-            ${readySession && hasReadySession ? `<button type="button" class="gp-cta gp-cta-plum" data-gp="open-ready">${escapeHtml(buttonLabel)}</button>` : ""}
+            <div class="gp-actions">
+              ${readySession && hasReadySession ? `<button type="button" class="gp-cta gp-cta-plum" data-gp="open-ready">${escapeHtml(buttonLabel)}</button>` : ""}
+              <button type="button" class="gp-pill-btn" data-gp="clear-sessions" ${G.done || G.current || G.results.length || Object.keys(G.skills).length || G.pendingResult ? "" : "disabled"}>
+                Clear sessions
+              </button>
+            </div>
           </div>
         </div>
       `;
@@ -2291,6 +2314,15 @@ export function createGrammarProgram({
               persistCurrentProgress();
             }
             goToSessionSurface({ clearPendingResult: view === "results" });
+            return;
+          case "clear-sessions":
+            if (G.done || G.current || G.results.length || Object.keys(G.skills).length || G.pendingResult) {
+              const confirmed = window.confirm("Clear all grammar sessions and start again from session 1?");
+              if (!confirmed) {
+                return;
+              }
+              clearAllSessions();
+            }
             return;
           default:
             return;
