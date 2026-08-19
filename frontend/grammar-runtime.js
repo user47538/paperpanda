@@ -1919,6 +1919,71 @@ export function createGrammarProgram({
       });
     }
 
+    function getSessionResultEntries(activityNumber = sessionConfig?.n || 1) {
+      const meta = getSessionMeta(activityNumber);
+      if (!meta) {
+        return [];
+      }
+      return G.results
+        .filter((entry) => entry.n >= meta.startActivity && entry.n <= meta.endActivity)
+        .sort((left, right) => left.n - right.n);
+    }
+
+    function buildSessionReviewSummary(activityNumber = sessionConfig?.n || 1) {
+      const resultEntries = getSessionResultEntries(activityNumber);
+      if (!resultEntries.length) {
+        return "";
+      }
+      const correctTotal = resultEntries.reduce((sum, entry) => sum + Math.max(0, Number(entry.score || 0) || 0), 0);
+      const questionTotal = resultEntries.reduce((sum, entry) => sum + Math.max(0, Number(entry.total || 0) || 0), 0);
+      const wrongTotal = Math.max(0, questionTotal - correctTotal);
+      const percent = questionTotal ? Math.round((correctTotal / questionTotal) * 100) : 0;
+      return `
+        <div class="gp-stage">
+          <div class="gp-stats">
+            <div class="gp-stat">
+              <div class="gp-strong">${escapeHtml(`${percent}%`)}</div>
+              <div class="gp-meta">Session score</div>
+            </div>
+            <div class="gp-stat">
+              <div class="gp-strong">${escapeHtml(String(correctTotal))}</div>
+              <div class="gp-meta">Right</div>
+            </div>
+            <div class="gp-stat">
+              <div class="gp-strong">${escapeHtml(String(wrongTotal))}</div>
+              <div class="gp-meta">Wrong</div>
+            </div>
+          </div>
+          <div class="gp-review">
+            ${resultEntries.map((entry) => {
+              const config = GP_SESSIONS.find((candidate) => candidate.n === entry.n) || null;
+              const right = Math.max(0, Number(entry.score || 0) || 0);
+              const total = Math.max(0, Number(entry.total || 0) || 0);
+              const wrong = Math.max(0, total - right);
+              const missedWords = Array.isArray(entry.details?.missed) ? entry.details.missed : [];
+              const note = missedWords.length
+                ? `Wrong: ${wrong}. Missed: ${missedWords.join(", ")}.`
+                : wrong
+                  ? `Wrong: ${wrong}.`
+                  : "Everything in this activity was correct.";
+              return `
+                <article class="gp-review-item">
+                  <div class="gp-row-baseline">
+                    <div>
+                      <div class="gp-strong">${escapeHtml(config?.title || `Activity ${entry.n}`)}</div>
+                      <div class="gp-meta">${escapeHtml(`${right}/${total} right`)}</div>
+                    </div>
+                    <span class="gp-pill ${wrong ? "gp-pill-warm" : "gp-pill-moss"}">${escapeHtml(wrong ? `${wrong} wrong` : "All correct")}</span>
+                  </div>
+                  <div class="gp-meta">${escapeHtml(note)}</div>
+                </article>
+              `;
+            }).join("")}
+          </div>
+        </div>
+      `;
+    }
+
     function buildResultsView() {
       const latest = G.results.find((entry) => entry.n === sessionConfig?.n);
       const score = latest?.score || 0;
@@ -1937,6 +2002,7 @@ export function createGrammarProgram({
           ? `${sessionConfig?.title || "This activity"} completed this session. ${propertyUpgrade.label || propertyUpgrade.title || "The next stage"} has been added to your property.`
           : `${sessionConfig?.title || "This activity"} completed this session. ${propertyUpgrade?.statusNote || "Your property stays at its current stage."}`
         : `${sessionConfig?.title || "This activity"} is complete. Return to Session and the next activity will open straight away.`;
+      const sessionReviewMarkup = groupedSessionComplete ? buildSessionReviewSummary(sessionConfig?.n || 1) : "";
       return `
         <div class="gp-view" data-gp-view="activity">
           <header class="gp-chrome">
@@ -1975,9 +2041,13 @@ export function createGrammarProgram({
                     <p class="gp-meta">${escapeHtml(missedWords.join(", "))}</p>
                   </div>`
                 : ""}
+              ${sessionReviewMarkup}
               <div class="gp-results-actions">
-                <button type="button" class="gp-cta gp-cta-plum" data-gp-tab="property">Visit the property</button>
-                <button type="button" class="gp-pill-btn" data-gp="back">${escapeHtml(hasNextActivity ? "Back to session" : "Back to grammar")}</button>
+                ${groupedSessionComplete
+                  ? `<button type="button" class="gp-cta gp-cta-plum" data-gp-tab="property">Visit the stables</button>
+                     <button type="button" class="gp-pill-btn" data-gp="begin-another-session">${escapeHtml(hasNextActivity ? "Begin another session" : "Back to grammar")}</button>`
+                  : `<button type="button" class="gp-cta gp-cta-plum" data-gp-tab="property">Visit the property</button>
+                     <button type="button" class="gp-pill-btn" data-gp="back">${escapeHtml(hasNextActivity ? "Back to session" : "Back to grammar")}</button>`}
               </div>
             </div>
           </div>
@@ -2342,6 +2412,9 @@ export function createGrammarProgram({
               persistCurrentProgress();
             }
             goToSessionSurface({ clearPendingResult: view === "results" });
+            return;
+          case "begin-another-session":
+            goToSessionSurface({ clearPendingResult: true, autoOpenReady: true });
             return;
           case "clear-sessions":
             if (G.done || G.current || G.results.length || Object.keys(G.skills).length || G.pendingResult) {
