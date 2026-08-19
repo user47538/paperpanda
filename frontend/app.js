@@ -4448,37 +4448,29 @@ function shouldUseHomeFocusUi() {
   return state.currentView === "home";
 }
 
+function isExpandedPracticeWorkspaceTab(tab = "", subject = getSelectedSubject()) {
+  if (state.currentView !== "subjects" || !state.subjectWorkspaceExpanded) {
+    return false;
+  }
+
+  if (String(state.activeSubjectTab || "") !== String(tab || "")) {
+    return false;
+  }
+
+  const workspaceSubject = getWorkspaceSubjectForTab(tab, subject) || subject;
+  return Boolean(workspaceSubject && isSpellingSubjectRecord(workspaceSubject.id, workspaceSubject.name));
+}
+
 function shouldUseSpellingFocusUi(subject = getSelectedSubject()) {
-  return Boolean(
-    subject &&
-    state.currentView === "subjects" &&
-    subject.id === "spelling" &&
-    state.activeSubjectTab === "spelling" &&
-    state.subjectWorkspaceExpanded &&
-    state.subjectWorkspaceExpandedSubjectId === subject.id
-  );
+  return Boolean(subject && isExpandedPracticeWorkspaceTab("spelling", subject));
 }
 
 function shouldUseGrammarFocusUi(subject = getSelectedSubject()) {
-  return Boolean(
-    subject &&
-    state.currentView === "subjects" &&
-    subject.id === "spelling" &&
-    state.activeSubjectTab === "grammar" &&
-    state.subjectWorkspaceExpanded &&
-    state.subjectWorkspaceExpandedSubjectId === subject.id
-  );
+  return Boolean(subject && isExpandedPracticeWorkspaceTab("grammar", subject));
 }
 
 function shouldUseWritingFocusUi(subject = getSelectedSubject()) {
-  return Boolean(
-    subject &&
-    state.currentView === "subjects" &&
-    subject.id === "spelling" &&
-    state.activeSubjectTab === "writing" &&
-    state.subjectWorkspaceExpanded &&
-    state.subjectWorkspaceExpandedSubjectId === subject.id
-  );
+  return Boolean(subject && isExpandedPracticeWorkspaceTab("writing", subject));
 }
 
 function renderFocusHomeCard() {
