@@ -13,6 +13,8 @@ const previewDatabaseName = "paperpanda-assets";
 const previewStoreName = "document-previews";
 const settingsAssetStoreName = "settings-assets";
 const subjectsSnapshotStoreName = "subjects-snapshots";
+const authRequestTimeoutMs = 15_000;
+const subjectSnapshotRestoreTimeoutMs = 1_500;
 const GOOGLE_DOCS_SCOPE = "https://www.googleapis.com/auth/documents";
 const GOOGLE_IDENTITY_SCRIPT_ID = "google-identity-client";
 const GOOGLE_IDENTITY_SCRIPT_URL = "https://accounts.google.com/gsi/client";
@@ -10895,12 +10897,23 @@ function getStoredSubjectsForAccount(account) {
 async function getMergedStoredSubjectsForAccount(account, primarySubjects = null) {
   const accountKey = normaliseAccountKey(account?.email);
   const storedSubjectsMap = loadStoredSubjectsMap();
+  const subjectSnapshotTimeout = Symbol("subjectSnapshotTimeout");
   const indexedDbSubjects = accountKey
-    ? await getSubjectsSnapshotRecord(accountKey).catch((error) => {
-        console.error("IndexedDB subject snapshot could not be restored.", error);
-        return null;
-      })
+    ? await Promise.race([
+        getSubjectsSnapshotRecord(accountKey).catch((error) => {
+          console.error("IndexedDB subject snapshot could not be restored.", error);
+          return null;
+        }),
+        new Promise((resolve) => {
+          window.setTimeout(() => resolve(subjectSnapshotTimeout), subjectSnapshotRestoreTimeoutMs);
+        })
+      ])
     : null;
+
+  if (indexedDbSubjects === subjectSnapshotTimeout) {
+    console.warn("IndexedDB subject snapshot restore timed out. Falling back to local storage and server subjects.");
+    return mergeAvailableSubjectSources(null, storedSubjectsMap[accountKey], primarySubjects);
+  }
 
   return mergeAvailableSubjectSources(indexedDbSubjects, storedSubjectsMap[accountKey], primarySubjects);
 }
@@ -10953,6 +10966,9 @@ async function registerCloudAccountWithFallback({ name, email, password, grade, 
       grade,
       subjects: createPersistableSubjects(subjects),
       settings
+    }, false, {
+      timeoutMs: authRequestTimeoutMs,
+      timeoutMessage: "Account creation took too long. Please try again."
     });
   } catch (error) {
     const payloadTooLarge =
@@ -11296,7 +11312,9 @@ async function restoreSessionUser() {
       const session = await requestApiGet("/api/auth/session", {
         headers: {
           Authorization: `Bearer ${savedToken}`
-        }
+        },
+        timeoutMs: authRequestTimeoutMs,
+        timeoutMessage: "Session restore took too long. Sign in again."
       });
       state.authToken = savedToken;
       const mergedSubjects = await getMergedStoredSubjectsForAccount(session.account, session.subjects);
@@ -11345,6 +11363,9 @@ async function restoreSessionUser() {
       payload = await requestApi("/api/auth/signin", {
         email: account.email,
         password: account.password
+      }, false, {
+        timeoutMs: authRequestTimeoutMs,
+        timeoutMessage: "Sign-in took too long. Please try again."
       });
     }
 
@@ -12086,11 +12107,30 @@ function buildReaderTextMarkup(sectionText, importantTerms = []) {
 }
 
 async function requestApiGet(endpoint, options = {}) {
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-    headers: {
-      ...(options.headers || {})
+  const rawTimeoutMs = Number(options.timeoutMs);
+  const timeoutMs = Number.isFinite(rawTimeoutMs) && rawTimeoutMs > 0 ? Math.max(1_000, rawTimeoutMs) : 0;
+  const abortController = timeoutMs ? new AbortController() : null;
+  const timeoutHandle = abortController ? setTimeout(() => abortController.abort(), timeoutMs) : null;
+  let response;
+
+  try {
+    response = await fetch(`${API_BASE_URL}${endpoint}`, {
+      headers: {
+        ...(options.headers || {})
+      },
+      signal: abortController?.signal
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(options.timeoutMessage || "The request timed out.");
     }
-  });
+    throw error instanceof Error ? error : new Error("The request failed.");
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+  }
+
   if (!response.ok) {
     let message = "The request failed.";
     try {
@@ -20102,6 +20142,9 @@ async function handleDashboardOpen() {
         const payload = await requestApi("/api/auth/signin", {
           email: studentEmail,
           password
+        }, false, {
+          timeoutMs: authRequestTimeoutMs,
+          timeoutMessage: "Sign-in took too long. Please try again."
         });
         elements.signInStatus.textContent = "Loading your study space...";
         state.authToken = payload.token || "";
