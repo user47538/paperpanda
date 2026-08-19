@@ -4470,6 +4470,17 @@ function shouldUseGrammarFocusUi(subject = getSelectedSubject()) {
   );
 }
 
+function shouldUseWritingFocusUi(subject = getSelectedSubject()) {
+  return Boolean(
+    subject &&
+    state.currentView === "subjects" &&
+    subject.id === "spelling" &&
+    state.activeSubjectTab === "writing" &&
+    state.subjectWorkspaceExpanded &&
+    state.subjectWorkspaceExpandedSubjectId === subject.id
+  );
+}
+
 function renderFocusHomeCard() {
   const host = elements.focusHomeNextCard;
   if (!host) {
@@ -4550,12 +4561,13 @@ function renderFocusMode() {
   const spellingLaunchpad = shouldShowSpellingLaunchpad(subject);
   const spellingFocus = shouldUseSpellingFocusUi(subject);
   const grammarFocus = shouldUseGrammarFocusUi(subject);
+  const writingFocus = shouldUseWritingFocusUi(subject);
   const askOpen = spellingFocus && state.focusAskOpen;
-  const drilledIn = (spellingFocus && !askOpen) || grammarFocus;
+  const drilledIn = (spellingFocus && !askOpen) || grammarFocus || writingFocus;
   const showWorkspaceBack = Boolean(
     state.currentView === "subjects" &&
     state.subjectWorkspaceExpanded &&
-    (state.subjectWorkspaceReturnLandingSubjectId || spellingFocus || grammarFocus)
+    (state.subjectWorkspaceReturnLandingSubjectId || spellingFocus || grammarFocus || writingFocus)
   );
 
   elements.subjectsView?.classList.toggle("focus-launchpad-open", spellingLaunchpad);
