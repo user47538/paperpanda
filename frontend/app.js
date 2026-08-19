@@ -7,7 +7,8 @@ const authTokenStorageKey = "paperpanda-session-token";
 const subjectsStorageKey = "paperpanda-subjects-by-account";
 const settingsStorageKey = "studylift-settings";
 const uiVersionStorageKey = "paperpanda-ui-version";
-const currentUiVersion = "2026-07-30-writing-launchpad-and-stage5-fix";
+const currentUiVersion = "2026-08-18-grammar-reset-and-signout";
+const grammarResetVersion = 1;
 const previewDatabaseName = "paperpanda-assets";
 const previewStoreName = "document-previews";
 const settingsAssetStoreName = "settings-assets";
@@ -708,6 +709,7 @@ const RP_JUMP_SHEET = {
   ]
 };
 const RP_TACK_VARIANT_KEYS = ["pad", "bridle", "girth"];
+const RP_GRAMMAR_PROGRESS_RESET_VERSION = 1;
 const SPELLING_TENSE_PROMPTS = {
   believe: {
     past: "They believed the strongest explanation straight away.",
@@ -6095,6 +6097,7 @@ function createDefaultWritingState(subjectId = "") {
 function createDefaultGrammarState(subjectId = "") {
   const enabled = subjectId === "spelling";
   return {
+    resetVersion: grammarResetVersion,
     enabled,
     done: 0,
     audioHeard: [],
@@ -6108,6 +6111,10 @@ function createDefaultGrammarState(subjectId = "") {
 function normaliseGrammarState(grammar, subjectId = "") {
   const base = createDefaultGrammarState(subjectId);
   const next = grammar && typeof grammar === "object" && !Array.isArray(grammar) ? grammar : {};
+  const resetVersion = Math.max(0, Number(next.resetVersion || 0) || 0);
+  if (resetVersion !== grammarResetVersion) {
+    return base;
+  }
   const skills = next.skills && typeof next.skills === "object" && !Array.isArray(next.skills) ? next.skills : {};
   const current = next.current && typeof next.current === "object" && !Array.isArray(next.current) ? next.current : null;
   const pendingResult = Math.max(0, Number(next.pendingResult || 0) || 0);
@@ -6126,6 +6133,7 @@ function normaliseGrammarState(grammar, subjectId = "") {
   return {
     ...base,
     ...next,
+    resetVersion: grammarResetVersion,
     enabled: subjectId === "spelling",
     done: Math.max(0, Math.min(GP_SESSIONS.length, Number(next.done || 0) || 0)),
     audioHeard: Array.isArray(next.audioHeard)
@@ -9237,7 +9245,16 @@ const RewardProperty = (function () {
   }
 
   function defaultState() {
-    return { stage: 0, owned: 2, sessions: 0, grammarSessions: 0, grammarSessionVersion: RP_GRAMMAR_SESSION_VERSION, horses: [], arenaJumps: [] };
+    return {
+      stage: 0,
+      owned: 2,
+      sessions: 0,
+      grammarSessions: 0,
+      grammarSessionVersion: RP_GRAMMAR_SESSION_VERSION,
+      grammarProgressResetVersion: RP_GRAMMAR_PROGRESS_RESET_VERSION,
+      horses: [],
+      arenaJumps: []
+    };
   }
 
   function clampZone(x, y) {
@@ -9411,17 +9428,24 @@ const RewardProperty = (function () {
     }
     const base = saved && typeof saved === "object" ? saved : defaultState();
     const grammarSessionVersion = Math.max(0, Number(base.grammarSessionVersion || 0) || 0);
-    const rawGrammarSessions = Math.max(0, Number(base.grammarSessions || 0) || 0);
-    const grammarSessions = grammarSessionVersion >= RP_GRAMMAR_SESSION_VERSION
-      ? rawGrammarSessions
-      : getCompletedGrammarRewardSessions(rawGrammarSessions);
+    const grammarProgressResetVersion = Math.max(0, Number(base.grammarProgressResetVersion || 0) || 0);
+    const shouldResetGrammarProgress = grammarProgressResetVersion !== RP_GRAMMAR_PROGRESS_RESET_VERSION;
+    const rawGrammarSessions = shouldResetGrammarProgress
+      ? 0
+      : Math.max(0, Number(base.grammarSessions || 0) || 0);
+    const grammarSessions = shouldResetGrammarProgress
+      ? 0
+      : grammarSessionVersion >= RP_GRAMMAR_SESSION_VERSION
+        ? rawGrammarSessions
+        : getCompletedGrammarRewardSessions(rawGrammarSessions);
     const savedStage = Math.max(0, Math.min(RP_STAGES.length - 1, Number(base.stage || 0) || 0));
     S = {
-      stage: Math.max(savedStage, getDerivedStage(grammarSessions)),
+      stage: shouldResetGrammarProgress ? 0 : Math.max(savedStage, getDerivedStage(grammarSessions)),
       owned: Math.max(2, Math.min(RP_TACK.length, Number(base.owned || 2) || 2)),
       sessions: Math.max(0, Number(base.sessions || 0) || 0),
       grammarSessions,
       grammarSessionVersion: RP_GRAMMAR_SESSION_VERSION,
+      grammarProgressResetVersion: RP_GRAMMAR_PROGRESS_RESET_VERSION,
       horses: Array.isArray(base.horses) ? base.horses.map((horse, index) => normaliseHorse(horse, index)) : [],
       arenaJumps: Array.isArray(base.arenaJumps) ? base.arenaJumps.map((jump, index) => normaliseArenaJump(jump, index)) : []
     };
@@ -11336,7 +11360,12 @@ async function restoreSessionUser() {
 
 function restoreSettings() {
   const raw = window.localStorage.getItem(settingsStorageKey);
+  const savedUiVersion = window.localStorage.getItem(uiVersionStorageKey);
+  const didUpgradeUi = savedUiVersion !== currentUiVersion;
   if (!raw) {
+    if (didUpgradeUi) {
+      clearSession();
+    }
     window.localStorage.setItem(uiVersionStorageKey, currentUiVersion);
     return;
   }
@@ -11371,7 +11400,8 @@ function restoreSettings() {
     console.error("Failed to restore settings.", error);
   }
 
-  if (window.localStorage.getItem(uiVersionStorageKey) !== currentUiVersion) {
+  if (didUpgradeUi) {
+    clearSession();
     window.localStorage.setItem(uiVersionStorageKey, currentUiVersion);
   }
 }
