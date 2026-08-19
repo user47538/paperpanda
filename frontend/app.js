@@ -1965,6 +1965,24 @@ function getSelectedSubject() {
   return state.subjects.find((subject) => subject.id === state.selectedSubjectId);
 }
 
+function getPracticeSubject() {
+  return state.subjects.find((subject) => subject.id === "spelling") || null;
+}
+
+function getWritingSubject() {
+  return state.subjects.find((subject) => subject.id === "english") || null;
+}
+
+function resolveWorkspaceSubjectForTab(tab = "", fallbackSubject = getSelectedSubject()) {
+  if (tab === "spelling" || tab === "grammar") {
+    return getPracticeSubject() || fallbackSubject || null;
+  }
+  if (tab === "writing") {
+    return getWritingSubject() || fallbackSubject || null;
+  }
+  return fallbackSubject || null;
+}
+
 function selectSubjectForSubjectsView(subjectId, { returnToHome = false } = {}) {
   const subject = state.subjects.find((item) => item.id === subjectId);
   if (!subject) {
@@ -2417,7 +2435,10 @@ function closeFocusAskPopup({ stopMic = false } = {}) {
 }
 
 function openSubjectsWorkspace(tab = "reader") {
-  const subject = getSelectedSubject();
+  const subject = resolveWorkspaceSubjectForTab(tab);
+  if (subject) {
+    state.selectedSubjectId = subject.id;
+  }
   const availableTabs = getAvailableSubjectTabs(subject);
   const nextTab = availableTabs.includes(tab) ? tab : availableTabs[0] || "reader";
   state.currentView = "subjects";
@@ -4370,13 +4391,9 @@ function openSubjectLandingArea(subjectId, area) {
   }
 
   state.subjectWorkspaceReturnLandingSubjectId = subjectId;
-  if (area === "writing") {
-    state.selectedSubjectId = "english";
-    expandSubjectWorkspace(area);
-    return;
-  }
-
-  state.selectedSubjectId = subjectId;
+  const currentSubject = state.subjects.find((subject) => subject.id === subjectId) || null;
+  const targetSubject = resolveWorkspaceSubjectForTab(area, currentSubject);
+  state.selectedSubjectId = targetSubject?.id || subjectId;
   expandSubjectWorkspace(area);
 }
 
@@ -4385,13 +4402,8 @@ function openFocusLaunchpadArea(subject, area) {
     return;
   }
 
-  if (area === "writing") {
-    state.selectedSubjectId = "english";
-    expandSubjectWorkspace(area);
-    return;
-  }
-
-  state.selectedSubjectId = subject.id;
+  const targetSubject = resolveWorkspaceSubjectForTab(area, subject);
+  state.selectedSubjectId = targetSubject?.id || subject.id;
   expandSubjectWorkspace(area);
 }
 
