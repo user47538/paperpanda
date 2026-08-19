@@ -1800,20 +1800,35 @@ function isSpellingSubjectRecord(subjectId = "", subjectName = "") {
   return (subjectAliasMap.spelling || []).some((alias) => alias.trim().toLowerCase() === normalizedSubjectName);
 }
 
+function findSeedSubjectByAlias(value = "") {
+  const normalizedValue = String(value || "").trim().toLowerCase();
+  if (!normalizedValue) {
+    return null;
+  }
+
+  return subjectTemplateSeed.find((seededSubject) => {
+    if (seededSubject.id.trim().toLowerCase() === normalizedValue) {
+      return true;
+    }
+    if (seededSubject.name.trim().toLowerCase() === normalizedValue) {
+      return true;
+    }
+    return (subjectAliasMap[seededSubject.id] || []).some((alias) => alias.trim().toLowerCase() === normalizedValue);
+  }) || null;
+}
+
 function resolveSubjectSeedEntry(subject, index) {
   const explicitId = String(subject?.id || "").trim();
   if (explicitId) {
-    const seededById = subjectTemplateSeed.find((seededSubject) => seededSubject.id === explicitId);
+    const seededById = findSeedSubjectByAlias(explicitId);
     if (seededById) {
       return seededById;
     }
   }
 
-  const subjectName = String(subject?.name || "").trim().toLowerCase();
+  const subjectName = String(subject?.name || "").trim();
   if (subjectName) {
-    const seededByName = subjectTemplateSeed.find(
-      (seededSubject) => seededSubject.name.trim().toLowerCase() === subjectName
-    );
+    const seededByName = findSeedSubjectByAlias(subjectName);
     if (seededByName) {
       return seededByName;
     }
@@ -1968,7 +1983,7 @@ function getSelectedSubject() {
 }
 
 function getPracticeSubject() {
-  return state.subjects.find((subject) => subject.id === "spelling") || null;
+  return state.subjects.find((subject) => isSpellingSubjectRecord(subject.id, subject.name)) || null;
 }
 
 function getWritingSubject() {
@@ -5809,10 +5824,17 @@ function saveStoredSubjectsMapForAccount(storedSubjectsMap, accountKey, subjects
 
 function hydrateStoredSubject(subject, index) {
   const subjectSeedEntry = resolveSubjectSeedEntry(subject, index);
-  const resolvedSubjectId = String(subject?.id || subjectSeedEntry?.id || "");
+  const resolvedSubjectId = String(
+    findSeedSubjectByAlias(subject?.id || "")?.id ||
+    findSeedSubjectByAlias(subject?.name || "")?.id ||
+    subject?.id ||
+    subjectSeedEntry?.id ||
+    ""
+  );
   return {
     ...structuredClone(subjectSeedEntry || {}),
     ...subject,
+    id: resolvedSubjectId,
     documents: Array.isArray(subject.documents) ? subject.documents.map(normaliseDocument) : [],
     assessments: Array.isArray(subject.assessments) ? subject.assessments.map(normaliseAssessment) : [],
     watch: Array.isArray(subject.watch)
