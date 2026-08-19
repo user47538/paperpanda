@@ -1987,7 +1987,7 @@ function getPracticeSubject() {
 }
 
 function getWritingSubject() {
-  return state.subjects.find((subject) => subject.id === "english") || null;
+  return getPracticeSubject();
 }
 
 function resolveWorkspaceSubjectForTab(tab = "", fallbackSubject = getSelectedSubject()) {
@@ -3641,10 +3641,9 @@ function renderSubjectLanding() {
   const openDocument = getSubjectLandingOpenDocument(subject);
 
   if (!openDocument && subject.id === "spelling") {
-    const writingSubject = state.subjects.find((item) => item.id === "english") || null;
     const spellingCount = getSpellingPendingActivityCount(subject);
     const grammarCount = getSubjectGrammarPendingSessionCount(subject);
-    const writingCount = writingSubject ? getSubjectWritingPendingSectionCount(writingSubject) : 0;
+    const writingCount = getSubjectWritingPendingSectionCount(subject);
 
     host.innerHTML = `
       <section class="subject-landing">
@@ -4186,8 +4185,7 @@ function renderSubjectFocusLaunchpad() {
     return;
   }
 
-  const englishSubject = state.subjects.find((item) => item.id === "english") || null;
-  const writingSubject = subject.id === "english" ? subject : subject.id === "spelling" ? englishSubject : null;
+  const writingSubject = subject.id === "spelling" ? subject : null;
 
   const readerBundle = getAllDocumentBundles(subject).find((bundle) => !bundle.reviewed) || getAllDocumentBundles(subject)[0] || null;
   const homeworkBundle = getSubjectHomeworkBundles(subject)[0] || null;
@@ -4244,8 +4242,8 @@ function renderSubjectFocusLaunchpad() {
           action: "✍ Open writing"
         }
       : {
-          title: "Writing Studio lives in English",
-          meta: "Open English to build a story section, choose a picture, and preview the book.",
+          title: "Writing Studio lives in Practice",
+          meta: "Open the Practice subject to build a story section, choose a picture, and preview the book.",
           action: "✍ Open writing"
         },
     watch: watchItem
@@ -4674,9 +4672,9 @@ function renderDockContext() {
   if (state.activeSubjectTab === "writing") {
     const writing = getSubjectWritingState(subject);
     elements.dockContextTitle.textContent = "Writing Studio";
-    elements.dockContextBody.innerHTML = subject.id === "english"
+    elements.dockContextBody.innerHTML = subject.id === "spelling"
       ? `<article class="dock-tile dock-tile--lilac"><div class="dock-tile__copy"><strong>${escapeHtml(`${getWritingCompletedSectionCount(writing)}/${WRITING_STUDIO_SECTION_COUNT} sections complete`)}</strong><span>${escapeHtml(writing.coachMessage || "The next story section is ready.")}</span></div></article>`
-      : `<div class="empty-state empty-state--compact">Open English to continue the story studio.</div>`;
+      : `<div class="empty-state empty-state--compact">Open the Practice subject to continue the story studio.</div>`;
     return;
   }
 
@@ -6131,7 +6129,7 @@ function createDefaultWritingSections() {
 }
 
 function createDefaultWritingState(subjectId = "") {
-  const enabled = subjectId === "english";
+  const enabled = subjectId === "spelling";
   return {
     enabled,
     view: "begin",
@@ -6256,7 +6254,7 @@ function normaliseWritingState(writing, subjectId = "") {
   return {
     ...base,
     ...next,
-    enabled: subjectId === "english",
+    enabled: subjectId === "spelling",
     view: ["begin", "write", "illustrate", "book"].includes(String(next.view || "")) ? String(next.view) : base.view,
     storyTitle: String(next.storyTitle || ""),
     openingAnswers: {
@@ -6649,11 +6647,38 @@ function getSubjectSpellingState(subject) {
   return subject.spelling;
 }
 
+function hasMeaningfulWritingProgress(writing) {
+  const openingAnswers = writing?.openingAnswers && typeof writing.openingAnswers === "object" ? writing.openingAnswers : {};
+  const sections = Array.isArray(writing?.sections) ? writing.sections : [];
+  return Boolean(
+    String(writing?.storyTitle || "").trim()
+    || String(openingAnswers.who || "").trim()
+    || String(openingAnswers.where || "").trim()
+    || String(openingAnswers.want || "").trim()
+    || String(writing?.illustrationStyle?.label || "").trim()
+    || sections.some((section) =>
+      String(section?.text || "").trim()
+      || Boolean(section?.completed)
+      || String(section?.selectedIllustrationId || "").trim()
+      || (Array.isArray(section?.illustrationOptions) && section.illustrationOptions.some((option) => String(option?.imageUrl || "").trim()))
+    )
+  );
+}
+
 function getSubjectWritingState(subject) {
   if (!subject) {
     return createDefaultWritingState("");
   }
   subject.writing = normaliseWritingState(subject.writing, subject.id);
+  if (subject.id === "spelling" && !hasMeaningfulWritingProgress(subject.writing)) {
+    const legacyEnglish = state.subjects.find((item) => item.id === "english");
+    if (legacyEnglish?.writing) {
+      const migrated = normaliseWritingState(legacyEnglish.writing, "spelling");
+      if (hasMeaningfulWritingProgress(migrated)) {
+        subject.writing = migrated;
+      }
+    }
+  }
   return subject.writing;
 }
 
@@ -12899,9 +12924,9 @@ function getSubjectTabCounts(subject) {
 
 function getAvailableSubjectTabs(subject) {
   return subject?.id === "spelling"
-    ? ["spelling", "grammar"]
+    ? ["spelling", "grammar", "writing"]
     : subject?.id === "english"
-      ? ["reader", "writing", "homework", "watch", "assessments"]
+      ? ["reader", "homework", "watch", "assessments"]
       : ["reader", "homework", "watch", "assessments"];
 }
 
@@ -12961,13 +12986,18 @@ function getHomeFocusSubjectStatus(subject) {
   const activeAssessmentCount = getActiveSubjectAssessments(subject).length;
   const spellingPendingCount = getSpellingPendingActivityCount(subject);
   const grammarPendingCount = getSubjectGrammarPendingSessionCount(subject);
-  const waitingCount = unreadCount + remainingHomeworkCount + activeAssessmentCount + spellingPendingCount + grammarPendingCount;
+  const writingPendingCount = getSubjectWritingPendingSectionCount(subject);
+  const waitingCount = unreadCount + remainingHomeworkCount + activeAssessmentCount + spellingPendingCount + grammarPendingCount + writingPendingCount;
   const summary = subject?.id === "spelling" && grammarPendingCount && waitingCount === grammarPendingCount
     ? "Grammar ready"
+    : subject?.id === "spelling" && writingPendingCount && waitingCount === writingPendingCount
+      ? "Writing ready"
     : spellingPendingCount && waitingCount === spellingPendingCount
       ? `${spellingPendingCount} spelling ${spellingPendingCount === 1 ? "stage" : "stages"}`
       : grammarPendingCount
         ? `${waitingCount} to do · grammar ready`
+        : writingPendingCount
+          ? `${waitingCount} to do · writing ready`
         : spellingPendingCount
       ? `${waitingCount} to do · ${spellingPendingCount} spelling stage${spellingPendingCount === 1 ? "" : "s"}`
       : waitingCount
@@ -12988,6 +13018,7 @@ function getSubjectHeroCopy(subject, tab) {
   const homeworkBundles = getSubjectHomeworkBundles(subject);
   const spellingPending = getSpellingPendingActivityCount(subject);
   const grammarPending = getSubjectGrammarPendingSessionCount(subject);
+  const writingPending = getSubjectWritingPendingSectionCount(subject);
   const watchCount = getSubjectWatchLinks(subject).length;
   const activeAssessments = getActiveSubjectAssessments(subject);
 
@@ -13037,6 +13068,22 @@ function getSubjectHeroCopy(subject, tab) {
     };
   }
 
+  if (tab === "writing") {
+    const writing = getSubjectWritingState(subject);
+    const currentSection = getWritingCurrentSection(writing);
+    const focusLabel = writing.view === "book"
+      ? "book preview"
+      : currentSection
+        ? `section ${currentSection.number}`
+        : "your story";
+    return {
+      big: `${writingPending} ${writingPending === 1 ? "section" : "sections"}`,
+      rest: writingPending
+        ? `left in ${WRITING_STUDIO_TAB_LABEL} — current focus: ${focusLabel}.`
+        : "complete in Writing Studio — your picture book is ready to revisit."
+    };
+  }
+
   if (tab === "watch") {
     return {
       big: `${watchCount} ${watchCount === 1 ? "video" : "videos"}`,
@@ -13083,8 +13130,15 @@ function renderHomeHero() {
   const unreadDocumentMetrics = getUnreadDocumentMetrics();
   const homeworkMetrics = getHomeworkMetrics();
   const assessmentMetrics = getAssessmentProgressMetrics();
-  const spellingThings = state.subjects.reduce((total, subject) => total + getSpellingPendingActivityCount(subject), 0);
-  const totalThings = unreadDocumentMetrics.unread + homeworkMetrics.remaining + assessmentMetrics.upcoming + spellingThings;
+  const practiceThings = state.subjects.reduce(
+    (total, subject) =>
+      total
+      + getSpellingPendingActivityCount(subject)
+      + getSubjectGrammarPendingSessionCount(subject)
+      + getSubjectWritingPendingSectionCount(subject),
+    0
+  );
+  const totalThings = unreadDocumentMetrics.unread + homeworkMetrics.remaining + assessmentMetrics.upcoming + practiceThings;
   const nextEntry = getNextAssessmentEntry();
   const daysUntil = nextEntry?.dueDateObject ? getDaysUntilDate(nextEntry.dueDateObject) : 0;
 
@@ -16982,13 +17036,13 @@ function saveWritingBookAsPdf(subject) {
 
 function renderWriting() {
   const host = elements.writingSection;
-  const subject = getSelectedSubject();
+  const subject = getWorkspaceSubjectForTab("writing", getSelectedSubject()) || getSelectedSubject();
   if (!host || !subject) {
     return;
   }
   const writing = getSubjectWritingState(subject);
   if (!writing.enabled) {
-    host.innerHTML = `<section class="ws-shell"><article class="ws-card"><p class="eyebrow">Writing Studio</p><h3>Open English to build your story</h3><p class="ws-copy">Writing Studio lives in the English workspace so each section, picture choice, and book page stays with your English work.</p></article></section>`;
+    host.innerHTML = `<section class="ws-shell"><article class="ws-card"><p class="eyebrow">Writing Studio</p><h3>Open the Practice subject to build your story</h3><p class="ws-copy">Writing Studio now lives inside Practice so each section, picture choice, and book page stays with that workspace.</p></article></section>`;
     return;
   }
 
