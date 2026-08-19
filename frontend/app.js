@@ -2000,6 +2000,28 @@ function resolveWorkspaceSubjectForTab(tab = "", fallbackSubject = getSelectedSu
   return fallbackSubject || null;
 }
 
+function getWorkspaceSubjectForTab(tab = state.activeSubjectTab, fallbackSubject = getSelectedSubject()) {
+  return resolveWorkspaceSubjectForTab(tab, fallbackSubject) || fallbackSubject || null;
+}
+
+function syncSelectedSubjectForWorkspaceTab(tab = state.activeSubjectTab) {
+  if (state.currentView !== "subjects") {
+    return getSelectedSubject();
+  }
+
+  if (!["spelling", "grammar", "writing"].includes(String(tab || ""))) {
+    return getSelectedSubject();
+  }
+
+  const currentSubject = getSelectedSubject();
+  const targetSubject = getWorkspaceSubjectForTab(tab, currentSubject);
+  if (targetSubject && state.selectedSubjectId !== targetSubject.id) {
+    state.selectedSubjectId = targetSubject.id;
+  }
+
+  return targetSubject || currentSubject || null;
+}
+
 function selectSubjectForSubjectsView(subjectId, { returnToHome = false } = {}) {
   const subject = state.subjects.find((item) => item.id === subjectId);
   if (!subject) {
@@ -4112,7 +4134,7 @@ function renderSubjectLanding() {
 }
 
 function renderSubjectTabs() {
-  const subject = getSelectedSubject();
+  const subject = getWorkspaceSubjectForTab(state.activeSubjectTab, getSelectedSubject()) || getSelectedSubject();
   if (!subject || !elements.subjectTabs) {
     return;
   }
@@ -4595,7 +4617,7 @@ function renderUploadAssessmentTaskOptions() {
 }
 
 function renderDockContext() {
-  const subject = getSelectedSubject();
+  const subject = getWorkspaceSubjectForTab(state.activeSubjectTab, getSelectedSubject()) || getSelectedSubject();
   if (!elements.dockContextTitle || !elements.dockContextBody || !subject) {
     return;
   }
@@ -17114,7 +17136,7 @@ function renderWriting() {
 
 function renderGrammar() {
   const host = elements.grammarSection;
-  const subject = getSelectedSubject();
+  const subject = getWorkspaceSubjectForTab("grammar", getSelectedSubject()) || getSelectedSubject();
   if (!host || !subject) {
     return;
   }
@@ -17138,7 +17160,7 @@ function renderGrammar() {
 
 function renderSpelling() {
   const host = elements.spellingSection;
-  const subject = getSelectedSubject();
+  const subject = getWorkspaceSubjectForTab("spelling", getSelectedSubject()) || getSelectedSubject();
   if (!host || !subject) {
     return;
   }
@@ -20072,6 +20094,7 @@ function render() {
   applyBackgrounds();
   renderAiConnectionState();
   renderCurrentView();
+  syncSelectedSubjectForWorkspaceTab();
   renderOverview();
   renderHomeHero();
   renderRevisionPanel();
