@@ -6147,6 +6147,7 @@ function createDefaultWritingState(subjectId = "") {
     bookPreviewIndex: 0,
     returnToBookAfterIllustration: false,
     illustrationStyle: null,
+    imageFeedback: "",
     coachMessage: enabled ? "Answer the three quick questions to begin your story." : "",
     activeSuggestion: null,
     isGeneratingIllustrations: false,
@@ -6270,6 +6271,7 @@ function normaliseWritingState(writing, subjectId = "") {
     bookPreviewIndex: Math.max(0, Math.min(WRITING_STUDIO_SECTION_COUNT - 1, Number(next.bookPreviewIndex || 0) || 0)),
     returnToBookAfterIllustration: Boolean(next.returnToBookAfterIllustration),
     illustrationStyle: illustrationStyle && illustrationStyle.label && illustrationStyle.brief ? illustrationStyle : null,
+    imageFeedback: String(next.imageFeedback || "").trim().slice(0, 280),
     coachMessage: String(next.coachMessage || base.coachMessage || ""),
     isGeneratingIllustrations: Boolean(next.isGeneratingIllustrations),
     illustrationError: String(next.illustrationError || ""),
@@ -16599,6 +16601,12 @@ function updateWritingOpeningAnswer(subject, field, value) {
   persistSubjects({ skipRemoteSync: true });
 }
 
+function updateWritingImageFeedback(subject, value) {
+  const writing = getSubjectWritingState(subject);
+  writing.imageFeedback = String(value || "").trimStart().slice(0, 280);
+  persistSubjects({ skipRemoteSync: true });
+}
+
 function startWritingStory(subject) {
   const writing = getSubjectWritingState(subject);
   const who = String(writing.openingAnswers.who || "").trim();
@@ -16717,6 +16725,7 @@ async function loadWritingIllustrations(subject, { force = false } = {}) {
       sectionNumber: section.number,
       sectionText: section.text,
       openingAnswers: writing.openingAnswers,
+      imageFeedback: writing.imageFeedback,
       previousSectionText: previousSection?.text || "",
       prompts: baseOptions.map((option) => option.prompt),
       styleGuide: writing.illustrationStyle && writing.currentSectionIndex > 0
@@ -17024,7 +17033,7 @@ function saveWritingBookAsPdf(subject) {
   if (!completedSections.length) {
     return;
   }
-  const previewWindow = window.open("", "_blank", "noopener,noreferrer,width=1100,height=900");
+  const previewWindow = window.open("", "_blank", "width=1100,height=900");
   if (!previewWindow) {
     writing.coachMessage = "Allow pop-ups to save the picture book as a PDF.";
     persistSubjects();
@@ -17033,18 +17042,21 @@ function saveWritingBookAsPdf(subject) {
   const pagesMarkup = completedSections
     .map((section, index) => {
       const selectedOption = getWritingSectionSelectedIllustration(section);
+      const pageText = escapeHtml(section.text || "").replace(/\n/g, "<br />");
       return `
         <section class="book-page">
           <div class="book-page__art">${selectedOption?.imageUrl ? `<img class="book-page__image" src="${escapeHtml(selectedOption.imageUrl)}" alt="${escapeHtml(selectedOption.prompt || `Illustration for page ${index + 1}`)}" />` : `<div class="book-page__placeholder">${escapeHtml(selectedOption?.prompt || `Illustration for page ${index + 1}`)}</div>`}</div>
-          <div class="book-page__text"><p class="book-page__number">Page ${index + 1} of ${completedSections.length}</p><div>${escapeHtml(section.text)}</div></div>
+          <div class="book-page__text"><p class="book-page__number">Page ${index + 1} of ${completedSections.length}</p><div class="book-page__body">${pageText}</div></div>
         </section>
       `;
     })
     .join("");
-  previewWindow.document.write(`<!doctype html><html><head><title>${escapeHtml(writing.storyTitle || WRITING_STUDIO_TAB_LABEL)}</title><style>body{font-family:Lexend,system-ui,sans-serif;margin:0;padding:32px;background:#efeaf2;color:#2e2a33}h1{margin:0 0 24px;font-size:32px}.book-page{display:flex;min-height:520px;background:#fff;border-radius:18px;overflow:hidden;box-shadow:0 18px 36px rgba(34,28,40,.12);margin:0 0 24px;page-break-after:always}.book-page__art,.book-page__text{width:50%}.book-page__art{border-right:1px dashed #d9d3df;background:#f5f2f7;padding:24px;display:flex}.book-page__image{width:100%;height:100%;object-fit:cover;border-radius:18px}.book-page__placeholder{flex:1;border:2px dashed #cfc6d7;border-radius:18px;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;color:#645d6c;line-height:1.5}.book-page__text{padding:32px 36px;font-size:24px;line-height:1.7}.book-page__number{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#645d6c;margin:0 0 18px}@media print{body{background:#fff;padding:0}.book-page{box-shadow:none;margin:0;border-radius:0}}</style></head><body><h1>${escapeHtml(writing.storyTitle || WRITING_STUDIO_TAB_LABEL)}</h1>${pagesMarkup}</body></html>`);
+  previewWindow.document.open();
+  previewWindow.document.write(`<!doctype html><html><head><title>${escapeHtml(writing.storyTitle || WRITING_STUDIO_TAB_LABEL)}</title><style>body{font-family:Lexend,system-ui,sans-serif;margin:0;padding:32px;background:#efeaf2;color:#2e2a33}.book-toolbar{position:sticky;top:0;z-index:2;display:flex;justify-content:space-between;gap:12px;align-items:center;padding:0 0 24px;background:#efeaf2}.book-toolbar__actions{display:flex;gap:12px;flex-wrap:wrap}.book-toolbar button{border:0;border-radius:999px;padding:12px 18px;font:700 14px Lexend,system-ui,sans-serif;cursor:pointer}.book-toolbar__print{background:#2e2a33;color:#fff}.book-toolbar__close{background:#fff;color:#2e2a33;border:1px solid #d9d3df}h1{margin:0;font-size:32px}.book-stack{display:grid;gap:24px}.book-page{display:flex;min-height:520px;background:#fff;border-radius:18px;overflow:hidden;box-shadow:0 18px 36px rgba(34,28,40,.12);page-break-after:always}.book-page__art,.book-page__text{width:50%}.book-page__art{border-right:1px dashed #d9d3df;background:#f5f2f7;padding:24px;display:flex}.book-page__image{width:100%;height:100%;object-fit:cover;border-radius:18px}.book-page__placeholder{flex:1;border:2px dashed #cfc6d7;border-radius:18px;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;color:#645d6c;line-height:1.5}.book-page__text{padding:32px 36px;font-size:24px;line-height:1.7}.book-page__body{white-space:normal}.book-page__number{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#645d6c;margin:0 0 18px}@media print{body{background:#fff;padding:0}.book-toolbar{display:none}.book-stack{gap:0}.book-page{box-shadow:none;margin:0;border-radius:0;break-after:page}}</style></head><body><div class="book-toolbar"><h1>${escapeHtml(writing.storyTitle || WRITING_STUDIO_TAB_LABEL)}</h1><div class="book-toolbar__actions"><button type="button" class="book-toolbar__print" onclick="window.print()">Print / Save PDF</button><button type="button" class="book-toolbar__close" onclick="window.close()">Close</button></div></div><div class="book-stack">${pagesMarkup}</div></body></html>`);
   previewWindow.document.close();
   previewWindow.focus();
-  previewWindow.print();
+  writing.coachMessage = "Book preview opened. Use Print / Save PDF in the new window.";
+  persistSubjects({ skipRemoteSync: true });
 }
 
 function renderWriting() {
@@ -17121,7 +17133,12 @@ function renderWriting() {
     const styleNote = !isChoosingBookStyle && writing.illustrationStyle?.label
       ? `<div class="ws-style-note"><strong>${escapeHtml(writing.illustrationStyle.label)}</strong><span>${escapeHtml(writing.illustrationStyle.brief)}</span></div>`
       : "";
-    bodyMarkup = `<article class="ws-card ws-card--main writing-stream__card"><div class="ws-card__head"><div><p class="eyebrow">Choose an illustration</p><p class="ws-copy">${escapeHtml(isChoosingBookStyle ? "Pick the visual style for the whole book. Later sections will follow this look." : "Pick the picture that matches your section best.")}</p></div><span class="ws-pill">${escapeHtml(`Section ${currentSection.number}`)}</span></div>${styleNote}${writing.illustrationError ? `<div class="ws-error-note">${escapeHtml(writing.illustrationError)}</div>` : ""}<div class="ws-illustration-grid">${options.map((option) => `<button type="button" class="ws-illustration-card${option.id === currentSection.selectedIllustrationId ? " is-selected" : ""}" data-writing-select-illustration="${escapeHtml(option.id)}" ${option.imageUrl ? "" : "disabled"}>${option.imageUrl ? `<img class="ws-illustration-card__image" src="${escapeHtml(option.imageUrl)}" alt="${escapeHtml(option.label || option.prompt)}" />` : `<div class="ws-illustration-card__placeholder">${writing.isGeneratingIllustrations ? "Generating..." : "No image yet"}</div>`}<strong>${escapeHtml(option.label || option.prompt)}</strong>${option.description ? `<span>${escapeHtml(option.description)}</span>` : ""}</button>`).join("")}</div><div class="ws-actions ws-actions--spread">${writing.returnToBookAfterIllustration ? `<button type="button" class="ghost-button ghost-button--light" data-writing-back-book="true">← Back to book</button>` : writing.currentSectionIndex > 0 ? `<button type="button" class="ghost-button ghost-button--light" data-writing-move-section="-1" data-writing-move-view="write">← Previous section</button>` : `<button type="button" class="ghost-button ghost-button--light" data-writing-open-section="${currentSection.number - 1}" data-writing-open-view="write">← Back to writing</button>`}<button type="button" class="ghost-button ghost-button--light" data-writing-reroll-illustrations="true" ${writing.isGeneratingIllustrations ? "disabled" : ""}>${escapeHtml(rerollLabel)}</button><button type="button" class="primary-button primary-button--dark" data-writing-use-illustration="true" ${writing.isGeneratingIllustrations ? "disabled" : ""}>Use this picture →</button>${!writing.returnToBookAfterIllustration && writing.currentSectionIndex < WRITING_STUDIO_SECTION_COUNT - 1 ? `<button type="button" class="ghost-button ghost-button--light" data-writing-move-section="1" data-writing-move-view="write">Next section →</button>` : `<span></span>`}</div></article>`;
+    const feedbackMarkup = isChoosingBookStyle
+      ? `<label class="ws-field ws-field--feedback"><span>Feedback for the illustration style</span><textarea id="writing-image-feedback" class="ws-editor ws-editor--feedback" placeholder="e.g. make the horse look gentler, use warmer colours, or show more of the stable setting.">${escapeHtml(writing.imageFeedback)}</textarea></label><p class="ws-feedback-note">This guides rerolls for section 1 and the illustrations created for the rest of the book.</p>`
+      : writing.imageFeedback
+        ? `<div class="ws-style-note"><strong>Saved image direction</strong><span>${escapeHtml(writing.imageFeedback)}</span></div>`
+        : "";
+    bodyMarkup = `<article class="ws-card ws-card--main writing-stream__card"><div class="ws-card__head"><div><p class="eyebrow">Choose an illustration</p><p class="ws-copy">${escapeHtml(isChoosingBookStyle ? "Pick the visual style for the whole book. Later sections will follow this look." : "Pick the picture that matches your section best.")}</p></div><span class="ws-pill">${escapeHtml(`Section ${currentSection.number}`)}</span></div>${styleNote}${feedbackMarkup}${writing.illustrationError ? `<div class="ws-error-note">${escapeHtml(writing.illustrationError)}</div>` : ""}<div class="ws-illustration-grid">${options.map((option) => `<button type="button" class="ws-illustration-card${option.id === currentSection.selectedIllustrationId ? " is-selected" : ""}" data-writing-select-illustration="${escapeHtml(option.id)}" ${option.imageUrl ? "" : "disabled"}>${option.imageUrl ? `<img class="ws-illustration-card__image" src="${escapeHtml(option.imageUrl)}" alt="${escapeHtml(option.label || option.prompt)}" />` : `<div class="ws-illustration-card__placeholder">${writing.isGeneratingIllustrations ? "Generating..." : "No image yet"}</div>`}<strong>${escapeHtml(option.label || option.prompt)}</strong>${option.description ? `<span>${escapeHtml(option.description)}</span>` : ""}</button>`).join("")}</div><div class="ws-actions ws-actions--spread">${writing.returnToBookAfterIllustration ? `<button type="button" class="ghost-button ghost-button--light" data-writing-back-book="true">← Back to book</button>` : writing.currentSectionIndex > 0 ? `<button type="button" class="ghost-button ghost-button--light" data-writing-move-section="-1" data-writing-move-view="write">← Previous section</button>` : `<button type="button" class="ghost-button ghost-button--light" data-writing-open-section="${currentSection.number - 1}" data-writing-open-view="write">← Back to writing</button>`}<button type="button" class="ghost-button ghost-button--light" data-writing-reroll-illustrations="true" ${writing.isGeneratingIllustrations ? "disabled" : ""}>${escapeHtml(rerollLabel)}</button><button type="button" class="primary-button primary-button--dark" data-writing-use-illustration="true" ${writing.isGeneratingIllustrations ? "disabled" : ""}>Use this picture →</button>${!writing.returnToBookAfterIllustration && writing.currentSectionIndex < WRITING_STUDIO_SECTION_COUNT - 1 ? `<button type="button" class="ghost-button ghost-button--light" data-writing-move-section="1" data-writing-move-view="write">Next section →</button>` : `<span></span>`}</div></article>`;
   } else {
     const completedSections = getWritingCompletedSections(writing);
     const previewSection = completedSections[writing.bookPreviewIndex] || completedSections[0] || writing.sections[0];
@@ -17133,6 +17150,7 @@ function renderWriting() {
   host.querySelector("#writing-answer-who")?.addEventListener("input", (event) => updateWritingOpeningAnswer(subject, "who", event.target.value));
   host.querySelector("#writing-answer-where")?.addEventListener("input", (event) => updateWritingOpeningAnswer(subject, "where", event.target.value));
   host.querySelector("#writing-answer-want")?.addEventListener("input", (event) => updateWritingOpeningAnswer(subject, "want", event.target.value));
+  host.querySelector("#writing-image-feedback")?.addEventListener("input", (event) => updateWritingImageFeedback(subject, event.target.value));
   host.querySelector("[data-writing-start]")?.addEventListener("click", () => { startWritingStory(subject); render(); });
   host.querySelector("#writing-section-editor")?.addEventListener("input", (event) => {
     const writingState = getSubjectWritingState(subject);

@@ -10010,6 +10010,22 @@ input[type="date"] {
   line-height: 1.45;
 }
 
+.ws-field--feedback {
+  margin-bottom: 10px;
+}
+
+.ws-editor--feedback {
+  min-height: 108px;
+  resize: vertical;
+}
+
+.ws-feedback-note {
+  margin: 0 0 18px;
+  color: #645d6c;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
 .ws-book-spread {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

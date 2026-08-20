@@ -20,19 +20,14 @@ import { availableRevisionGrades, getRevisionCatalogueForGrade, getRevisionEntry
 const app = express();
 const port = Number(process.env.PORT || 3001);
 const openAiApiKey = process.env.OPENAI_API_KEY || "";
-const openAiWritingImageModel = String(process.env.OPENAI_WRITING_IMAGE_MODEL || "gpt-image-1-mini").trim() || "gpt-image-1-mini";
-const openAiWritingImageQuality = ["low", "medium", "high", "auto"].includes(String(process.env.OPENAI_WRITING_IMAGE_QUALITY || "low").trim().toLowerCase())
-  ? String(process.env.OPENAI_WRITING_IMAGE_QUALITY || "low").trim().toLowerCase()
-  : "low";
-const openAiWritingImageFormat = ["jpeg", "png", "webp"].includes(String(process.env.OPENAI_WRITING_IMAGE_FORMAT || "jpeg").trim().toLowerCase())
-  ? String(process.env.OPENAI_WRITING_IMAGE_FORMAT || "jpeg").trim().toLowerCase()
-  : "jpeg";
-const openAiWritingImageCompression = Math.max(40, Math.min(95, Number(process.env.OPENAI_WRITING_IMAGE_COMPRESSION || 70) || 70));
+const geminiApiKey = process.env.GEMINI_API_KEY || "";
+const geminiWritingImageModel = String(process.env.GEMINI_WRITING_IMAGE_MODEL || "gemini-3.1-flash-image").trim() || "gemini-3.1-flash-image";
 const openAiJsonTimeoutMs = Math.max(5_000, Number(process.env.OPENAI_JSON_TIMEOUT_MS || 35_000) || 35_000);
 const openAiSpeechTimeoutMs = Math.max(5_000, Number(process.env.OPENAI_SPEECH_TIMEOUT_MS || 35_000) || 35_000);
-const openAiImageTimeoutMs = Math.max(5_000, Number(process.env.OPENAI_IMAGE_TIMEOUT_MS || 25_000) || 25_000);
+const geminiImageTimeoutMs = Math.max(5_000, Number(process.env.GEMINI_IMAGE_TIMEOUT_MS || 45_000) || 45_000);
 const writingImageSectionTextLimit = 420;
 const writingImagePreviousTextLimit = 220;
+const writingImageFeedbackLimit = 280;
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -114,6 +109,12 @@ app.use(express.json({ limit: "50mb" }));
 function requireOpenAiKey() {
   if (!openAiApiKey) {
     throw new Error("OPENAI_API_KEY is not configured on the backend.");
+  }
+}
+
+function requireGeminiKey() {
+  if (!geminiApiKey) {
+    throw new Error("GEMINI_API_KEY is not configured on the backend.");
   }
 }
 
@@ -359,34 +360,92 @@ async function callOpenAiSpeech(payload) {
   };
 }
 
-async function generateOpenAiImage(prompt) {
-  const requestPayload = {
-    model: openAiWritingImageModel,
-    prompt,
-    size: "1024x1024",
-    quality: openAiWritingImageQuality,
-    output_format: openAiWritingImageFormat
-  };
-  if (openAiWritingImageFormat !== "png") {
-    requestPayload.output_compression = openAiWritingImageCompression;
+async function callGeminiJson(endpoint, payload, { timeoutMs = geminiImageTimeoutMs, timeoutLabel = "Gemini request" } = {}) {
+  requireGeminiKey();
+  const abortController = new AbortController();
+  const timeoutHandle = setTimeout(() => abortController.abort(), timeoutMs);
+  let response;
+  try {
+    response = await fetch(`https://generativelanguage.googleapis.com/v1beta/${endpoint}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": geminiApiKey
+      },
+      body: JSON.stringify(payload),
+      signal: abortController.signal
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`${timeoutLabel} timed out.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutHandle);
   }
-  const payload = await callOpenAiJson("images/generations", requestPayload, {
-    timeoutMs: openAiImageTimeoutMs,
-    timeoutLabel: "OpenAI image generation"
+
+  if (!response.ok) {
+    let message = "Gemini request failed.";
+    try {
+      const errorPayload = await response.json();
+      message = errorPayload?.error?.message || message;
+    } catch (error) {
+      const fallbackText = await response.text();
+      if (fallbackText) {
+        message = fallbackText;
+      }
+    }
+    throw new Error(message);
+  }
+
+  return response.json();
+}
+
+function extractGeminiImage(payload) {
+  if (payload?.output_image?.data) {
+    return {
+      mimeType: String(payload.output_image.mime_type || "image/png"),
+      data: String(payload.output_image.data || "")
+    };
+  }
+
+  for (const step of Array.isArray(payload?.steps) ? payload.steps : []) {
+    if (String(step?.type || "") !== "model_output") {
+      continue;
+    }
+    for (const contentBlock of Array.isArray(step?.content) ? step.content : []) {
+      if (String(contentBlock?.type || "") === "image" && String(contentBlock?.data || "").trim()) {
+        return {
+          mimeType: String(contentBlock.mime_type || "image/png"),
+          data: String(contentBlock.data || "")
+        };
+      }
+    }
+  }
+
+  throw new Error("Gemini image generation returned no image.");
+}
+
+async function generateGeminiImage(prompt) {
+  const payload = await callGeminiJson("interactions", {
+    model: geminiWritingImageModel,
+    input: [
+      {
+        type: "text",
+        text: prompt
+      }
+    ]
+  }, {
+    timeoutMs: geminiImageTimeoutMs,
+    timeoutLabel: "Gemini image generation"
   });
-  const imageRecord = Array.isArray(payload?.data) ? payload.data[0] : null;
-  if (imageRecord?.b64_json) {
-    return `data:image/${openAiWritingImageFormat};base64,${imageRecord.b64_json}`;
-  }
-  if (imageRecord?.url) {
-    return String(imageRecord.url);
-  }
-  throw new Error("OpenAI image generation returned no image.");
+  const imageRecord = extractGeminiImage(payload);
+  return `data:${imageRecord.mimeType};base64,${imageRecord.data}`;
 }
 
 async function generateWritingIllustrationOptions(prompts, buildPrompt) {
   const initialResults = await Promise.allSettled(
-    prompts.map(async (prompt) => ({ prompt, imageUrl: await generateOpenAiImage(buildPrompt(prompt)) }))
+    prompts.map(async (prompt) => ({ prompt, imageUrl: await generateGeminiImage(buildPrompt(prompt)) }))
   );
 
   const options = initialResults.map((result, index) => {
@@ -414,7 +473,7 @@ async function generateWritingIllustrationOptions(prompts, buildPrompt) {
     failedIndexes.map(async (failedIndex) => ({
       failedIndex,
       prompt: prompts[failedIndex],
-      imageUrl: await generateOpenAiImage(buildPrompt(prompts[failedIndex]))
+      imageUrl: await generateGeminiImage(buildPrompt(prompts[failedIndex]))
     }))
   );
 
@@ -978,6 +1037,7 @@ app.post("/api/writing/illustrations", async (request, response) => {
     const sectionText = String(request.body?.sectionText || "").trim();
     const previousSectionText = String(request.body?.previousSectionText || "").trim();
     const openingAnswers = request.body?.openingAnswers && typeof request.body.openingAnswers === "object" ? request.body.openingAnswers : {};
+    const imageFeedback = clipText(String(request.body?.imageFeedback || "").trim(), writingImageFeedbackLimit);
     const styleGuide = request.body?.styleGuide && typeof request.body.styleGuide === "object"
       ? {
           label: String(request.body.styleGuide.label || "").trim(),
@@ -1017,6 +1077,7 @@ app.post("/api/writing/illustrations", async (request, response) => {
         styleGuide?.label ? `Keep the established book style: ${styleGuide.label}.` : "",
         styleGuide?.brief ? `Style notes: ${styleGuide.brief}` : "",
         styleGuide?.prompt ? `Reference style direction from the chosen book image: ${styleGuide.prompt}` : "",
+        imageFeedback ? `Student feedback about the illustrations: ${imageFeedback}` : "",
         clippedPreviousSectionText ? `Previous section summary: ${clippedPreviousSectionText}` : "",
         `Current section text: ${clippedSectionText}`,
         `Scene direction: ${prompt}`
