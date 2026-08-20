@@ -17073,6 +17073,7 @@ function renderWriting() {
 
   const currentSection = getWritingCurrentSection(writing);
   const completedCount = getWritingCompletedSectionCount(writing);
+  const bookReady = completedCount >= WRITING_STUDIO_SECTION_COUNT;
   const activeSectionLabel = currentSection ? `Section ${currentSection.number}` : "Picture book";
   const sectionProgressMarkup = `
     <section class="writing-stream__progress">
@@ -17100,6 +17101,7 @@ function renderWriting() {
         <div class="writing-stream__summary-meta">
           <span class="subject-pill">${escapeHtml(`${completedCount}/${WRITING_STUDIO_SECTION_COUNT} complete`)}</span>
           <span class="subject-pill">${escapeHtml(writing.view === "illustrate" ? "Illustration mode" : writing.view === "book" ? "Book preview" : "Writing mode")}</span>
+          ${bookReady ? `<button type="button" class="ghost-button ghost-button--mint" data-writing-save-pdf="true">Save as PDF</button>` : ""}
         </div>
       </article>
       ${sectionProgressMarkup}
@@ -17183,7 +17185,9 @@ function renderWriting() {
   });
   host.querySelector("[data-writing-use-illustration]")?.addEventListener("click", () => { acceptWritingIllustration(subject); render(); });
   host.querySelector("[data-writing-back-book]")?.addEventListener("click", () => { returnWritingToBook(subject); render(); });
-  host.querySelector("[data-writing-save-pdf]")?.addEventListener("click", () => saveWritingBookAsPdf(subject));
+  host.querySelectorAll("[data-writing-save-pdf]").forEach((button) => {
+    button.addEventListener("click", () => saveWritingBookAsPdf(subject));
+  });
   host.querySelector("[data-writing-book-edit]")?.addEventListener("click", () => { editWritingBookPage(subject); render(); });
   host.querySelector("[data-writing-book-change-illustration]")?.addEventListener("click", async () => {
     render();
