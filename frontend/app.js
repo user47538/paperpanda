@@ -660,8 +660,8 @@ const RP_STAGES = [
   ["/property/property-stage3.png", "Stage 2 - the stables", "Six tidy stalls, a bright aisle, and the feed room restored."],
   ["/property/property-stage4.png", "Stage 3 - paddocks & fences", "Pasture seeded, post-and-rail fencing repaired, and the paddocks reopened."],
   ["/property/property-stage5.png", "Stage 4 - the driveway", "The gravel drive, front gate, and entrance garden are now in place."],
-  ["/property/property-stage5.png", "Stage 5 - the round pen", "A round pen has been added for groundwork and warm-up rides."],
-  ["/property/property-stage5.png", "Stage 6 - back paddock trail", "A riding trail now loops through the back paddocks and blocks."]
+  ["/property/property-stage5-round-pen.jpeg", "Stage 5 - the round pen", "A round pen has been added for groundwork and warm-up rides."],
+  ["/property/property-stage6-back-trail.jpeg", "Stage 6 - back paddock trail", "A riding trail now loops through the back paddocks and blocks."]
 ];
 const RP_TACK = [
   { k: "saddle", label: "Saddle", x: 38.8, y: 40.3, w: 21.5, h: 23.5, rotate: -2 },
@@ -682,7 +682,9 @@ const RP_HOTSPOTS = [
 const RP_ASSETS = {
   tackRoom: "/property/tack-room-empty.jpeg",
   saddle: "/property/saddle-reward.jpeg",
-  arena: "/property/arena-empty.jpeg"
+  arena: "/property/arena-empty.jpeg",
+  horseFloat: "/property/horse-float.jpeg",
+  horseWashBay: "/property/horse-wash-bay.jpeg"
 };
 const RP_VARIANT_SHEETS = {
   rider: {
@@ -9294,7 +9296,7 @@ function buildRewardPropertyMarkup() {
                 <div class="rp-sel-where"></div>
               </div>
             </div>
-            <div class="rp-label">Tack and rider</div>
+            <div class="rp-label">Tack setup</div>
             <div class="rp-tackrows"></div>
             <div class="rp-choice-summary"></div>
             <button class="rp-btn rp-btn-dark rp-wide" data-rp="stable-toggle">Send back to the stable</button>
@@ -9542,6 +9544,15 @@ const RewardProperty = (function () {
     if (reward.track === "arena") {
       return `${reward.label} have been added to the reward ladder.`;
     }
+    if (reward.id === "riders") {
+      return "The rider team is now waiting beside the paddock.";
+    }
+    if (reward.id === "horse-float") {
+      return "The horse float is now parked beside the shed.";
+    }
+    if (reward.id === "horse-wash-bay") {
+      return "The horse wash bay is now built beside the stables.";
+    }
     return `${reward.label} has been added to the property reward ladder.`;
   }
 
@@ -9588,6 +9599,61 @@ const RewardProperty = (function () {
       reward,
       message: getRewardClaimMessage(reward.id)
     };
+  }
+
+  function getWorldRewardProps() {
+    const props = [];
+    if (hasClaimedReward("horse-wash-bay")) {
+      props.push({
+        id: "horse-wash-bay",
+        kind: "image",
+        src: RP_ASSETS.horseWashBay,
+        label: "Horse wash bay",
+        x: 84.2,
+        y: 61.8,
+        width: 15.8,
+        tilt: -1.5
+      });
+    }
+    if (hasClaimedReward("horse-float")) {
+      props.push({
+        id: "horse-float",
+        kind: "image",
+        src: RP_ASSETS.horseFloat,
+        label: "Horse float",
+        x: 90.5,
+        y: 76.4,
+        width: 17.2,
+        tilt: -1.5
+      });
+    }
+    if (hasClaimedReward("riders")) {
+      const riderSheet = getVariantSheet("rider");
+      const riderPlacements = [
+        { riderId: "sarah", x: 73.8, y: 72.8, width: 3.8 },
+        { riderId: "aisha", x: 77.2, y: 72.6, width: 4.1 },
+        { riderId: "chloe", x: 80.8, y: 72.7, width: 3.7 },
+        { riderId: "max", x: 84.2, y: 72.5, width: 3.7 },
+        { riderId: "leo", x: 87.6, y: 72.6, width: 4 }
+      ];
+      riderPlacements.forEach((placement) => {
+        const rider = riderSheet?.items?.find((entry) => entry.id === placement.riderId);
+        if (!rider || !riderSheet) {
+          return;
+        }
+        props.push({
+          id: `rider-${placement.riderId}`,
+          kind: "sprite",
+          sheet: riderSheet,
+          item: rider,
+          label: rider.label,
+          x: placement.x,
+          y: placement.y,
+          width: placement.width
+        });
+      });
+    }
+    return props;
   }
 
   function buildRackArtMarkup(category = "", horse = null) {
@@ -9977,8 +10043,18 @@ const RewardProperty = (function () {
     });
 
     const world = query(".rp-world");
-    world.querySelectorAll(".rp-horse,.rp-hotspot").forEach((node) => node.remove());
+    world.querySelectorAll(".rp-horse,.rp-hotspot,.rp-world-prop").forEach((node) => node.remove());
     const occluder = query(".rp-occluder");
+    getWorldRewardProps().forEach((prop) => {
+      const propElement = document.createElement("div");
+      propElement.className = `rp-world-prop rp-world-prop--${prop.kind}`;
+      propElement.style.cssText = `left:${prop.x}%;top:${prop.y}%;width:${prop.width}%;z-index:${8 + Math.round(prop.y)};--prop-tilt:${prop.tilt || 0}deg;`;
+      propElement.setAttribute("aria-hidden", "true");
+      propElement.innerHTML = prop.kind === "sprite"
+        ? buildSpriteCropMarkup(prop.sheet, prop.item, prop.label, "rp-sprite-crop rp-sprite-crop--world")
+        : `<img src="${escapeHtml(prop.src)}" alt="${escapeHtml(prop.label || "")}" loading="lazy" />`;
+      world.insertBefore(propElement, occluder);
+    });
     S.horses.filter((horse) => !horse.stabled).forEach((horse) => {
       const depth = 0.55 + (((horse.y - 44) / 48) * 0.8);
       const tags = RP_TACK.filter((item) => horse[item.k]).map((item) => item.label);
@@ -10125,7 +10201,7 @@ const RewardProperty = (function () {
 
     query(".rp-chips").innerHTML = S.horses.map((horse) => `<button class="rp-chip${horse.id === sel ? " is-on" : ""}" data-id="${escapeHtml(horse.id)}">${escapeHtml(horse.name)}</button>`).join("");
     query(".rp-foot").textContent = view === "property"
-      ? "Drag a horse to move it. Drop it below the front wall to stand behind the fence. Use the zoom controls to look closer."
+      ? "Drag a horse to move it. Drop it below the front wall to stand behind the fence. Chosen property rewards now appear out in the paddock scene."
       : view === "stable"
         ? "Horses sent back from the property stand in their stall with their plaque below."
         : view === "tack"
@@ -10345,7 +10421,6 @@ const RewardProperty = (function () {
       const nextGrammarSessions = Math.max(0, Number(options.grammarSessions || 0) || 0);
       S.grammarSessions = nextGrammarSessions;
       S.grammarSessionVersion = RP_GRAMMAR_SESSION_VERSION;
-      S.stage = Math.max(S.stage, getDerivedStage(nextGrammarSessions));
     }
     bind();
     render();

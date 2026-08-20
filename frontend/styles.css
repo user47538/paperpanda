@@ -10503,6 +10503,32 @@ input[type="date"] {
   touch-action: none;
 }
 
+.rp-world-prop {
+  position: absolute;
+  transform: translate(-50%, -100%) rotate(var(--prop-tilt, 0deg));
+  transform-origin: center bottom;
+  pointer-events: none;
+}
+
+.rp-world-prop img,
+.rp-world-prop .rp-sprite-crop {
+  display: block;
+  width: 100%;
+}
+
+.rp-world-prop--image img {
+  mix-blend-mode: multiply;
+  filter: drop-shadow(0 10px 14px rgba(41, 31, 25, 0.18));
+}
+
+.rp-world-prop--sprite .rp-sprite-crop {
+  filter: drop-shadow(0 8px 10px rgba(41, 31, 25, 0.12));
+}
+
+.rp-world-prop--sprite .rp-sprite-crop img {
+  opacity: 0.98;
+}
+
 .rp-sprite {
   position: absolute;
   inset: 0;
