@@ -5121,6 +5121,21 @@ input[type="date"] {
     padding-inline: 20px;
   }
 
+  .subject-landing__summary-card--page {
+    max-width: none;
+  }
+
+  .subject-landing__page-preview--reader {
+    padding: 12px;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .subject-landing__page-image--reader {
+    width: 100%;
+    max-height: none;
+  }
+
   .subject-landing__arrow {
     display: none;
   }
