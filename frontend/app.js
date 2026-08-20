@@ -16392,6 +16392,15 @@ function getWritingCompletedSections(writing) {
   return (writing.sections || []).filter((section) => section.completed && String(section.text || "").trim());
 }
 
+function getWritingSectionIllustrationOptions(section) {
+  return Array.isArray(section?.illustrationOptions) ? section.illustrationOptions : [];
+}
+
+function getWritingSectionSelectedIllustration(section) {
+  const options = getWritingSectionIllustrationOptions(section);
+  return options.find((option) => option.id === String(section?.selectedIllustrationId || "")) || options[0] || null;
+}
+
 function syncWritingBookPreviewToSection(writing, sectionId = "") {
   const completedSections = getWritingCompletedSections(writing);
   const nextPreviewIndex = completedSections.findIndex((section) => section.id === sectionId);
@@ -16787,9 +16796,9 @@ function acceptWritingIllustration(subject) {
   }
   ensureWritingIllustrationOptions(writing, writing.currentSectionIndex);
   if (!section.selectedIllustrationId) {
-    section.selectedIllustrationId = section.illustrationOptions[0]?.id || "";
+    section.selectedIllustrationId = getWritingSectionIllustrationOptions(section)[0]?.id || "";
   }
-  const selectedOption = section.illustrationOptions.find((option) => option.id === section.selectedIllustrationId) || section.illustrationOptions[0] || null;
+  const selectedOption = getWritingSectionSelectedIllustration(section);
   if ((section.number === 1 || !writing.illustrationStyle) && selectedOption) {
     writing.illustrationStyle = buildWritingIllustrationStyleSelection(section, selectedOption);
   }
@@ -17023,7 +17032,7 @@ function saveWritingBookAsPdf(subject) {
   }
   const pagesMarkup = completedSections
     .map((section, index) => {
-      const selectedOption = section.illustrationOptions.find((option) => option.id === section.selectedIllustrationId) || section.illustrationOptions[0];
+      const selectedOption = getWritingSectionSelectedIllustration(section);
       return `
         <section class="book-page">
           <div class="book-page__art">${selectedOption?.imageUrl ? `<img class="book-page__image" src="${escapeHtml(selectedOption.imageUrl)}" alt="${escapeHtml(selectedOption.prompt || `Illustration for page ${index + 1}`)}" />` : `<div class="book-page__placeholder">${escapeHtml(selectedOption?.prompt || `Illustration for page ${index + 1}`)}</div>`}</div>
@@ -17116,7 +17125,7 @@ function renderWriting() {
   } else {
     const completedSections = getWritingCompletedSections(writing);
     const previewSection = completedSections[writing.bookPreviewIndex] || completedSections[0] || writing.sections[0];
-    const selectedOption = previewSection?.illustrationOptions.find((option) => option.id === previewSection.selectedIllustrationId) || previewSection?.illustrationOptions[0];
+    const selectedOption = getWritingSectionSelectedIllustration(previewSection);
     bodyMarkup = `<article class="ws-card ws-card--main writing-stream__card"><div class="ws-card__head"><div><p class="eyebrow">Finished · your book</p><h3>${escapeHtml(writing.storyTitle || WRITING_STUDIO_TAB_LABEL)}</h3></div><button type="button" class="ghost-button ghost-button--mint" data-writing-save-pdf="true">Save as PDF</button></div><div class="ws-book-spread"><div class="ws-book-spread__art">${selectedOption?.imageUrl ? `<img class="ws-book-spread__image" src="${escapeHtml(selectedOption.imageUrl)}" alt="${escapeHtml(selectedOption.prompt || `Illustration for page ${previewSection?.number || 1}`)}" />` : `<div class="ws-book-spread__placeholder">${escapeHtml(selectedOption?.prompt || `Illustration for page ${previewSection?.number || 1}`)}</div>`}</div><div class="ws-book-spread__text"><p class="eyebrow">${escapeHtml(`Page ${previewSection?.number || 1} of ${Math.max(1, completedSections.length)}`)}</p><div>${escapeHtml(previewSection?.text || "")}</div></div></div><div class="ws-actions ws-actions--spread"><button type="button" class="ghost-button ghost-button--light" data-writing-book-edit="true">Edit this section</button><button type="button" class="ghost-button ghost-button--light" data-writing-book-change-illustration="true">Change picture</button></div><div class="ws-book-nav"><button type="button" class="ghost-button ghost-button--light ws-book-nav__button" data-writing-book-move="-1" ${writing.bookPreviewIndex <= 0 ? "disabled" : ""}>‹</button><div class="ws-book-dots">${completedSections.map((_, index) => `<span class="ws-book-dot${index === writing.bookPreviewIndex ? " is-active" : ""}"></span>`).join("")}</div><button type="button" class="primary-button primary-button--dark ws-book-nav__button" data-writing-book-move="1" ${writing.bookPreviewIndex >= completedSections.length - 1 ? "disabled" : ""}>›</button></div></article>`;
   }
 
