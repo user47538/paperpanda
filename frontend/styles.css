@@ -8674,6 +8674,144 @@ input[type="date"] {
   gap: 12px;
 }
 
+.ss-reward-choice,
+.ss-reward-ladder {
+  display: grid;
+  gap: 14px;
+  margin-top: 22px;
+  padding: 20px;
+  border-radius: 24px;
+  border: 1px solid rgba(218, 211, 223, 0.92);
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.ss-reward-choice h5 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 28px;
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+
+.ss-reward-choice p,
+.ss-reward-ladder__copy {
+  margin: 0;
+  color: var(--soft);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.ss-reward-choice__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.ss-reward-choice__card {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(46, 42, 51, 0.1);
+  background: rgba(245, 242, 247, 0.94);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ss-reward-choice__card.is-static {
+  cursor: default;
+}
+
+.ss-reward-choice__card strong {
+  font-size: 20px;
+  line-height: 1.1;
+}
+
+.ss-reward-choice__card span:last-child,
+.ss-reward-ladder__body span {
+  color: var(--soft);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.ss-reward-choice__track {
+  color: #6e5a86;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.ss-reward-ladder__head {
+  display: grid;
+  gap: 10px;
+}
+
+.ss-reward-ladder__list {
+  display: grid;
+}
+
+.ss-reward-ladder__row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 14px;
+  align-items: center;
+  padding: 14px 0;
+  border-bottom: 1px solid rgba(46, 42, 51, 0.08);
+}
+
+.ss-reward-ladder__row.is-locked {
+  opacity: 0.72;
+}
+
+.ss-reward-ladder__marker {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px dashed rgba(110, 90, 134, 0.28);
+  color: #8f83a0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.ss-reward-ladder__body {
+  display: grid;
+  gap: 3px;
+}
+
+.ss-reward-ladder__body strong {
+  font-size: 17px;
+  line-height: 1.15;
+}
+
+.ss-reward-ladder__status {
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(110, 90, 134, 0.08);
+  color: #8a8097;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+@media (max-width: 760px) {
+  .ss-reward-choice__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ss-reward-ladder__row {
+    grid-template-columns: auto 1fr;
+  }
+
+  .ss-reward-ladder__status {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
+
 .ss-instance-list {
   display: grid;
   gap: 16px;

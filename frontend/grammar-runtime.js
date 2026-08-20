@@ -233,11 +233,11 @@ export function createGrammarProgram({
       }
       const remainingActivities = Math.max(0, readyMeta.size - getCompletedActivitiesInSession(readyMeta.sessionNumber));
       if (remainingActivities <= 0) {
-        return "This session upgrade is ready in Property.";
+        return "This grammar session is ready to finish. Property rewards now progress through completed spelling sessions.";
       }
       return remainingActivities === 1
-        ? "Finish 1 more activity in this session to unlock the next property upgrade."
-        : `Finish ${remainingActivities} more activities in this session to unlock the next property upgrade.`;
+        ? "Finish 1 more activity in this session to complete the grammar set."
+        : `Finish ${remainingActivities} more activities in this session to complete the grammar set.`;
     }
 
     function getReadySessionIndex() {

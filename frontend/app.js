@@ -621,15 +621,48 @@ const SPELLING_HORSE_RANKS = ["Foal", "Pony", "School Horse", "Show Horse", "Cha
 const SPELLING_TENSE_IDS = ["past", "present", "future"];
 const SPELLING_CHALLENGE_MODE_ORDER = ["looks-right", "dictation", "root-word", "missing-letter"];
 const RP_STORAGE_KEY = "paperpanda:property:v1";
-const RP_STAGES = [
-  ["/property/property-stage1.png", "Stage 1 - run-down", "Bare yards, rusted sheds, broken rails. Nothing renovated yet."],
-  ["/property/property-stage2.png", "Stage 2 - arena prepared", "Arena surface laid, hedging installed, jumps set out."],
-  ["/property/property-stage3.png", "Stage 3 - stable renovated", "New roof and cladding, tidy yard, tack shed repaired."],
-  ["/property/property-stage4.png", "Stage 4 - fencing and troughs", "Clean post-and-rail fencing, water troughs, and feed bays."],
-  ["/property/property-stage5.png", "Stage 5 - landscaped entrance", "Stone gateway, mature trees, planting, and polished paths."]
+const RP_MANDATORY_REWARDS = [
+  { id: "arena-stage", label: "The arena", description: "Surface laid, hedging, mirrors", badge: "Stage 1", worldStage: 1 },
+  { id: "stables-stage", label: "The stables", description: "Six stalls, aisle, feed room", badge: "Stage 2", worldStage: 2 },
+  { id: "paddocks-stage", label: "Paddocks & fences", description: "Pasture seeded, post-and-rail up", badge: "Stage 3", worldStage: 3 },
+  { id: "driveway-stage", label: "The driveway", description: "Gravel drive and front gate", badge: "Stage 4", worldStage: 4 },
+  { id: "round-pen-stage", label: "The round pen", description: "A training yard for groundwork", badge: "Stage 5", worldStage: 5 },
+  { id: "back-trail-stage", label: "Back paddock trail", description: "A riding track through the back blocks", badge: "Stage 6", worldStage: 6 }
 ];
-const RP_REWARD_READY_STAGE = 3;
-const RP_REWARD_REQUIRED_SESSIONS = 3;
+const RP_OPTIONAL_REWARDS = [
+  { id: "saddles", track: "tack", label: "Saddles", description: "A saddle for every horse in the stable" },
+  { id: "bridles", track: "tack", label: "Bridles", description: "Bridles and reins on the tack room hooks" },
+  { id: "saddle-pads", track: "tack", label: "Saddle pads", description: "Numnahs stacked on the pad rack" },
+  { id: "girths", track: "tack", label: "Girths", description: "Girths hung beside the saddles" },
+  { id: "riders", track: "property", label: "Riders", description: "Riders you can put up on any horse" },
+  { id: "horse-float", track: "property", label: "Horse float", description: "Two-horse float parked by the shed" },
+  { id: "horse-wash-bay", track: "property", label: "Horse wash bay", description: "Tiled bay with warm water and a hose" },
+  { id: "arena-lights", track: "arena", label: "Arena lights", description: "Four towers — ride after dark" },
+  { id: "arena-roof", track: "arena", label: "Arena roof", description: "Covered arena, ride in any weather" }
+];
+const RP_OPTIONAL_REWARD_TRACKS = {
+  tack: ["saddles", "bridles", "saddle-pads", "girths"],
+  property: ["riders", "horse-float", "horse-wash-bay"],
+  arena: ["arena-lights", "arena-roof"]
+};
+const RP_REWARD_BY_ID = Object.fromEntries(
+  [...RP_MANDATORY_REWARDS, ...RP_OPTIONAL_REWARDS].map((reward) => [reward.id, reward])
+);
+const RP_TACK_REWARD_BY_CATEGORY = {
+  saddle: "saddles",
+  bridle: "bridles",
+  pad: "saddle-pads",
+  girth: "girths"
+};
+const RP_STAGES = [
+  ["/property/property-stage1.png", "Before any renovations", "Bare yards, rusted sheds, broken rails. The property is waiting for its first rebuild session."],
+  ["/property/property-stage2.png", "Stage 1 - the arena", "Surface laid, hedging planted, and mirrors installed around the arena."],
+  ["/property/property-stage3.png", "Stage 2 - the stables", "Six tidy stalls, a bright aisle, and the feed room restored."],
+  ["/property/property-stage4.png", "Stage 3 - paddocks & fences", "Pasture seeded, post-and-rail fencing repaired, and the paddocks reopened."],
+  ["/property/property-stage5.png", "Stage 4 - the driveway", "The gravel drive, front gate, and entrance garden are now in place."],
+  ["/property/property-stage5.png", "Stage 5 - the round pen", "A round pen has been added for groundwork and warm-up rides."],
+  ["/property/property-stage5.png", "Stage 6 - back paddock trail", "A riding trail now loops through the back paddocks and blocks."]
+];
 const RP_TACK = [
   { k: "saddle", label: "Saddle", x: 38.8, y: 40.3, w: 21.5, h: 23.5, rotate: -2 },
   { k: "bridle", label: "Bridle", x: 28.8, y: 64.5, w: 15.4, h: 26.2, rotate: -2 },
@@ -8532,6 +8565,9 @@ function finaliseSpellingRepeatCheck(subject) {
     RewardProperty.addHorse(unlockedHorseMeta.id, unlockedHorseMeta.name, unlockedHorseMeta.label);
   }
   recordCompletedSpellingAttempt(subject);
+  if (RewardProperty.syncPracticeState) {
+    RewardProperty.syncPracticeState(subject);
+  }
   const completionMessage = unlockedHorse
     ? `Final spelling check complete. You moved from ${initialScore}/${SPELLING_UNIT_SEED.diagnosticTargetCount} to ${repeatScore}/${SPELLING_UNIT_SEED.diagnosticTargetCount}. ${unlockedHorseMeta?.name || "A new horse"} has been added to your property.`
     : `Final spelling check complete. You moved from ${initialScore}/${SPELLING_UNIT_SEED.diagnosticTargetCount} to ${repeatScore}/${SPELLING_UNIT_SEED.diagnosticTargetCount}.`;
@@ -9246,7 +9282,7 @@ function buildRewardPropertyMarkup() {
           <div class="rp-card">
             <h3 class="rp-card-t">Renovation</h3>
             <p class="rp-card-p rp-stage-note"></p>
-            <div class="rp-pips"><i></i><i></i><i></i><i></i><i></i></div>
+            <div class="rp-pips"><i></i><i></i><i></i><i></i><i></i><i></i></div>
           </div>
 
           <div class="rp-card rp-sel" hidden>
@@ -9295,8 +9331,8 @@ const RewardProperty = (function () {
   let drag = null;
   let pan = null;
 
-  function getDerivedStage(grammarSessions = 0) {
-    return Math.max(0, Math.min(RP_STAGES.length - 1, Math.max(0, Number(grammarSessions || 0) || 0)));
+  function getDerivedStage(sessionCount = 0) {
+    return Math.max(0, Math.min(RP_STAGES.length - 1, Math.max(0, Number(sessionCount || 0) || 0)));
   }
 
   function getStageSummary(stageIndex = 0) {
@@ -9313,23 +9349,11 @@ const RewardProperty = (function () {
   }
 
   function getGrammarUpgradeSummary(previousGrammarSessions = 0, nextGrammarSessions = previousGrammarSessions) {
-    const previousStage = getDerivedStage(previousGrammarSessions);
-    const nextStage = getDerivedStage(nextGrammarSessions);
-    const summary = getStageSummary(nextStage);
-    if (nextStage > previousStage) {
-      return {
-        earned: true,
-        heading: "Property upgrade awarded",
-        statusNote: "This session unlocked the next renovation stage for the property.",
-        ...summary
-      };
-    }
+    const summary = getStageSummary(S?.stage || 0);
     return {
       earned: false,
-      heading: nextStage >= RP_STAGES.length - 1 ? "Property fully upgraded" : "Property unchanged",
-      statusNote: nextStage >= RP_STAGES.length - 1
-        ? "The property has already reached its highest current renovation stage."
-        : "This session did not unlock a new renovation stage.",
+      heading: "Shared reward ladder",
+      statusNote: "The reward ladder now progresses through completed spelling sessions and later reward choices.",
       ...summary
     };
   }
@@ -9339,6 +9363,8 @@ const RewardProperty = (function () {
       stage: 0,
       owned: 2,
       sessions: 0,
+      claimedRewardIds: [],
+      lastClaimedRewardId: "",
       grammarSessions: 0,
       grammarSessionVersion: RP_GRAMMAR_SESSION_VERSION,
       grammarProgressResetVersion: RP_GRAMMAR_PROGRESS_RESET_VERSION,
@@ -9404,29 +9430,73 @@ const RewardProperty = (function () {
       .map((item) => getHorseVariant(horse, item.k)?.label || item.label);
   }
 
-  function rewardPhaseUnlocked() {
+  function getClaimedRewardIds() {
     ensureLoaded();
-    return Math.max(S.sessions, S.horses.length) >= RP_REWARD_REQUIRED_SESSIONS;
+    return Array.isArray(S.claimedRewardIds)
+      ? S.claimedRewardIds.map((value) => String(value || "")).filter((value) => RP_REWARD_BY_ID[value])
+      : [];
   }
 
-  function rewardSessionCount() {
+  function getClaimedRewardSet() {
+    return new Set(getClaimedRewardIds());
+  }
+
+  function getMandatoryStageCount() {
     ensureLoaded();
-    return rewardPhaseUnlocked()
-      ? Math.max(0, Math.max(S.sessions, S.horses.length) - RP_REWARD_REQUIRED_SESSIONS)
-      : 0;
+    return Math.max(0, Math.min(RP_MANDATORY_REWARDS.length, Number(S.sessions || 0) || 0));
+  }
+
+  function getOptionalRewardAllowance() {
+    ensureLoaded();
+    return Math.max(0, (Number(S.sessions || 0) || 0) - RP_MANDATORY_REWARDS.length);
+  }
+
+  function getPendingRewardChoiceCount() {
+    return Math.max(0, getOptionalRewardAllowance() - getClaimedRewardIds().length);
+  }
+
+  function getNextRewardForTrack(track = "") {
+    const claimed = getClaimedRewardSet();
+    return (RP_OPTIONAL_REWARD_TRACKS[String(track || "")] || [])
+      .map((rewardId) => RP_REWARD_BY_ID[rewardId])
+      .find((reward) => reward && !claimed.has(reward.id)) || null;
+  }
+
+  function getUpcomingRewardChoices() {
+    return ["tack", "property", "arena"]
+      .map((track) => getNextRewardForTrack(track))
+      .filter(Boolean);
+  }
+
+  function getAvailableRewardChoices() {
+    if (getPendingRewardChoiceCount() <= 0) {
+      return [];
+    }
+    return getUpcomingRewardChoices();
+  }
+
+  function hasClaimedReward(rewardId = "") {
+    return getClaimedRewardSet().has(String(rewardId || ""));
   }
 
   function ownedTack() {
-    return Math.max(0, Math.min(RP_TACK.length, rewardSessionCount()));
+    return RP_TACK.filter((item) => isTackUnlocked(item.k)).length;
   }
 
   function ownedJumpCount() {
-    return Math.max(0, Math.min(RP_JUMP_SHEET.items.length, rewardSessionCount()));
+    const arenaRewardCount = ["arena-lights", "arena-roof"].filter((rewardId) => hasClaimedReward(rewardId)).length;
+    if (arenaRewardCount <= 0) {
+      return 0;
+    }
+    if (arenaRewardCount === 1) {
+      return Math.min(2, RP_JUMP_SHEET.items.length);
+    }
+    return RP_JUMP_SHEET.items.length;
   }
 
   function isTackUnlocked(category = "") {
-    const tackIndex = RP_TACK.findIndex((item) => item.k === category);
-    return tackIndex >= 0 && tackIndex < ownedTack();
+    const rewardId = RP_TACK_REWARD_BY_CATEGORY[String(category || "")];
+    return Boolean(rewardId) && hasClaimedReward(rewardId);
   }
 
   function isJumpUnlocked(type = "") {
@@ -9440,17 +9510,84 @@ const RewardProperty = (function () {
   }
 
   function getRewardMilestoneMessage() {
-    const sessionShortfall = Math.max(0, RP_REWARD_REQUIRED_SESSIONS - Math.max(S.sessions, S.horses.length));
-    if (!rewardPhaseUnlocked()) {
-      return `Complete ${sessionShortfall} more practice session${sessionShortfall === 1 ? "" : "s"} to start the reward tack and jump collection.`;
+    const mandatoryCompleted = getMandatoryStageCount();
+    if (mandatoryCompleted < RP_MANDATORY_REWARDS.length) {
+      const nextStage = RP_MANDATORY_REWARDS[mandatoryCompleted];
+      const remaining = RP_MANDATORY_REWARDS.length - mandatoryCompleted;
+      return remaining === RP_MANDATORY_REWARDS.length
+        ? `Sessions 1-6 rebuild the property in order. The first completed session unlocks ${nextStage.label.toLowerCase()}.`
+        : `The next completed session unlocks ${nextStage.label.toLowerCase()} as ${nextStage.badge.toLowerCase()}.`;
     }
-    if (rewardSessionCount() >= RP_TACK.length) {
-      return `All four tack rewards are unlocked. Keep completing sessions to collect and place more jumps.`;
+    const pendingChoices = getPendingRewardChoiceCount();
+    if (pendingChoices > 0) {
+      return pendingChoices === 1
+        ? "A reward choice is waiting. Pick one tack, property, or arena reward."
+        : `${pendingChoices} reward choices are waiting. Pick one reward each time you complete a session.`;
     }
-    const nextReward = RP_TACK[Math.min(ownedTack(), RP_TACK.length - 1)];
-    return ownedTack()
-      ? `The next completed practice session unlocks ${nextReward.label.toLowerCase()} access and another arena jump.`
-      : `The next completed practice session unlocks the saddle reward and the first arena jump.`;
+    const upcomingChoices = getUpcomingRewardChoices();
+    if (!upcomingChoices.length) {
+      return "The current reward ladder is fully claimed. Keep completing sessions to build skill and collect horses.";
+    }
+    return `The next completed session will offer ${upcomingChoices.map((reward) => reward.label.toLowerCase()).join(", ")}.`;
+  }
+
+  function getRewardClaimMessage(rewardId = "") {
+    const reward = RP_REWARD_BY_ID[String(rewardId || "")];
+    if (!reward) {
+      return "Reward claimed.";
+    }
+    if (reward.track === "tack") {
+      return `${reward.label} are now unlocked in the tack room.`;
+    }
+    if (reward.track === "arena") {
+      return `${reward.label} have been added to the reward ladder.`;
+    }
+    return `${reward.label} has been added to the property reward ladder.`;
+  }
+
+  function getRewardLadderSnapshot() {
+    const claimed = getClaimedRewardSet();
+    const mandatoryCompleted = getMandatoryStageCount();
+    const entries = [
+      ...RP_MANDATORY_REWARDS.map((reward, index) => ({
+        ...reward,
+        locked: index >= mandatoryCompleted,
+        statusLabel: reward.badge
+      })),
+      ...RP_OPTIONAL_REWARDS.map((reward) => ({
+        ...reward,
+        locked: !claimed.has(reward.id),
+        statusLabel: claimed.has(reward.id) ? "Unlocked" : "Locked"
+      }))
+    ];
+    return {
+      sessionCount: Math.max(0, Number(S.sessions || 0) || 0),
+      mandatoryCompleted,
+      pendingChoiceCount: getPendingRewardChoiceCount(),
+      availableChoices: getAvailableRewardChoices(),
+      upcomingChoices: getUpcomingRewardChoices(),
+      entries
+    };
+  }
+
+  function claimReward(rewardId = "") {
+    ensureLoaded();
+    const availableChoices = getAvailableRewardChoices();
+    const reward = availableChoices.find((entry) => entry.id === String(rewardId || ""));
+    if (!reward) {
+      return null;
+    }
+    const nextClaimedIds = [...getClaimedRewardIds(), reward.id];
+    S.claimedRewardIds = nextClaimedIds;
+    S.lastClaimedRewardId = reward.id;
+    save();
+    if (root?.isConnected) {
+      render();
+    }
+    return {
+      reward,
+      message: getRewardClaimMessage(reward.id)
+    };
   }
 
   function buildRackArtMarkup(category = "", horse = null) {
@@ -9528,11 +9665,17 @@ const RewardProperty = (function () {
       : grammarSessionVersion >= RP_GRAMMAR_SESSION_VERSION
         ? rawGrammarSessions
         : getCompletedGrammarRewardSessions(rawGrammarSessions);
+    const claimedRewardIds = Array.isArray(base.claimedRewardIds)
+      ? [...new Set(base.claimedRewardIds.map((value) => String(value || "")).filter((value) => RP_REWARD_BY_ID[value]))]
+      : [];
+    const savedSessions = Math.max(0, Number(base.sessions || 0) || 0);
     const savedStage = Math.max(0, Math.min(RP_STAGES.length - 1, Number(base.stage || 0) || 0));
     S = {
-      stage: shouldResetGrammarProgress ? 0 : Math.max(savedStage, getDerivedStage(grammarSessions)),
+      stage: shouldResetGrammarProgress ? 0 : Math.max(savedStage, getDerivedStage(savedSessions)),
       owned: Math.max(2, Math.min(RP_TACK.length, Number(base.owned || 2) || 2)),
-      sessions: Math.max(0, Number(base.sessions || 0) || 0),
+      sessions: savedSessions,
+      claimedRewardIds,
+      lastClaimedRewardId: claimedRewardIds.includes(String(base.lastClaimedRewardId || "")) ? String(base.lastClaimedRewardId || "") : "",
       grammarSessions,
       grammarSessionVersion: RP_GRAMMAR_SESSION_VERSION,
       grammarProgressResetVersion: RP_GRAMMAR_PROGRESS_RESET_VERSION,
@@ -9559,11 +9702,9 @@ const RewardProperty = (function () {
   function setGrammarSessions(doneCount = 0) {
     ensureLoaded();
     const nextGrammarSessions = Math.max(0, Number(doneCount || 0) || 0);
-    const nextStage = Math.max(S.stage, getDerivedStage(nextGrammarSessions));
-    const changed = nextGrammarSessions !== S.grammarSessions || nextStage !== S.stage;
+    const changed = nextGrammarSessions !== S.grammarSessions;
     S.grammarSessions = nextGrammarSessions;
     S.grammarSessionVersion = RP_GRAMMAR_SESSION_VERSION;
-    S.stage = nextStage;
     if (changed) {
       save();
       if (root?.isConnected) {
@@ -9645,9 +9786,13 @@ const RewardProperty = (function () {
       changed = changed || result.added;
     });
     const completedCount = Array.isArray(spelling.completedAttempts) ? spelling.completedAttempts.length : 0;
-    const nextSessionCount = Math.max(S.sessions, completedCount);
-    if (nextSessionCount !== S.sessions) {
-      S.sessions = nextSessionCount;
+    if (completedCount !== S.sessions) {
+      S.sessions = completedCount;
+      changed = true;
+    }
+    const derivedStage = getDerivedStage(completedCount);
+    if (derivedStage !== S.stage) {
+      S.stage = derivedStage;
       changed = true;
     }
     if (changed) {
@@ -9659,7 +9804,6 @@ const RewardProperty = (function () {
     ensureLoaded();
     const result = ensureHorse(slug, name, breed);
     if (result.added) {
-      S.sessions += 1;
       sel = result.horse.id;
       save();
     } else if (S.horses.length) {
@@ -9674,8 +9818,6 @@ const RewardProperty = (function () {
     const nextStage = Math.min(RP_STAGES.length - 1, S.stage + 1);
     if (nextStage !== S.stage) {
       S.stage = nextStage;
-      S.grammarSessions = Math.max(S.grammarSessions, nextStage);
-      S.grammarSessionVersion = RP_GRAMMAR_SESSION_VERSION;
       save();
     }
     render();
@@ -9831,7 +9973,7 @@ const RewardProperty = (function () {
     query(".rp-zval").textContent = `${Math.round(zoom * 100)}%`;
     query(".rp-stage-note").textContent = stage[2];
     root.querySelectorAll(".rp-pips i").forEach((pip, index) => {
-      pip.classList.toggle("is-on", index <= S.stage);
+      pip.classList.toggle("is-on", index < S.stage);
     });
 
     const world = query(".rp-world");
@@ -9867,18 +10009,15 @@ const RewardProperty = (function () {
     }
     query(".rp-stalls").innerHTML = stallsMarkup;
 
-    query(".rp-tackhint").textContent = !rewardPhaseUnlocked()
-      ? getRewardMilestoneMessage()
-      : selectedHorse
-        ? `Fitting tack to ${selectedHorse.name}. Rewards unlock in order: saddle, bridle, girth, then saddle pad.`
-        : "Select a horse, then tap the unlocked tack hanging in the room to fit it.";
+    query(".rp-tackhint").textContent = selectedHorse
+      ? `Fitting tack to ${selectedHorse.name}. Claim tack rewards from the reward ladder, then fit them here.`
+      : getRewardMilestoneMessage();
     query(".rp-tackroom").style.backgroundImage = `url('${RP_ASSETS.tackRoom}')`;
-    query(".rp-tackroom").innerHTML = RP_TACK.map((item, index) => {
-      const unlocked = index < ownedTack();
+    query(".rp-tackroom").innerHTML = RP_TACK.map((item) => {
+      const unlocked = isTackUnlocked(item.k);
       const active = selectedHorse ? Boolean(selectedHorse[item.k]) : false;
       const variantLabel = getTackDisplayVariant(item.k, selectedHorse)?.label || "";
-      const remainingSessions = Math.max(0, (index + 1) - rewardSessionCount());
-      const lockedLabel = rewardPhaseUnlocked() ? `${remainingSessions} session${remainingSessions === 1 ? "" : "s"} away` : "Waiting for rewards";
+      const lockedLabel = "Choose on reward ladder";
       return `
         <button
           type="button"
@@ -9897,12 +10036,10 @@ const RewardProperty = (function () {
       `;
     }).join("");
     const tackVariants = getVariantItems(activeTackCategory);
-    query(".rp-tackchoices").innerHTML = !rewardPhaseUnlocked()
-      ? `<div class="rp-choice-empty">${escapeHtml(getRewardMilestoneMessage())}</div>`
-      : !selectedHorse
+    query(".rp-tackchoices").innerHTML = !selectedHorse
         ? `<div class="rp-choice-empty">Select a horse to open the tack tray.</div>`
         : !isTackUnlocked(activeTackCategory)
-          ? `<div class="rp-choice-empty">${escapeHtml(`${RP_TACK.find((item) => item.k === activeTackCategory)?.label || "This tack"} unlocks after more completed sessions.`)}</div>`
+          ? `<div class="rp-choice-empty">${escapeHtml(`${RP_TACK.find((item) => item.k === activeTackCategory)?.label || "This tack"} is still locked on the reward ladder.`)}</div>`
           : tackVariants.length
         ? `
           <div class="rp-choice-head">
@@ -9939,11 +10076,9 @@ const RewardProperty = (function () {
         </button>
       `;
     }).join("");
-    query(".rp-arenahint").textContent = !rewardPhaseUnlocked()
-      ? getRewardMilestoneMessage()
-      : ownedJumpCount()
+    query(".rp-arenahint").textContent = ownedJumpCount()
         ? `${ownedJumpCount()} jump reward${ownedJumpCount() === 1 ? "" : "s"} unlocked. Add each jump once, then drag it anywhere in the arena.`
-        : "Your next completed practice session unlocks the first jump reward.";
+        : getRewardMilestoneMessage();
     query(".rp-arena-library").innerHTML = RP_JUMP_SHEET.items.map((jumpMeta, index) => {
       const unlocked = index < ownedJumpCount();
       const added = S.arenaJumps.some((jump) => jump.type === jumpMeta.id);
@@ -9968,8 +10103,8 @@ const RewardProperty = (function () {
       query(".rp-sel-breed").textContent = selectedHorse.breed;
       query(".rp-sel-where").textContent = selectedHorse.stabled ? "In the stables" : `Out in ${selectedHorse.zone || "the paddock"}`;
       query("[data-rp='stable-toggle']").textContent = selectedHorse.stabled ? "Bring out to the property" : "Send to the stables";
-      query(".rp-tackrows").innerHTML = RP_TACK.map((item, index) => {
-        const unlocked = index < ownedTack();
+      query(".rp-tackrows").innerHTML = RP_TACK.map((item) => {
+        const unlocked = isTackUnlocked(item.k);
         const active = Boolean(selectedHorse[item.k]);
         const variantLabel = getVariantLabel(item.k, selectedHorse[getHorseChoiceKey(item.k)] || "");
         const statusLabel = !unlocked
@@ -9994,8 +10129,8 @@ const RewardProperty = (function () {
       : view === "stable"
         ? "Horses sent back from the property stand in their stall with their plaque below."
         : view === "tack"
-          ? "Each reward session adds the next tack item in order. Use the tack room to preview what has been collected and fit it to a selected horse."
-          : "Each reward session unlocks one arena jump. Add unlocked jumps once, then drag them around the arena to build the course.";
+          ? "Claim tack rewards from the ladder, then use the tack room to fit them to a selected horse."
+          : "Arena rewards unlock jump access here. Add unlocked jumps once, then drag them around the arena to build the course.";
   }
 
   function bind() {
@@ -10219,7 +10354,9 @@ const RewardProperty = (function () {
   return {
     mount,
     addHorse,
+    claimReward,
     getGrammarUpgradeSummary,
+    getRewardLadderSnapshot,
     renovate,
     reset,
     setGrammarSessions,
@@ -10260,6 +10397,92 @@ const GrammarProgram = createGrammarProgram({
   mountRewardProperty,
   RewardProperty
 });
+
+function buildSpellingRewardLadderMarkup(snapshot) {
+  if (!snapshot) {
+    return "";
+  }
+  return `
+    <article class="ss-reward-ladder">
+      <div class="ss-reward-ladder__head">
+        <p class="eyebrow">Reward ladder</p>
+        <p class="ss-reward-ladder__copy">Sessions 1–6 build the six renovation stages, in order. Nothing else can be added until all six are complete. After that the student is offered three rewards each session — one tack, one property, one arena — and picks one.</p>
+      </div>
+      <div class="ss-reward-ladder__list">
+        ${snapshot.entries.map((reward, index) => `
+          <article class="ss-reward-ladder__row${reward.locked ? " is-locked" : ""}">
+            <div class="ss-reward-ladder__marker">${escapeHtml(index < RP_MANDATORY_REWARDS.length ? String(index + 1) : "?")}</div>
+            <div class="ss-reward-ladder__body">
+              <strong>${escapeHtml(reward.label)}</strong>
+              <span>${escapeHtml(reward.description)}</span>
+            </div>
+            <span class="ss-reward-ladder__status">${escapeHtml(reward.statusLabel)}</span>
+          </article>
+        `).join("")}
+      </div>
+    </article>
+  `;
+}
+
+function buildSpellingRewardChoiceMarkup(snapshot) {
+  if (!snapshot) {
+    return "";
+  }
+  const mandatoryRemaining = Math.max(0, RP_MANDATORY_REWARDS.length - snapshot.mandatoryCompleted);
+  if (mandatoryRemaining > 0) {
+    const nextReward = RP_MANDATORY_REWARDS[snapshot.mandatoryCompleted];
+    return `
+      <article class="ss-reward-choice">
+        <p class="eyebrow">Next renovation</p>
+        <h5>${escapeHtml(nextReward?.label || "Next stage")}</h5>
+        <p>${escapeHtml(nextReward?.description || "Keep completing sessions to rebuild the property.")}</p>
+      </article>
+    `;
+  }
+  if (snapshot.pendingChoiceCount > 0 && snapshot.availableChoices.length) {
+    return `
+      <article class="ss-reward-choice">
+        <p class="eyebrow">Reward choice</p>
+        <h5>${escapeHtml(snapshot.pendingChoiceCount > 1 ? `${snapshot.pendingChoiceCount} choices waiting` : "Choose your next reward")}</h5>
+        <p>Choose one reward from the three offered tracks for this completed session.</p>
+        <div class="ss-reward-choice__grid">
+          ${snapshot.availableChoices.map((reward) => `
+            <button type="button" class="ss-reward-choice__card" data-spelling-claim-reward="${escapeHtml(reward.id)}">
+              <span class="ss-reward-choice__track">${escapeHtml(reward.track)}</span>
+              <strong>${escapeHtml(reward.label)}</strong>
+              <span>${escapeHtml(reward.description)}</span>
+            </button>
+          `).join("")}
+        </div>
+      </article>
+    `;
+  }
+  if (snapshot.upcomingChoices.length) {
+    return `
+      <article class="ss-reward-choice">
+        <p class="eyebrow">Next reward set</p>
+        <h5>Another choice unlocks next session</h5>
+        <p>The next completed session will offer one tack, one property, and one arena reward. These are the next three in line.</p>
+        <div class="ss-reward-choice__grid">
+          ${snapshot.upcomingChoices.map((reward) => `
+            <article class="ss-reward-choice__card is-static">
+              <span class="ss-reward-choice__track">${escapeHtml(reward.track)}</span>
+              <strong>${escapeHtml(reward.label)}</strong>
+              <span>${escapeHtml(reward.description)}</span>
+            </article>
+          `).join("")}
+        </div>
+      </article>
+    `;
+  }
+  return `
+    <article class="ss-reward-choice">
+      <p class="eyebrow">Reward choice</p>
+      <h5>All current rewards claimed</h5>
+      <p>Keep completing sessions to build skill and collect more horses. The current reward ladder is fully chosen.</p>
+    </article>
+  `;
+}
 
 function buildSpellingSurfaceTabs(activeTab) {
   const tabs = [
@@ -17912,17 +18135,18 @@ function renderSpelling() {
     const earnedHorseMeta = getSpellingPaddockHorseMeta(spelling.lastUnlockedHorseId || spelling.paddockHorses[spelling.paddockHorses.length - 1]);
     const repeatWord = getSpellingRepeatCurrentWord(spelling);
     const repeatCompletedCount = Object.keys(spelling.repeatCheck.responses || {}).length;
+    const rewardLadderSnapshot = RewardProperty.getRewardLadderSnapshot ? RewardProperty.getRewardLadderSnapshot() : null;
     stageBody = showSessionCompletionSummary
       ? `
         <article class="ss-stage-panel">
           <div class="ss-stage-panel__head">
             <div>
               <p class="eyebrow">Session complete</p>
-              <h4>Five-stage summary</h4>
+              <h4>Session reward summary</h4>
             </div>
-            <span class="ss-stage-badge is-complete">Program complete</span>
+            <span class="ss-stage-badge is-complete">${escapeHtml(rewardLadderSnapshot?.pendingChoiceCount ? "Reward ready" : "Session finished")}</span>
           </div>
-          <p class="ss-stage-copy">${escapeHtml(`Overall score: ${overallScorePercent}%. You moved from ${getSpellingDiagnosticCorrectCount(spelling)}/${attemptWords.length} in stage 1 to ${getSpellingRepeatCorrectCount(spelling)}/${attemptWords.length} in stage 5.${earnedHorseMeta ? ` ${earnedHorseMeta.label || "A new horse"} earned for your property.` : ""}`)}</p>
+          <p class="ss-stage-copy">${escapeHtml(`Overall score: ${overallScorePercent}%. You moved from ${getSpellingDiagnosticCorrectCount(spelling)}/${attemptWords.length} in stage 1 to ${getSpellingRepeatCorrectCount(spelling)}/${attemptWords.length} in stage 5.${earnedHorseMeta ? ` ${earnedHorseMeta.label || "A new horse"} earned for your stables.` : ""}`)}</p>
           ${earnedHorseMeta ? `
             <article class="ss-earned-horse-card">
               <img class="spelling-horse-card__image" src="${escapeHtml(earnedHorseMeta.image)}" alt="${escapeHtml(earnedHorseMeta.name)}" />
@@ -17948,9 +18172,11 @@ function renderSpelling() {
           <div class="spelling-review-card__days">
             ${SPELLING_UNIT_SEED.reviewDays.map((dayLabel) => `<span class="is-done">${escapeHtml(dayLabel)}</span>`).join("")}
           </div>
+          ${buildSpellingRewardChoiceMarkup(rewardLadderSnapshot)}
+          ${buildSpellingRewardLadderMarkup(rewardLadderSnapshot)}
           <div class="spelling-stage-actions spelling-stage-actions--centered">
-            <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-unit="true">Start next</button>
-            <button type="button" class="primary-button primary-button--dark" data-spelling-finish-session="true">Visit the property</button>
+            <button type="button" class="ghost-button ghost-button--small" data-spelling-reset-unit="true">Begin another session</button>
+            <button type="button" class="primary-button primary-button--dark" data-spelling-finish-session="true">Visit the stables</button>
           </div>
         </article>
       `
@@ -18068,6 +18294,18 @@ function renderSpelling() {
   host.querySelector("[data-spelling-finish-session]")?.addEventListener("click", () => {
     finishSpellingSession(subject);
     render();
+  });
+
+  host.querySelectorAll("[data-spelling-claim-reward]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const claimResult = RewardProperty.claimReward ? RewardProperty.claimReward(button.dataset.spellingClaimReward || "") : null;
+      if (claimResult?.message) {
+        const nextSpelling = getSubjectSpellingState(subject);
+        nextSpelling.coachMessage = claimResult.message;
+        persistSubjects({ skipRemoteSync: true });
+      }
+      render();
+    });
   });
 
   host.querySelectorAll("[data-spelling-reset-activity]").forEach((button) => {
