@@ -8,7 +8,7 @@ const subjectsStorageKey = "paperpanda-subjects-by-account";
 const settingsStorageKey = "studylift-settings";
 const uiVersionStorageKey = "paperpanda-ui-version";
 const currentUiVersion = "2026-08-18-grammar-reset-and-signout";
-const grammarResetVersion = 1;
+const grammarResetVersion = 2;
 const previewDatabaseName = "paperpanda-assets";
 const previewStoreName = "document-previews";
 const settingsAssetStoreName = "settings-assets";
@@ -747,6 +747,7 @@ const RP_JUMP_SHEET = {
 };
 const RP_TACK_VARIANT_KEYS = ["pad", "bridle", "girth"];
 const RP_GRAMMAR_PROGRESS_RESET_VERSION = 1;
+const RP_REWARD_PROGRESS_RESET_VERSION = 1;
 const SPELLING_TENSE_PROMPTS = {
   believe: {
     past: "They believed the strongest explanation straight away.",
@@ -9367,6 +9368,10 @@ const RewardProperty = (function () {
       sessions: 0,
       claimedRewardIds: [],
       lastClaimedRewardId: "",
+      rewardProgressResetVersion: RP_REWARD_PROGRESS_RESET_VERSION,
+      rewardProgressNeedsBaseline: false,
+      rewardBaselineCompletedAttempts: 0,
+      rewardBaselineHorseCount: 0,
       grammarSessions: 0,
       grammarSessionVersion: RP_GRAMMAR_SESSION_VERSION,
       grammarProgressResetVersion: RP_GRAMMAR_PROGRESS_RESET_VERSION,
@@ -9437,6 +9442,16 @@ const RewardProperty = (function () {
     return Array.isArray(S.claimedRewardIds)
       ? S.claimedRewardIds.map((value) => String(value || "")).filter((value) => RP_REWARD_BY_ID[value])
       : [];
+  }
+
+  function getRewardBaselineCompletedAttempts() {
+    ensureLoaded();
+    return Math.max(0, Number(S.rewardBaselineCompletedAttempts || 0) || 0);
+  }
+
+  function getRewardBaselineHorseCount() {
+    ensureLoaded();
+    return Math.max(0, Number(S.rewardBaselineHorseCount || 0) || 0);
   }
 
   function getClaimedRewardSet() {
@@ -9723,6 +9738,8 @@ const RewardProperty = (function () {
     const grammarSessionVersion = Math.max(0, Number(base.grammarSessionVersion || 0) || 0);
     const grammarProgressResetVersion = Math.max(0, Number(base.grammarProgressResetVersion || 0) || 0);
     const shouldResetGrammarProgress = grammarProgressResetVersion !== RP_GRAMMAR_PROGRESS_RESET_VERSION;
+    const rewardProgressResetVersion = Math.max(0, Number(base.rewardProgressResetVersion || 0) || 0);
+    const shouldResetRewardProgress = rewardProgressResetVersion !== RP_REWARD_PROGRESS_RESET_VERSION;
     const rawGrammarSessions = shouldResetGrammarProgress
       ? 0
       : Math.max(0, Number(base.grammarSessions || 0) || 0);
@@ -9737,16 +9754,28 @@ const RewardProperty = (function () {
     const savedSessions = Math.max(0, Number(base.sessions || 0) || 0);
     const savedStage = Math.max(0, Math.min(RP_STAGES.length - 1, Number(base.stage || 0) || 0));
     S = {
-      stage: shouldResetGrammarProgress ? 0 : Math.max(savedStage, getDerivedStage(savedSessions)),
+      stage: shouldResetGrammarProgress || shouldResetRewardProgress ? 0 : Math.max(savedStage, getDerivedStage(savedSessions)),
       owned: Math.max(2, Math.min(RP_TACK.length, Number(base.owned || 2) || 2)),
-      sessions: savedSessions,
-      claimedRewardIds,
-      lastClaimedRewardId: claimedRewardIds.includes(String(base.lastClaimedRewardId || "")) ? String(base.lastClaimedRewardId || "") : "",
+      sessions: shouldResetRewardProgress ? 0 : savedSessions,
+      claimedRewardIds: shouldResetRewardProgress ? [] : claimedRewardIds,
+      lastClaimedRewardId: shouldResetRewardProgress
+        ? ""
+        : claimedRewardIds.includes(String(base.lastClaimedRewardId || ""))
+          ? String(base.lastClaimedRewardId || "")
+          : "",
+      rewardProgressResetVersion: RP_REWARD_PROGRESS_RESET_VERSION,
+      rewardProgressNeedsBaseline: shouldResetRewardProgress,
+      rewardBaselineCompletedAttempts: shouldResetRewardProgress ? 0 : Math.max(0, Number(base.rewardBaselineCompletedAttempts || 0) || 0),
+      rewardBaselineHorseCount: shouldResetRewardProgress ? 0 : Math.max(0, Number(base.rewardBaselineHorseCount || 0) || 0),
       grammarSessions,
       grammarSessionVersion: RP_GRAMMAR_SESSION_VERSION,
       grammarProgressResetVersion: RP_GRAMMAR_PROGRESS_RESET_VERSION,
-      horses: Array.isArray(base.horses) ? base.horses.map((horse, index) => normaliseHorse(horse, index)) : [],
-      arenaJumps: Array.isArray(base.arenaJumps) ? base.arenaJumps.map((jump, index) => normaliseArenaJump(jump, index)) : []
+      horses: shouldResetRewardProgress
+        ? []
+        : Array.isArray(base.horses) ? base.horses.map((horse, index) => normaliseHorse(horse, index)) : [],
+      arenaJumps: shouldResetRewardProgress
+        ? []
+        : Array.isArray(base.arenaJumps) ? base.arenaJumps.map((jump, index) => normaliseArenaJump(jump, index)) : []
     };
   }
 
@@ -9846,17 +9875,37 @@ const RewardProperty = (function () {
       return;
     }
     const spelling = getSubjectSpellingState(subject);
+    const completedAttempts = Array.isArray(spelling.completedAttempts) ? spelling.completedAttempts.length : 0;
+    const ownedHorseMeta = getSpellingOwnedHorseMeta(spelling);
+    const shouldResetRewardProgress = Boolean(S.rewardProgressNeedsBaseline);
     let changed = false;
-    getSpellingOwnedHorseMeta(spelling).forEach((horseMeta) => {
+    if (shouldResetRewardProgress) {
+      const starterHorseMeta = ownedHorseMeta[0] || SPELLING_PADDOCK_HORSES[0] || null;
+      S.rewardProgressResetVersion = RP_REWARD_PROGRESS_RESET_VERSION;
+      S.rewardProgressNeedsBaseline = false;
+      S.rewardBaselineCompletedAttempts = completedAttempts;
+      S.rewardBaselineHorseCount = ownedHorseMeta.length;
+      S.stage = 0;
+      S.sessions = 0;
+      S.claimedRewardIds = [];
+      S.lastClaimedRewardId = "";
+      S.horses = [];
+      S.arenaJumps = [];
+      if (starterHorseMeta) {
+        ensureHorse(starterHorseMeta.id, starterHorseMeta.name, starterHorseMeta.label);
+      }
+      changed = true;
+    }
+    ownedHorseMeta.slice(getRewardBaselineHorseCount()).forEach((horseMeta) => {
       const result = ensureHorse(horseMeta.id, horseMeta.name, horseMeta.label);
       changed = changed || result.added;
     });
-    const completedCount = Array.isArray(spelling.completedAttempts) ? spelling.completedAttempts.length : 0;
-    if (completedCount !== S.sessions) {
-      S.sessions = completedCount;
+    const rewardCompletedCount = Math.max(0, completedAttempts - getRewardBaselineCompletedAttempts());
+    if (rewardCompletedCount !== S.sessions) {
+      S.sessions = rewardCompletedCount;
       changed = true;
     }
-    const derivedStage = getDerivedStage(completedCount);
+    const derivedStage = getDerivedStage(rewardCompletedCount);
     if (derivedStage !== S.stage) {
       S.stage = derivedStage;
       changed = true;
