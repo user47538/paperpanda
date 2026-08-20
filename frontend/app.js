@@ -16493,6 +16493,9 @@ function buildWritingIllustrationOptions(writing, sectionIndex) {
   const baseText = String(section?.text || "").trim() || buildWritingSectionSuggestion(writing, sectionIndex);
   const focusWord = String(writing.openingAnswers.who || "the character").trim();
   const sceneSummary = clipText(baseText.toLowerCase(), 72);
+  const feedbackDirection = String(writing.imageFeedback || "").trim()
+    ? `Required visual brief from the student: ${clipText(writing.imageFeedback, 180)}.`
+    : "";
 
   if (sectionIndex === 0) {
     return WRITING_STUDIO_STYLE_VARIANTS.map((style) =>
@@ -16502,7 +16505,7 @@ function buildWritingIllustrationOptions(writing, sectionIndex) {
         styleId: style.id,
         styleLabel: style.label,
         styleBrief: style.description,
-        prompt: `${style.promptLead} Make the composition and materials unmistakably different from the other style options. Show ${focusWord} as ${sceneSummary}`
+        prompt: `${style.promptLead} ${feedbackDirection} Make the composition and materials unmistakably different from the other style options. Show ${focusWord} as ${sceneSummary}`
       })
     );
   }
@@ -16516,7 +16519,7 @@ function buildWritingIllustrationOptions(writing, sectionIndex) {
         styleId: lockedStyle.styleId,
         styleLabel: lockedStyle.label,
         styleBrief: lockedStyle.brief,
-        prompt: `Keep the exact established ${lockedStyle.label.toLowerCase()} picture-book look. ${lockedStyle.brief} Show a wide scene of ${focusWord} as ${sceneSummary}`
+        prompt: `Keep the exact established ${lockedStyle.label.toLowerCase()} picture-book look. ${lockedStyle.brief} ${feedbackDirection} Show a wide scene of ${focusWord} as ${sceneSummary}`
       },
       {
         label: `${lockedStyle.label} · character focus`,
@@ -16524,7 +16527,7 @@ function buildWritingIllustrationOptions(writing, sectionIndex) {
         styleId: lockedStyle.styleId,
         styleLabel: lockedStyle.label,
         styleBrief: lockedStyle.brief,
-        prompt: `Keep the exact established ${lockedStyle.label.toLowerCase()} picture-book look. ${lockedStyle.brief} Show a close character-focused moment of ${focusWord} as ${sceneSummary}`
+        prompt: `Keep the exact established ${lockedStyle.label.toLowerCase()} picture-book look. ${lockedStyle.brief} ${feedbackDirection} Show a close character-focused moment of ${focusWord} as ${sceneSummary}`
       }
     ].map((option) => buildWritingIllustrationOption(section, option));
   }
@@ -16536,7 +16539,7 @@ function buildWritingIllustrationOptions(writing, sectionIndex) {
       styleId: style.id,
       styleLabel: style.label,
       styleBrief: style.description,
-      prompt: `${style.promptLead} Show ${focusWord} as ${sceneSummary}`
+      prompt: `${style.promptLead} ${feedbackDirection} Show ${focusWord} as ${sceneSummary}`
     })
   );
 }
