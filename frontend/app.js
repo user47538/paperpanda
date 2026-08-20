@@ -4004,6 +4004,45 @@ function renderSubjectLanding() {
               </article>
               <button type="button" class="subject-landing__arrow" data-subject-landing-page-move="1" ${!pageList.length || currentPageIndex >= pageList.length - 1 ? "disabled" : ""}>→</button>
             </div>
+            <div class="subject-landing__dock">
+              <div class="subject-landing__dock-inner">
+                <span class="subject-landing__dock-label">Original doc</span>
+                <button type="button" class="subject-landing__dock-listen" data-subject-landing-listen-full="true">▶ Listen</button>
+                <button type="button" class="subject-landing__dock-ask" data-subject-landing-ask="true">Ask Panda</button>
+              </div>
+            </div>
+            ${state.subjectLandingAskOpen
+              ? `
+                <aside class="subject-landing-ask-popup" data-subject-landing-ask-popup>
+                  <button type="button" class="subject-landing-ask-popup__close" data-subject-landing-ask-close aria-label="Close Ask Panda">×</button>
+                  <p class="subject-landing-ask-popup__eyebrow">Support</p>
+                  <div class="subject-landing-ask-popup__header">
+                    <img src="/paperpanda-logo.svg" alt="PaperPanda" class="subject-landing-ask-popup__avatar" />
+                    <div class="subject-landing-ask-popup__copy">
+                      <h3>Ask Panda</h3>
+                      <p>Ask about the current subject or what you're reading.</p>
+                    </div>
+                  </div>
+                  <button type="button" class="subject-landing-ask-popup__mic" data-subject-landing-ask-mic>
+                    ${state.askMicActive ? "Stop microphone" : "Use microphone"}
+                  </button>
+                  <div class="subject-landing-ask-popup__wave" aria-hidden="true">
+                    <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+                  </div>
+                  <div class="subject-landing-ask-popup__context" data-subject-landing-ask-context>${escapeHtml(landingAskContext)}</div>
+                  <div class="subject-landing-ask-popup__response" data-subject-landing-ask-response>${escapeHtml(landingAskResponse)}</div>
+                  <textarea
+                    class="subject-landing-ask-popup__input"
+                    data-subject-landing-ask-input
+                    rows="5"
+                    placeholder="Ask Panda about this document here."
+                  >${escapeHtml(state.subjectLandingAskDraft)}</textarea>
+                  <div class="subject-landing-ask-popup__actions">
+                    <button type="button" class="subject-landing-ask-popup__listen" data-subject-landing-ask-listen>${state.askResponseSpeaking ? "Stop" : "Listen to response"}</button>
+                  </div>
+                </aside>
+              `
+              : ""}
           `}
       </section>
     `;
@@ -4145,11 +4184,14 @@ function renderSubjectLanding() {
     }
     const pieces = getSubjectLandingSimplifiedPieces(documentRecord);
     const piece = pieces[Math.max(0, Math.min(state.subjectLandingPieceIndex, Math.max(0, pieces.length - 1)))] || null;
+    const pageNumber = currentPage?.pageNumber || currentPageIndex + 1;
     state.askDocumentId = documentRecord.id;
     state.subjectLandingAskOpen = true;
-    state.subjectLandingAskDraft = state.subjectLandingAskDraft || (piece?.title
-      ? `Can you explain "${piece.title}" in even simpler language?`
-      : "Can you explain this section in simpler language?");
+    state.subjectLandingAskDraft = state.subjectLandingAskDraft || (state.subjectLandingView === "original"
+      ? `Can you explain page ${pageNumber} in simpler language?`
+      : piece?.title
+        ? `Can you explain "${piece.title}" in even simpler language?`
+        : "Can you explain this section in simpler language?");
     state.subjectLandingAskStatus = state.subjectLandingAskStatus || "Ask Panda about the current document here.";
     render();
     requestAnimationFrame(() => {
