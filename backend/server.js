@@ -3,6 +3,7 @@ import express from "express";
 import multer from "multer";
 import { createCanvas } from "@napi-rs/canvas";
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
+import { createWorker, PSM } from "tesseract.js";
 import {
   awardAccountPoints,
   getDataFilePath,
@@ -25,6 +26,12 @@ const geminiWritingImageModel = String(process.env.GEMINI_WRITING_IMAGE_MODEL ||
 const openAiJsonTimeoutMs = Math.max(5_000, Number(process.env.OPENAI_JSON_TIMEOUT_MS || 35_000) || 35_000);
 const openAiSpeechTimeoutMs = Math.max(5_000, Number(process.env.OPENAI_SPEECH_TIMEOUT_MS || 35_000) || 35_000);
 const geminiImageTimeoutMs = Math.max(5_000, Number(process.env.GEMINI_IMAGE_TIMEOUT_MS || 45_000) || 45_000);
+const localOcrTimeoutMs = Math.max(10_000, Number(process.env.LOCAL_OCR_TIMEOUT_MS || 90_000) || 90_000);
+const pdfPreviewRenderScale = Math.max(1, Number(process.env.PDF_PREVIEW_RENDER_SCALE || 1.25) || 1.25);
+const pdfOcrRenderScale = Math.max(pdfPreviewRenderScale, Number(process.env.PDF_OCR_RENDER_SCALE || 2.2) || 2.2);
+const localOcrEnabled = String(process.env.LOCAL_OCR_ENABLED || "1").trim() !== "0";
+const localOcrLanguage = String(process.env.LOCAL_OCR_LANGUAGE || "eng").trim() || "eng";
+const localOcrCachePath = String(process.env.LOCAL_OCR_CACHE_PATH || "/tmp/paperpanda-tesseract-cache").trim() || "/tmp/paperpanda-tesseract-cache";
 const writingImageSectionTextLimit = 420;
 const writingImagePreviousTextLimit = 220;
 const writingImageFeedbackLimit = 280;
@@ -562,6 +569,15 @@ function getPdfTextSignal(text) {
   };
 }
 
+function canUseLocalOcr() {
+  return localOcrEnabled;
+}
+
+function getPdfPageBlockText(pageNumber, text) {
+  const cleanedText = String(text || "").trim();
+  return cleanedText ? `Page ${pageNumber}\n${cleanedText}`.trim() : "";
+}
+
 function shouldOcrPdfPage(page) {
   const signal = getPdfTextSignal(page?.text);
   const symbolHeavyLowContext =
@@ -609,6 +625,159 @@ function rebuildPdfTextIndexes(pages) {
   };
 }
 
+function stripPdfOcrArtifacts(pages) {
+  return (Array.isArray(pages) ? pages : []).map((page) => {
+    const { ocrImageUrl, ...rest } = page || {};
+    return rest;
+  });
+}
+
+function didPdfPageTextsChange(beforePages, afterPages) {
+  const baselinePages = Array.isArray(beforePages) ? beforePages : [];
+  const candidatePages = Array.isArray(afterPages) ? afterPages : [];
+  return candidatePages.some((page, index) => String(page?.text || "").trim() !== String(baselinePages[index]?.text || "").trim());
+}
+
+function buildPdfOcrErrorMessage(errors) {
+  return errors
+    .map((entry) => String(entry || "").trim())
+    .filter(Boolean)
+    .join(" ");
+}
+
+function getPdfOcrImageUrl(page) {
+  return String(page?.ocrImageUrl || page?.imageUrl || "").trim();
+}
+
+function preprocessCanvasForOcr(canvas, context) {
+  if (!canvas?.width || !canvas?.height || !context?.getImageData || !context?.putImageData) {
+    return;
+  }
+
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+  const { data } = imageData;
+  let minLuminance = 255;
+  let maxLuminance = 0;
+
+  for (let index = 0; index < data.length; index += 4) {
+    const luminance = Math.round(data[index] * 0.299 + data[index + 1] * 0.587 + data[index + 2] * 0.114);
+    minLuminance = Math.min(minLuminance, luminance);
+    maxLuminance = Math.max(maxLuminance, luminance);
+  }
+
+  const range = Math.max(1, maxLuminance - minLuminance);
+  for (let index = 0; index < data.length; index += 4) {
+    const luminance = Math.round(data[index] * 0.299 + data[index + 1] * 0.587 + data[index + 2] * 0.114);
+    const normalized = ((luminance - minLuminance) / range) * 255;
+    let boosted = (normalized - 128) * 1.45 + 128;
+    if (boosted >= 198) {
+      boosted = 255;
+    } else if (boosted <= 36) {
+      boosted = 0;
+    }
+    const clamped = Math.max(0, Math.min(255, Math.round(boosted)));
+    data[index] = clamped;
+    data[index + 1] = clamped;
+    data[index + 2] = clamped;
+  }
+
+  context.putImageData(imageData, 0, 0);
+}
+
+async function runWithTimeout(taskFactory, timeoutMs, timeoutLabel) {
+  return new Promise((resolve, reject) => {
+    const timeoutHandle = setTimeout(() => {
+      reject(new Error(`${timeoutLabel} timed out.`));
+    }, timeoutMs);
+
+    Promise.resolve()
+      .then(taskFactory)
+      .then((result) => {
+        clearTimeout(timeoutHandle);
+        resolve(result);
+      })
+      .catch((error) => {
+        clearTimeout(timeoutHandle);
+        reject(error);
+      });
+  });
+}
+
+function applyOcrTranscriptsToPages(pages, ocrByPageNumber) {
+  return pages.map((page) => {
+    const transcriptText = String(ocrByPageNumber.get(page.pageNumber) || "").trim();
+    if (!transcriptText) {
+      return page;
+    }
+    return {
+      ...page,
+      text: getPdfPageBlockText(page.pageNumber, transcriptText)
+    };
+  });
+}
+
+function decodeDataUrlToBuffer(imageUrl) {
+  const source = String(imageUrl || "").trim();
+  if (!source) {
+    return null;
+  }
+  const commaIndex = source.indexOf(",");
+  if (commaIndex === -1) {
+    return Buffer.from(source, "base64");
+  }
+  return Buffer.from(source.slice(commaIndex + 1), "base64");
+}
+
+async function ocrPdfPagesLocally(pages) {
+  if (!canUseLocalOcr()) {
+    throw new Error("Local OCR is disabled on this host.");
+  }
+
+  const pagesNeedingOcr = pages
+    .filter((page) => shouldOcrPdfPage(page))
+    .map((page) => ({
+      pageNumber: page.pageNumber,
+      imageUrl: getPdfOcrImageUrl(page)
+    }))
+    .filter((page) => page.imageUrl);
+
+  if (!pagesNeedingOcr.length) {
+    return pages;
+  }
+
+  const worker = await createWorker(localOcrLanguage, 1, {
+    cachePath: localOcrCachePath
+  });
+  const ocrByPageNumber = new Map();
+  try {
+    await worker.setParameters({
+      preserve_interword_spaces: "1",
+      tessedit_pageseg_mode: String(PSM.AUTO),
+      user_defined_dpi: "300"
+    });
+
+    for (const page of pagesNeedingOcr) {
+      const imageBuffer = decodeDataUrlToBuffer(page.imageUrl);
+      if (!imageBuffer?.length) {
+        continue;
+      }
+      const result = await runWithTimeout(
+        () => worker.recognize(imageBuffer),
+        localOcrTimeoutMs,
+        `Local OCR for page ${page.pageNumber}`
+      );
+      const transcriptText = String(result?.data?.text || "").trim();
+      if (transcriptText) {
+        ocrByPageNumber.set(page.pageNumber, transcriptText);
+      }
+    }
+  } finally {
+    await worker.terminate();
+  }
+
+  return applyOcrTranscriptsToPages(pages, ocrByPageNumber);
+}
+
 async function ocrPdfPagesWithOpenAi(pages) {
   requireOpenAiKey();
   const pagesNeedingOcr = pages.filter((page) => shouldOcrPdfPage(page));
@@ -649,7 +818,7 @@ async function ocrPdfPagesWithOpenAi(pages) {
               },
               {
                 type: "input_image",
-                image_url: page.imageUrl,
+                image_url: getPdfOcrImageUrl(page),
                 detail: "high"
               }
             ])
@@ -675,16 +844,7 @@ async function ocrPdfPagesWithOpenAi(pages) {
     });
   }
 
-  return pages.map((page) => {
-    const ocrText = String(ocrByPageNumber.get(page.pageNumber) || "").trim();
-    if (!ocrText) {
-      return page;
-    }
-    return {
-      ...page,
-      text: `Page ${page.pageNumber}\n${ocrText}`.trim()
-    };
-  });
+  return applyOcrTranscriptsToPages(pages, ocrByPageNumber);
 }
 
 class NodeCanvasFactory {
@@ -707,12 +867,15 @@ class NodeCanvasFactory {
   }
 }
 
-async function renderPdfPageToDataUrl(page) {
-  const viewport = page.getViewport({ scale: 1.25 });
+async function renderPdfPageToDataUrl(page, { scale = pdfPreviewRenderScale, preprocessForOcr = false } = {}) {
+  const viewport = page.getViewport({ scale });
   const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
   const context = canvas.getContext("2d");
   const canvasFactory = new NodeCanvasFactory();
   await page.render({ canvasContext: context, viewport, canvasFactory }).promise;
+  if (preprocessForOcr) {
+    preprocessCanvasForOcr(canvas, context);
+  }
   return `data:image/png;base64,${canvas.toBuffer("image/png").toString("base64")}`;
 }
 
@@ -732,14 +895,19 @@ async function parsePdfBuffer(buffer) {
     const page = await pdf.getPage(pageNumber);
     const textContent = await page.getTextContent();
     const pageText = extractPdfPageText(textContent.items).trim();
-    const imageUrl = await renderPdfPageToDataUrl(page);
+    const blockText = getPdfPageBlockText(pageNumber, pageText);
+    const needsOcrAssist = shouldOcrPdfPage({ text: blockText });
+    const imageUrl = await renderPdfPageToDataUrl(page, { scale: pdfPreviewRenderScale });
+    const ocrImageUrl = needsOcrAssist
+      ? await renderPdfPageToDataUrl(page, { scale: pdfOcrRenderScale, preprocessForOcr: true })
+      : "";
 
     if (pageText) {
-      const blockText = `Page ${pageNumber}\n${pageText}`;
       pages.push({
         pageNumber,
         text: blockText,
         imageUrl,
+        ocrImageUrl,
         startIndex: currentIndex,
         endIndex: currentIndex + blockText.length
       });
@@ -750,6 +918,7 @@ async function parsePdfBuffer(buffer) {
         pageNumber,
         text: "",
         imageUrl,
+        ocrImageUrl,
         startIndex: currentIndex,
         endIndex: currentIndex
       });
@@ -775,35 +944,54 @@ async function parsePdfBufferWithOcrFallback(buffer) {
 
   if (!needsOcrFallback) {
     return {
-      ...pdfData,
+      ...rebuildPdfTextIndexes(stripPdfOcrArtifacts(pdfData.pages)),
       ocrAttempted: false,
       ocrUsed: false,
       ocrError: ""
     };
   }
 
-  try {
-    const ocrPages = await ocrPdfPagesWithOpenAi(pdfData.pages);
-    return {
-      ...rebuildPdfTextIndexes(ocrPages),
-      ocrAttempted: true,
-      ocrUsed: true,
-      ocrError: ""
-    };
-  } catch (error) {
-    return {
-      ...pdfData,
-      ocrAttempted: true,
-      ocrUsed: false,
-      ocrError: error instanceof Error ? error.message : "OCR failed."
-    };
+  let workingPages = pdfData.pages;
+  let ocrAttempted = false;
+  let ocrUsed = false;
+  const ocrErrors = [];
+
+  if (canUseLocalOcr()) {
+    ocrAttempted = true;
+    try {
+      const localOcrPages = await ocrPdfPagesLocally(workingPages);
+      ocrUsed = ocrUsed || didPdfPageTextsChange(workingPages, localOcrPages);
+      workingPages = localOcrPages;
+    } catch (error) {
+      ocrErrors.push(`Local OCR failed: ${error instanceof Error ? error.message : "Unknown error."}`);
+    }
   }
+
+  const stillNeedsRemoteOcr = workingPages.some((page) => shouldOcrPdfPage(page));
+  if (stillNeedsRemoteOcr && openAiApiKey) {
+    ocrAttempted = true;
+    try {
+      const remoteOcrPages = await ocrPdfPagesWithOpenAi(workingPages);
+      ocrUsed = ocrUsed || didPdfPageTextsChange(workingPages, remoteOcrPages);
+      workingPages = remoteOcrPages;
+    } catch (error) {
+      ocrErrors.push(`OpenAI OCR failed: ${error instanceof Error ? error.message : "Unknown error."}`);
+    }
+  }
+
+  return {
+    ...rebuildPdfTextIndexes(stripPdfOcrArtifacts(workingPages)),
+    ocrAttempted,
+    ocrUsed,
+    ocrError: ocrUsed ? "" : buildPdfOcrErrorMessage(ocrErrors)
+  };
 }
 
 app.get("/health", (_request, response) => {
   response.json({
     ok: true,
     hasOpenAiKey: Boolean(openAiApiKey),
+    hasLocalOcr: canUseLocalOcr(),
     authStoreBackend: getDataFilePath()
   });
 });
