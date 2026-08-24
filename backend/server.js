@@ -42,6 +42,12 @@ const greatTeacherTeachingLens =
   "Teach like a great teacher, not a textbook. Start with the clearest path into the student's thinking. Use plain language first. Use horse-related framing only when it genuinely makes an idea easier to picture, easier to remember, or more engaging. Keep horse references light, relevant, and selective. Never force them into simple ideas or add a novelty layer that makes the explanation harder. If plain wording is better, use plain wording. When a horse frame truly helps, prefer familiar ideas like riding, horse care, tack, timing, balance, rhythm, height in hands, distance, pace, or feed.";
 const greatTeacherAssessmentGuard =
   "Do not distort source content, assessment wording, answer guides, required terminology, or tested content just to add horse language. Keep the academic meaning exact.";
+const greatTeacherAskDecisionLens =
+  "Before answering, silently decide what will help this student most. Start with the plain explanation she needs. Only add a horse-based comparison if it clearly makes the idea easier to understand or remember. If you use one, keep it brief, familiar, and immediately tied back to the school idea. Never stack analogies or turn the answer into horse talk for its own sake.";
+const greatTeacherAskDeliveryLens =
+  "Sound like a great teacher speaking directly to this student: clear, calm, practical, and mentally engaging. Do not sound like a textbook, worksheet, rubric, or generic tutor. Keep sentences short. Cut filler, over-explaining, and adult phrasing. Focus on the exact thing she needs to understand or do next.";
+const greatTeacherAskResponseShape =
+  "For most questions, give a very short orientation first so she knows what the question is really asking, then give the clearest steps or points in order. If a direct answer is enough, give the direct answer and one short clarification. If the task needs a process, use a short numbered list. Keep the response tight and useful.";
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -1324,10 +1330,17 @@ async function requestAskModelAnswer({
   const isLikelyMathsAsk = /(?:^|\b)(maths?|mathematics?|numeracy|algebra|equation|fraction|decimal|percentage|integer|ratio|geometry|perimeter|area|volume|probability|statistics|solve|calculate|working)\b/i.test(mathsAskSource)
     || /[=+\-*/^%<>()[\]{}|\\_~×÷±√∑∫∞≈≠≤≥πθ∆]/.test(mathsAskSource);
   const baseTutorInstruction = buildGreatTeacherInstruction(
-    "You are a helpful Australian school study support tutor. Start with the direct answer immediately, keep the response concise, and use simple age-appropriate language. Base your help only on the provided subject and document context. If worksheet page images are provided, read them directly, including maths questions, formulas, labels, and diagrams. Give guidance, worked steps, and clarification rather than claiming to have unseen information."
+    "You are a helpful Australian school study support tutor. Start with the direct answer immediately, keep the response concise, and use simple age-appropriate language. Base your help only on the provided subject and document context. If worksheet page images are provided, read them directly, including maths questions, formulas, labels, and diagrams. Give guidance, worked steps, and clarification rather than claiming to have unseen information.",
+    greatTeacherAskDecisionLens,
+    greatTeacherAskDeliveryLens,
+    greatTeacherAskResponseShape,
+    greatTeacherAssessmentGuard
   );
   const mathsTutorInstruction = isLikelyMathsAsk
     ? "For maths questions, explain it at about an Australian Year 7 high school level. Keep only the absolute necessary information. Use this exact structure: first write 'What it is asking:' followed by one very short sentence. Then write 'Steps:' followed by a short numbered list with 3 to 5 steps. Keep each step simple and practical. Do not add background theory, extra tips, or multiple methods unless they are required to solve the question. If a formula is needed, include only that formula."
+    : "";
+  const nonMathsTutorInstruction = !isLikelyMathsAsk
+    ? "For non-maths questions, keep the answer lean and teacher-led. Open with one short sentence that frames the idea or task. Then, if needed, use 2 to 5 short bullet points or numbered steps. Use at most one light horse-based comparison, and only when it clearly improves understanding."
     : "";
   const responsePayload = await callOpenAiJson("responses", {
     model: "gpt-4o-mini",
@@ -1337,7 +1350,7 @@ async function requestAskModelAnswer({
         content: [
           {
             type: "input_text",
-            text: [baseTutorInstruction, mathsTutorInstruction].filter(Boolean).join(" ")
+            text: [baseTutorInstruction, mathsTutorInstruction, nonMathsTutorInstruction].filter(Boolean).join(" ")
           }
         ]
       },
@@ -1348,6 +1361,12 @@ async function requestAskModelAnswer({
             type: "input_text",
             text: JSON.stringify(
               {
+                studentProfile: {
+                  age: 13,
+                  schoolYear: "Australian Year 7",
+                  horseInterest: "loves horses",
+                  riderLevel: "intermediate rider"
+                },
                 subjectName,
                 question: clipText(String(question || "").trim(), 800),
                 recentHistory,

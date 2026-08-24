@@ -525,19 +525,24 @@
                 rows="5"
                 placeholder="Example: Can you explain what I should focus on for this history source analysis?"
               ></textarea>
-              <div class="ask-toolbar" role="group" aria-label="Response playback controls">
-                <button type="button" class="ghost-button ghost-button--light ask-transport-button" id="ask-rewind-button" aria-label="Rewind 10 seconds" title="Rewind 10 seconds" disabled>
-                  ⏪
+              <div class="ask-toolbar">
+                <button type="button" class="ghost-button ghost-button--light" id="ask-listen-button">
+                  Listen to response
                 </button>
-                <button type="button" class="ghost-button ghost-button--light ask-transport-button" id="ask-listen-button" aria-label="Play response" title="Play response">
-                  ⏯
-                </button>
-                <button type="button" class="ghost-button ghost-button--light ask-transport-button" id="ask-forward-button" aria-label="Fast-forward 10 seconds" title="Fast-forward 10 seconds" disabled>
-                  ⏩
-                </button>
-                <button type="button" class="ghost-button ghost-button--light ask-transport-button" id="ask-stop-button" aria-label="Stop response" title="Stop response" disabled>
-                  ⏹
-                </button>
+                <div class="ask-toolbar__transport" role="group" aria-label="Response playback controls">
+                  <button type="button" class="ghost-button ghost-button--light ask-transport-button" id="ask-rewind-button" aria-label="Rewind 10 seconds" title="Rewind 10 seconds" disabled>
+                    ⏪
+                  </button>
+                  <button type="button" class="ghost-button ghost-button--light ask-transport-button" id="ask-pause-button" aria-label="Pause response" title="Pause response" disabled>
+                    ⏸
+                  </button>
+                  <button type="button" class="ghost-button ghost-button--light ask-transport-button" id="ask-forward-button" aria-label="Fast-forward 10 seconds" title="Fast-forward 10 seconds" disabled>
+                    ⏩
+                  </button>
+                  <button type="button" class="ghost-button ghost-button--light ask-transport-button" id="ask-stop-button" aria-label="Stop response" title="Stop response" disabled>
+                    ⏹
+                  </button>
+                </div>
               </div>
             </aside>
             <section class="dock-context-card" id="dock-context-card">

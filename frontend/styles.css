@@ -2478,16 +2478,17 @@ input[type="date"] {
 
 .ask-toolbar {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
-}
-
-.ask-toolbar #ask-button {
-  grid-column: 1 / -1;
 }
 
 .ask-toolbar .ghost-button {
   width: 100%;
+}
+
+.ask-toolbar__transport {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
 }
 
 .ask-transport-button {
@@ -6303,12 +6304,14 @@ input[type="date"] {
   gap: 14px;
 }
 
-#subjects-view.focus-ask-open .ask-toolbar #ask-button {
+#subjects-view.focus-ask-open .ask-toolbar .ghost-button {
   width: 100%;
 }
 
-#subjects-view.focus-ask-open .ask-toolbar .ghost-button {
-  width: 100%;
+#subjects-view.focus-ask-open .ask-toolbar__transport {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
 }
 
 #subjects-view.focus-drilled .workspace-dock,

@@ -1674,6 +1674,7 @@ const elements = {
   askRewindButton: document.getElementById("ask-rewind-button"),
   askMicButton: document.getElementById("ask-mic-button"),
   askListenButton: document.getElementById("ask-listen-button"),
+  askPauseButton: document.getElementById("ask-pause-button"),
   askForwardButton: document.getElementById("ask-forward-button"),
   askStopButton: document.getElementById("ask-stop-button"),
   askContext: document.getElementById("ask-context"),
@@ -2485,6 +2486,7 @@ function getDockAskSurface() {
     rewindButton: elements.askRewindButton,
     micButton: elements.askMicButton,
     listenButton: elements.askListenButton,
+    pauseButton: elements.askPauseButton,
     forwardButton: elements.askForwardButton,
     stopButton: elements.askStopButton,
     context: elements.askContext,
@@ -2508,6 +2510,7 @@ function getSubjectLandingAskSurface() {
     rewindButton: popup.querySelector("[data-subject-landing-ask-rewind]"),
     micButton: popup.querySelector("[data-subject-landing-ask-mic]"),
     listenButton: popup.querySelector("[data-subject-landing-ask-listen]"),
+    pauseButton: popup.querySelector("[data-subject-landing-ask-pause]"),
     forwardButton: popup.querySelector("[data-subject-landing-ask-forward]"),
     stopButton: popup.querySelector("[data-subject-landing-ask-stop]"),
     context: popup.querySelector("[data-subject-landing-ask-context]"),
@@ -4103,9 +4106,10 @@ function renderSubjectLanding() {
                   >${escapeHtml(state.subjectLandingAskDraft)}</textarea>
                   <div class="subject-landing-ask-popup__actions">
                     <button type="button" class="subject-landing-ask-popup__submit" data-subject-landing-ask-submit>Read response</button>
+                    <button type="button" class="subject-landing-ask-popup__listen" data-subject-landing-ask-listen ${state.askResponseSpeaking && !state.askResponsePaused ? "disabled" : ""}>Listen to response</button>
                     <div class="subject-landing-ask-popup__transport" role="group" aria-label="Response playback controls">
                       <button type="button" class="subject-landing-ask-popup__control" data-subject-landing-ask-rewind aria-label="Rewind 10 seconds" title="Rewind 10 seconds" ${currentAudioContext === "ask" && canSeekCurrentAskPlayback() ? "" : "disabled"}>⏪</button>
-                      <button type="button" class="subject-landing-ask-popup__control" data-subject-landing-ask-listen aria-label="${escapeHtml(state.askResponseSpeaking ? (state.askResponsePaused ? "Resume response" : "Pause response") : "Play response")}" title="${escapeHtml(state.askResponseSpeaking ? (state.askResponsePaused ? "Resume response" : "Pause response") : "Play response")}">⏯</button>
+                      <button type="button" class="subject-landing-ask-popup__control" data-subject-landing-ask-pause aria-label="${escapeHtml(state.askResponsePaused ? "Resume response" : "Pause response")}" title="${escapeHtml(state.askResponsePaused ? "Resume response" : "Pause response")}" ${state.askResponseSpeaking ? "" : "disabled"}>${state.askResponsePaused ? "▶" : "⏸"}</button>
                       <button type="button" class="subject-landing-ask-popup__control" data-subject-landing-ask-forward aria-label="Fast-forward 10 seconds" title="Fast-forward 10 seconds" ${currentAudioContext === "ask" && canSeekCurrentAskPlayback() ? "" : "disabled"}>⏩</button>
                       <button type="button" class="subject-landing-ask-popup__control" data-subject-landing-ask-stop aria-label="Stop response" title="Stop response" ${state.askResponseSpeaking ? "" : "disabled"}>⏹</button>
                     </div>
@@ -4180,9 +4184,10 @@ function renderSubjectLanding() {
                   >${escapeHtml(state.subjectLandingAskDraft)}</textarea>
                   <div class="subject-landing-ask-popup__actions">
                     <button type="button" class="subject-landing-ask-popup__submit" data-subject-landing-ask-submit>Read response</button>
+                    <button type="button" class="subject-landing-ask-popup__listen" data-subject-landing-ask-listen ${state.askResponseSpeaking && !state.askResponsePaused ? "disabled" : ""}>Listen to response</button>
                     <div class="subject-landing-ask-popup__transport" role="group" aria-label="Response playback controls">
                       <button type="button" class="subject-landing-ask-popup__control" data-subject-landing-ask-rewind aria-label="Rewind 10 seconds" title="Rewind 10 seconds" ${currentAudioContext === "ask" && canSeekCurrentAskPlayback() ? "" : "disabled"}>⏪</button>
-                      <button type="button" class="subject-landing-ask-popup__control" data-subject-landing-ask-listen aria-label="${escapeHtml(state.askResponseSpeaking ? (state.askResponsePaused ? "Resume response" : "Pause response") : "Play response")}" title="${escapeHtml(state.askResponseSpeaking ? (state.askResponsePaused ? "Resume response" : "Pause response") : "Play response")}">⏯</button>
+                      <button type="button" class="subject-landing-ask-popup__control" data-subject-landing-ask-pause aria-label="${escapeHtml(state.askResponsePaused ? "Resume response" : "Pause response")}" title="${escapeHtml(state.askResponsePaused ? "Resume response" : "Pause response")}" ${state.askResponseSpeaking ? "" : "disabled"}>${state.askResponsePaused ? "▶" : "⏸"}</button>
                       <button type="button" class="subject-landing-ask-popup__control" data-subject-landing-ask-forward aria-label="Fast-forward 10 seconds" title="Fast-forward 10 seconds" ${currentAudioContext === "ask" && canSeekCurrentAskPlayback() ? "" : "disabled"}>⏩</button>
                       <button type="button" class="subject-landing-ask-popup__control" data-subject-landing-ask-stop aria-label="Stop response" title="Stop response" ${state.askResponseSpeaking ? "" : "disabled"}>⏹</button>
                     </div>
@@ -4386,6 +4391,7 @@ function renderSubjectLanding() {
   host.querySelector("[data-subject-landing-ask-mic]")?.addEventListener("click", handleAskMicToggle);
   host.querySelector("[data-subject-landing-ask-rewind]")?.addEventListener("click", handleAskRewind);
   host.querySelector("[data-subject-landing-ask-listen]")?.addEventListener("click", handleAskListen);
+  host.querySelector("[data-subject-landing-ask-pause]")?.addEventListener("click", handleAskPauseToggle);
   host.querySelector("[data-subject-landing-ask-forward]")?.addEventListener("click", handleAskFastForward);
   host.querySelector("[data-subject-landing-ask-stop]")?.addEventListener("click", handleAskStop);
 }
@@ -13411,14 +13417,14 @@ function renderAskVoiceControls() {
       surface.micButton.textContent = state.askMicActive ? "Stop microphone" : "Use microphone";
     }
     if (surface.listenButton) {
-      surface.listenButton.textContent = "⏯";
-      surface.listenButton.setAttribute("aria-label", state.askResponseSpeaking
-        ? (state.askResponsePaused ? "Resume response" : "Pause response")
-        : "Play response");
-      surface.listenButton.setAttribute("title", state.askResponseSpeaking
-        ? (state.askResponsePaused ? "Resume response" : "Pause response")
-        : "Play response");
-      surface.listenButton.disabled = false;
+      surface.listenButton.textContent = "Listen to response";
+      surface.listenButton.disabled = state.askResponseSpeaking && !state.askResponsePaused;
+    }
+    if (surface.pauseButton) {
+      surface.pauseButton.textContent = state.askResponsePaused ? "▶" : "⏸";
+      surface.pauseButton.setAttribute("aria-label", state.askResponsePaused ? "Resume response" : "Pause response");
+      surface.pauseButton.setAttribute("title", state.askResponsePaused ? "Resume response" : "Pause response");
+      surface.pauseButton.disabled = !state.askResponseSpeaking;
     }
     if (surface.rewindButton) {
       surface.rewindButton.disabled = !canSeekAskResponse;
@@ -19594,27 +19600,7 @@ function handleAskMicToggle() {
 
 function handleAskListen() {
   const activeSurface = getActiveAskSurface();
-  if (state.askResponseSpeaking) {
-    if (state.askResponsePaused) {
-      void resumeListening()
-        .then(() => {
-          setAskSurfaceStatus(activeSurface, "Playing Panda's answer...");
-        })
-        .catch((error) => {
-          const message = error instanceof Error ? `Listen failed: ${error.message}` : "Listen failed.";
-          setAskSurfaceStatus(activeSurface, message);
-        });
-      return;
-    }
-
-    void pauseListening()
-      .then(() => {
-        setAskSurfaceStatus(activeSurface, "Paused. Choose Resume to continue.");
-      })
-      .catch((error) => {
-        const message = error instanceof Error ? `Listen failed: ${error.message}` : "Listen failed.";
-        setAskSurfaceStatus(activeSurface, message);
-      });
+  if (state.askResponseSpeaking && !state.askResponsePaused) {
     return;
   }
 
@@ -19658,6 +19644,34 @@ function handleAskListen() {
     })
     .catch((error) => {
       const message = error instanceof Error ? `Ask AI failed: ${error.message}` : "Ask AI failed.";
+      setAskSurfaceStatus(activeSurface, message);
+    });
+}
+
+function handleAskPauseToggle() {
+  const activeSurface = getActiveAskSurface();
+  if (!state.askResponseSpeaking) {
+    return;
+  }
+
+  if (state.askResponsePaused) {
+    void resumeListening()
+      .then(() => {
+        setAskSurfaceStatus(activeSurface, "Playing Panda's answer...");
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? `Listen failed: ${error.message}` : "Listen failed.";
+        setAskSurfaceStatus(activeSurface, message);
+      });
+    return;
+  }
+
+  void pauseListening()
+    .then(() => {
+      setAskSurfaceStatus(activeSurface, "Paused. Choose Resume to continue.");
+    })
+    .catch((error) => {
+      const message = error instanceof Error ? `Listen failed: ${error.message}` : "Listen failed.";
       setAskSurfaceStatus(activeSurface, message);
     });
 }
@@ -21582,6 +21596,7 @@ async function handleDashboardOpen() {
 elements.askRewindButton?.addEventListener("click", handleAskRewind);
 elements.askMicButton?.addEventListener("click", handleAskMicToggle);
 elements.askListenButton?.addEventListener("click", handleAskListen);
+elements.askPauseButton?.addEventListener("click", handleAskPauseToggle);
 elements.askForwardButton?.addEventListener("click", handleAskFastForward);
 elements.askStopButton?.addEventListener("click", handleAskStop);
 elements.signInModeCreateButton.addEventListener("click", () => {
