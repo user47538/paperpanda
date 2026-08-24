@@ -2367,6 +2367,7 @@ async function ensureDocumentStudyPlan(documentRecord, subject, { force = false 
   renderReader();
 
   try {
+    await hydrateDocumentPreviewImages(documentRecord);
     const payload = await requestDocumentStudyPlan(documentRecord, subject);
     documentRecord.studyOverview = String(payload?.overview || "").trim();
     documentRecord.importantTerms = Array.isArray(payload?.importantTerms)
@@ -5792,6 +5793,45 @@ function syncPreviewPersistence() {
   });
 }
 
+async function hydrateDocumentPreviewImages(documentRecord) {
+  if (!documentRecord?.id) {
+    return false;
+  }
+
+  let hydratedAnyPreview = false;
+
+  try {
+    if (!documentRecord.previewImageUrl) {
+      const previewRecord = await getPreviewRecord(documentRecord.id);
+      if (previewRecord?.previewImageUrl) {
+        documentRecord.previewImageUrl = previewRecord.previewImageUrl;
+        hydratedAnyPreview = true;
+      }
+    }
+    for (const page of documentRecord.pages || []) {
+      if (page?.imageUrl || !page?.pageNumber) {
+        continue;
+      }
+      const pagePreviewRecord = await getPreviewRecord(createPagePreviewRecordId(documentRecord.id, page.pageNumber));
+      if (pagePreviewRecord?.previewImageUrl) {
+        page.imageUrl = pagePreviewRecord.previewImageUrl;
+        hydratedAnyPreview = true;
+      }
+    }
+    if (documentRecord.previewImageUrl && Array.isArray(documentRecord.pages) && documentRecord.pages.length) {
+      const firstPage = documentRecord.pages[0];
+      if (firstPage && !firstPage.imageUrl) {
+        firstPage.imageUrl = documentRecord.previewImageUrl;
+        hydratedAnyPreview = true;
+      }
+    }
+  } catch (error) {
+    console.error(`Preview image failed to load for ${documentRecord.id}.`, error);
+  }
+
+  return hydratedAnyPreview;
+}
+
 async function hydratePreviewImages() {
   const documentsNeedingPreviewHydration = state.subjects.flatMap((subject) =>
     (subject.documents || []).filter(
@@ -5808,34 +5848,7 @@ async function hydratePreviewImages() {
   let hydratedAnyPreview = false;
 
   for (const documentRecord of documentsNeedingPreviewHydration) {
-    try {
-      if (!documentRecord.previewImageUrl) {
-        const previewRecord = await getPreviewRecord(documentRecord.id);
-        if (previewRecord?.previewImageUrl) {
-          documentRecord.previewImageUrl = previewRecord.previewImageUrl;
-          hydratedAnyPreview = true;
-        }
-      }
-      for (const page of documentRecord.pages || []) {
-        if (page?.imageUrl || !page?.pageNumber) {
-          continue;
-        }
-        const pagePreviewRecord = await getPreviewRecord(createPagePreviewRecordId(documentRecord.id, page.pageNumber));
-        if (pagePreviewRecord?.previewImageUrl) {
-          page.imageUrl = pagePreviewRecord.previewImageUrl;
-          hydratedAnyPreview = true;
-        }
-      }
-      if (documentRecord.previewImageUrl && Array.isArray(documentRecord.pages) && documentRecord.pages.length) {
-        const firstPage = documentRecord.pages[0];
-        if (firstPage && !firstPage.imageUrl) {
-          firstPage.imageUrl = documentRecord.previewImageUrl;
-          hydratedAnyPreview = true;
-        }
-      }
-    } catch (error) {
-      console.error(`Preview image failed to load for ${documentRecord.id}.`, error);
-    }
+    hydratedAnyPreview = (await hydrateDocumentPreviewImages(documentRecord)) || hydratedAnyPreview;
   }
 
   if (hydratedAnyPreview) {
@@ -12911,7 +12924,8 @@ async function compressDocumentPageImage(imageUrl, { maxWidth = 960, quality = 0
 }
 
 async function buildDocumentVisionPages(documentRecord, { maxPages = 4, maxTextPerPage = 220, sparseThreshold = 140 } = {}) {
-  const pages = Array.isArray(documentRecord?.pages) ? documentRecord.pages : [];
+  await hydrateDocumentPreviewImages(documentRecord);
+  const pages = getDocumentPages(documentRecord);
   if (!pages.length) {
     return [];
   }
@@ -19199,7 +19213,7 @@ function createId() {
   return `doc-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-const STUDY_PLAN_VERSION = 3;
+const STUDY_PLAN_VERSION = 4;
 
 function createDocumentRecord({ title, type, content }) {
   return {
