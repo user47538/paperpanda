@@ -4335,6 +4335,7 @@ input[type="date"] {
 }
 
 .subject-landing-row__revision-button,
+.subject-landing-row__delete-button,
 .subject-landing-row__open-button {
   min-height: 38px;
   padding: 0 14px;
@@ -4347,6 +4348,11 @@ input[type="date"] {
 .subject-landing-row__revision-button {
   background: #f6f1eb;
   color: #5c5668;
+}
+
+.subject-landing-row__delete-button {
+  background: #fde7ea;
+  color: #8d1f2f;
 }
 
 .subject-landing-row__open-button {
@@ -5192,6 +5198,7 @@ input[type="date"] {
   }
 
   .subject-landing-row__revision-button,
+  .subject-landing-row__delete-button,
   .subject-landing-row__open-button {
     flex: 1;
   }

@@ -3349,6 +3349,13 @@ function getSubjectLandingResourceRowMarkup(bundle, { revisionArchived = false }
         </button>
         <button
           type="button"
+          class="subject-landing-row__delete-button"
+          data-subject-landing-delete-document="${escapeHtml(bundleId)}"
+        >
+          Delete
+        </button>
+        <button
+          type="button"
           class="subject-landing-row__open-button"
           data-subject-landing-open-document="${escapeHtml(bundleId)}"
         >
@@ -4179,6 +4186,20 @@ function renderSubjectLanding() {
       render();
     });
   });
+  host.querySelectorAll("[data-subject-landing-delete-document]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const bundleId = String(button.dataset.subjectLandingDeleteDocument || "");
+      const bundle = landingResourceBundleMap.get(bundleId);
+      if (!bundle) {
+        return;
+      }
+      const confirmed = window.confirm(`Delete "${bundle.title}"?`);
+      if (!confirmed) {
+        return;
+      }
+      deleteDocuments(bundle.documents.map((documentRecord) => documentRecord.id));
+    });
+  });
   host.querySelectorAll("[data-subject-landing-folder-toggle]").forEach((button) => {
     button.addEventListener("click", () => {
       const folderId = String(button.dataset.subjectLandingFolderToggle || "");
@@ -4260,7 +4281,9 @@ function renderSubjectLanding() {
       }
       const pieces = getSubjectLandingSimplifiedPieces(documentRecord);
       const piece = pieces[Math.max(0, Math.min(state.subjectLandingPieceIndex, Math.max(0, pieces.length - 1)))] || null;
-      const pageNumber = currentPage?.pageNumber || currentPageIndex + 1;
+      const currentPageIndex = getCurrentDocumentPageIndex(documentRecord);
+      const currentPage = getDocumentPages(documentRecord)[currentPageIndex] || null;
+      const pageNumber = Number(currentPage?.pageNumber || currentPageIndex + 1) || 1;
       openSubjectLandingAsk(documentRecord, {
         pageNumber,
         pieceTitle: piece?.title || ""
