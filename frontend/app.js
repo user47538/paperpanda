@@ -3616,6 +3616,15 @@ function buildStandaloneDocumentPageHtml(payload, stylesMarkup = "") {
                           </div>
                         \`}
                     </div>
+                    \${pages.length > 1
+                      ? \`
+                        <div class="subject-landing__mobile-page-nav">
+                          <button type="button" class="subject-landing__mobile-page-button" data-standalone-page-move="-1" \${pageIndex <= 0 ? "disabled" : ""}>Previous page</button>
+                          <span class="subject-landing__mobile-page-label">\${escapeHtml(currentPage ? \`Page \${currentPage.pageNumber} of \${Math.max(1, pages.length)}\` : \`Page \${pageIndex + 1} of \${Math.max(1, pages.length)}\`)}</span>
+                          <button type="button" class="subject-landing__mobile-page-button" data-standalone-page-move="1" \${!pages.length || pageIndex >= pages.length - 1 ? "disabled" : ""}>Next page</button>
+                        </div>
+                      \`
+                      : ""}
                   </article>
                   <button type="button" class="subject-landing__arrow" data-standalone-page-move="1" \${!pages.length || pageIndex >= pages.length - 1 ? "disabled" : ""}>→</button>
                 </div>
@@ -4105,6 +4114,15 @@ function renderSubjectLanding() {
                       </div>
                     `}
                 </div>
+                ${pageList.length > 1
+                  ? `
+                    <div class="subject-landing__mobile-page-nav">
+                      <button type="button" class="subject-landing__mobile-page-button" data-subject-landing-page-move="-1" ${currentPageIndex <= 0 ? "disabled" : ""}>Previous page</button>
+                      <span class="subject-landing__mobile-page-label">${escapeHtml(currentPage ? `Page ${currentPage.pageNumber || currentPageIndex + 1} of ${Math.max(1, pageList.length)}` : `Page ${currentPageIndex + 1} of ${Math.max(1, pageList.length)}`)}</span>
+                      <button type="button" class="subject-landing__mobile-page-button" data-subject-landing-page-move="1" ${!pageList.length || currentPageIndex >= pageList.length - 1 ? "disabled" : ""}>Next page</button>
+                    </div>
+                  `
+                  : ""}
               </article>
               <button type="button" class="subject-landing__arrow" data-subject-landing-page-move="1" ${!pageList.length || currentPageIndex >= pageList.length - 1 ? "disabled" : ""}>→</button>
             </div>
