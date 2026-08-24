@@ -68,8 +68,10 @@ let remoteSettingsSaveQueuedSnapshot = null;
 let remoteSettingsSaveInFlight = false;
 let googleIdentityClientPromise = null;
 let standaloneAskChannel = null;
+let currentAudioPlaybackMode = "";
+let currentAudioPlaybackResumeWaiters = [];
 const askPageImageCache = new Map();
-const aiSpeechPlaybackRate = 0.5;
+const aiSpeechPlaybackRate = 0.65;
 const defaultGrade = "7";
 const defaultPageBackgroundColor = "#FBF7F0";
 const documentQuizPassPoints = 10;
@@ -1452,6 +1454,7 @@ const state = {
   googleDocsTokenExpiresAt: 0,
   askMicActive: false,
   askResponseSpeaking: false,
+  askResponsePaused: false,
   spellingAudioStatus: {
     context: "",
     tone: "",
@@ -1670,6 +1673,7 @@ const elements = {
   askInput: document.getElementById("ask-input"),
   askMicButton: document.getElementById("ask-mic-button"),
   askListenButton: document.getElementById("ask-listen-button"),
+  askStopButton: document.getElementById("ask-stop-button"),
   askContext: document.getElementById("ask-context"),
   askResponse: document.getElementById("ask-response"),
   savedTestsList: document.getElementById("saved-tests-list"),
@@ -2478,6 +2482,7 @@ function getDockAskSurface() {
     input: elements.askInput,
     micButton: elements.askMicButton,
     listenButton: elements.askListenButton,
+    stopButton: elements.askStopButton,
     context: elements.askContext,
     response: elements.askResponse
   };
@@ -2498,6 +2503,7 @@ function getSubjectLandingAskSurface() {
     input: popup.querySelector("[data-subject-landing-ask-input]"),
     micButton: popup.querySelector("[data-subject-landing-ask-mic]"),
     listenButton: popup.querySelector("[data-subject-landing-ask-listen]"),
+    stopButton: popup.querySelector("[data-subject-landing-ask-stop]"),
     context: popup.querySelector("[data-subject-landing-ask-context]"),
     response: popup.querySelector("[data-subject-landing-ask-response]")
   };
@@ -4091,7 +4097,8 @@ function renderSubjectLanding() {
                   >${escapeHtml(state.subjectLandingAskDraft)}</textarea>
                   <div class="subject-landing-ask-popup__actions">
                     <button type="button" class="subject-landing-ask-popup__submit" data-subject-landing-ask-submit>Ask now</button>
-                    <button type="button" class="subject-landing-ask-popup__listen" data-subject-landing-ask-listen>${state.askResponseSpeaking ? "Stop" : "Listen to response"}</button>
+                    <button type="button" class="subject-landing-ask-popup__listen" data-subject-landing-ask-listen>${state.askResponseSpeaking ? (state.askResponsePaused ? "Resume" : "Pause") : "Listen to response"}</button>
+                    <button type="button" class="subject-landing-ask-popup__listen" data-subject-landing-ask-stop ${state.askResponseSpeaking ? "" : "disabled"}>Stop</button>
                   </div>
                 </aside>
               `
@@ -4163,7 +4170,8 @@ function renderSubjectLanding() {
                   >${escapeHtml(state.subjectLandingAskDraft)}</textarea>
                   <div class="subject-landing-ask-popup__actions">
                     <button type="button" class="subject-landing-ask-popup__submit" data-subject-landing-ask-submit>Ask now</button>
-                    <button type="button" class="subject-landing-ask-popup__listen" data-subject-landing-ask-listen>${state.askResponseSpeaking ? "Stop" : "Listen to response"}</button>
+                    <button type="button" class="subject-landing-ask-popup__listen" data-subject-landing-ask-listen>${state.askResponseSpeaking ? (state.askResponsePaused ? "Resume" : "Pause") : "Listen to response"}</button>
+                    <button type="button" class="subject-landing-ask-popup__listen" data-subject-landing-ask-stop ${state.askResponseSpeaking ? "" : "disabled"}>Stop</button>
                   </div>
                 </aside>
               `
@@ -4363,6 +4371,7 @@ function renderSubjectLanding() {
   });
   host.querySelector("[data-subject-landing-ask-mic]")?.addEventListener("click", handleAskMicToggle);
   host.querySelector("[data-subject-landing-ask-listen]")?.addEventListener("click", handleAskListen);
+  host.querySelector("[data-subject-landing-ask-stop]")?.addEventListener("click", handleAskStop);
 }
 
 function renderSubjectTabs() {
@@ -13385,10 +13394,79 @@ function renderAskVoiceControls() {
       surface.micButton.textContent = state.askMicActive ? "Stop microphone" : "Use microphone";
     }
     if (surface.listenButton) {
-      surface.listenButton.textContent = state.askResponseSpeaking ? "Stop" : "Listen to response";
+      surface.listenButton.textContent = state.askResponseSpeaking
+        ? (state.askResponsePaused ? "Resume" : "Pause")
+        : "Listen to response";
       surface.listenButton.disabled = false;
     }
+    if (surface.stopButton) {
+      surface.stopButton.disabled = !state.askResponseSpeaking;
+    }
   });
+}
+
+function resolveCurrentAudioPlaybackResumeWaiters() {
+  if (!currentAudioPlaybackResumeWaiters.length) {
+    return;
+  }
+
+  const waiters = currentAudioPlaybackResumeWaiters;
+  currentAudioPlaybackResumeWaiters = [];
+  waiters.forEach((resolve) => resolve());
+}
+
+async function waitForCurrentAudioPlaybackResume(listenSessionId) {
+  while (currentListenSessionId === listenSessionId && state.askResponsePaused) {
+    await new Promise((resolve) => {
+      currentAudioPlaybackResumeWaiters.push(resolve);
+    });
+  }
+}
+
+function hasResumableAudioElementPlayback() {
+  return Boolean(
+    currentAudioPlayback &&
+    currentAudioPlayback.getAttribute("src") &&
+    !currentAudioPlayback.ended &&
+    currentAudioPlayback.currentTime > 0
+  );
+}
+
+async function pauseListening() {
+  if (!currentAudioContext || !state.askResponseSpeaking || state.askResponsePaused) {
+    return;
+  }
+
+  if (currentAudioPlaybackMode === "audio-context") {
+    const audioContext = getAiSpeechPlaybackContext();
+    if (audioContext?.state === "running") {
+      await audioContext.suspend();
+    }
+  } else if (currentAudioPlayback && !currentAudioPlayback.paused) {
+    currentAudioPlayback.pause();
+  }
+
+  state.askResponsePaused = true;
+  renderAskVoiceControls();
+}
+
+async function resumeListening() {
+  if (!currentAudioContext || !state.askResponseSpeaking || !state.askResponsePaused) {
+    return;
+  }
+
+  if (currentAudioPlaybackMode === "audio-context") {
+    const audioContext = getAiSpeechPlaybackContext();
+    if (audioContext?.state === "suspended") {
+      await audioContext.resume();
+    }
+  } else if (hasResumableAudioElementPlayback()) {
+    await currentAudioPlayback.play();
+  }
+
+  state.askResponsePaused = false;
+  renderAskVoiceControls();
+  resolveCurrentAudioPlaybackResumeWaiters();
 }
 
 function getSpeechRecognitionConstructor() {
@@ -13476,8 +13554,10 @@ async function speakTextWithOpenAi(text, { context = "document", documentId = nu
   const listenSessionId = Date.now();
   currentListenSessionId = listenSessionId;
   currentAudioContext = context === "document" && documentId ? `document:${documentId}` : context;
+  currentAudioPlaybackMode = "";
   state.listeningDocumentId = context === "document" ? documentId : null;
   state.askResponseSpeaking = context === "ask";
+  state.askResponsePaused = false;
   renderDocuments();
   renderAskVoiceControls();
   if (statusElement) {
@@ -13498,6 +13578,10 @@ async function speakTextWithOpenAi(text, { context = "document", documentId = nu
   }
 
   for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
+    if (currentListenSessionId !== listenSessionId) {
+      return;
+    }
+    await waitForCurrentAudioPlaybackResume(listenSessionId);
     if (currentListenSessionId !== listenSessionId) {
       return;
     }
@@ -13598,6 +13682,7 @@ async function playSpeechBlobThroughAudioElement(speechBlob, { statusMessages = 
   playbackElement.src = currentAudioObjectUrl;
   playbackElement.defaultPlaybackRate = aiSpeechPlaybackRate;
   playbackElement.playbackRate = aiSpeechPlaybackRate;
+  currentAudioPlaybackMode = "audio-element";
   playbackElement.load();
 
   await new Promise((resolve, reject) => {
@@ -13638,8 +13723,18 @@ async function playSpeechBlobThroughAudioElement(speechBlob, { statusMessages = 
 }
 
 async function playSpeechChunk(chunkText, { listenSessionId, statusMessages = {}, onStatusChange = null, statusElement = null } = {}) {
+  await waitForCurrentAudioPlaybackResume(listenSessionId);
+  if (currentListenSessionId !== listenSessionId) {
+    return;
+  }
+
   const speechBlob = await requestApi("/api/speak", { text: chunkText }, true);
 
+  if (currentListenSessionId !== listenSessionId) {
+    return;
+  }
+
+  await waitForCurrentAudioPlaybackResume(listenSessionId);
   if (currentListenSessionId !== listenSessionId) {
     return;
   }
@@ -13673,6 +13768,7 @@ async function playSpeechChunk(chunkText, { listenSessionId, statusMessages = {}
   await new Promise((resolve, reject) => {
     const source = audioContext.createBufferSource();
     currentAudioBufferSource = source;
+    currentAudioPlaybackMode = "audio-context";
     source.buffer = decodedBuffer;
     source.playbackRate.value = aiSpeechPlaybackRate;
     source.connect(audioContext.destination);
@@ -15093,11 +15189,16 @@ function stopListening() {
   if (state.askResponseSpeaking) {
     state.askResponseSpeaking = false;
   }
+  if (state.askResponsePaused) {
+    state.askResponsePaused = false;
+  }
   if (state.activeReaderSegmentIndex !== -1 || state.activeReaderSectionId) {
     state.activeReaderSegmentIndex = -1;
     state.activeReaderSectionId = "";
   }
   currentAudioContext = "";
+  currentAudioPlaybackMode = "";
+  resolveCurrentAudioPlaybackResumeWaiters();
   renderAskVoiceControls();
 }
 
@@ -19418,8 +19519,26 @@ function handleAskMicToggle() {
 function handleAskListen() {
   const activeSurface = getActiveAskSurface();
   if (state.askResponseSpeaking) {
-    stopListening();
-    setAskSurfaceStatus(activeSurface, getStoredAskAnswer(activeSurface) ? getAskReadyStatus() : getAskIdleStatus(activeSurface));
+    if (state.askResponsePaused) {
+      void resumeListening()
+        .then(() => {
+          setAskSurfaceStatus(activeSurface, "Playing Panda's answer...");
+        })
+        .catch((error) => {
+          const message = error instanceof Error ? `Listen failed: ${error.message}` : "Listen failed.";
+          setAskSurfaceStatus(activeSurface, message);
+        });
+      return;
+    }
+
+    void pauseListening()
+      .then(() => {
+        setAskSurfaceStatus(activeSurface, "Paused. Choose Resume to continue.");
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? `Listen failed: ${error.message}` : "Listen failed.";
+        setAskSurfaceStatus(activeSurface, message);
+      });
     return;
   }
 
@@ -19488,6 +19607,15 @@ function handleAskListen() {
       const message = error instanceof Error ? `Ask AI failed: ${error.message}` : "Ask AI failed.";
       setAskSurfaceStatus(activeSurface, message);
     });
+}
+
+function handleAskStop() {
+  const activeSurface = getActiveAskSurface();
+  stopListening();
+  setAskSurfaceStatus(
+    activeSurface,
+    getStoredAskAnswer(activeSurface) ? getAskReadyStatus() : getAskIdleStatus(activeSurface)
+  );
 }
 
 function formatDate() {
@@ -21382,6 +21510,7 @@ async function handleDashboardOpen() {
 
 elements.askMicButton?.addEventListener("click", handleAskMicToggle);
 elements.askListenButton?.addEventListener("click", handleAskListen);
+elements.askStopButton?.addEventListener("click", handleAskStop);
 elements.signInModeCreateButton.addEventListener("click", () => {
   setAuthMode("create");
 });
