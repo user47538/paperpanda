@@ -32,6 +32,7 @@ const pdfOcrRenderScale = Math.max(pdfPreviewRenderScale, Number(process.env.PDF
 const localOcrEnabled = String(process.env.LOCAL_OCR_ENABLED || "1").trim() !== "0";
 const localOcrLanguage = String(process.env.LOCAL_OCR_LANGUAGE || "eng").trim() || "eng";
 const localOcrCachePath = String(process.env.LOCAL_OCR_CACHE_PATH || "/tmp/paperpanda-tesseract-cache").trim() || "/tmp/paperpanda-tesseract-cache";
+const localOcrRecycleAfterJobs = Math.max(1, Number(process.env.LOCAL_OCR_RECYCLE_AFTER_JOBS || 12) || 12);
 const writingImageSectionTextLimit = 420;
 const writingImagePreviousTextLimit = 220;
 const writingImageFeedbackLimit = 280;
@@ -41,6 +42,9 @@ const upload = multer({
     fileSize: 25 * 1024 * 1024
   }
 });
+let localOcrWorkerPromise = null;
+let localOcrWorkerJobCount = 0;
+let localOcrQueue = Promise.resolve();
 
 const configuredOrigins = String(process.env.FRONTEND_ORIGIN || "")
   .split(",")
@@ -218,6 +222,62 @@ function cleanDocumentVisionPages(pageVisuals, { pageLimit = 6, textLimit = 260 
     })
     .filter((page) => page.imageUrl && (/^data:image\//i.test(page.imageUrl) || /^https?:\/\//i.test(page.imageUrl)))
     .slice(0, pageLimit);
+}
+
+function cleanAskHistoryEntries(history, { limit = 4, textLimit = 240 } = {}) {
+  if (!Array.isArray(history)) {
+    return [];
+  }
+
+  return history
+    .slice(-limit)
+    .map((entry) => ({
+      question: clipText(String(entry?.question || "").trim(), textLimit),
+      answer: clipText(String(entry?.answer || "").trim(), textLimit * 2)
+    }))
+    .filter((entry) => entry.question || entry.answer);
+}
+
+function cleanAskAssessment(nextAssessment, { textLimit = 120 } = {}) {
+  if (!nextAssessment || typeof nextAssessment !== "object") {
+    return null;
+  }
+
+  const title = clipText(String(nextAssessment.title || "").trim(), textLimit);
+  const due = clipText(String(nextAssessment.due || "").trim(), textLimit);
+  return title || due ? { title, due } : null;
+}
+
+function buildAskDocumentContext(document, { compact = false } = {}) {
+  if (!document || typeof document !== "object") {
+    return null;
+  }
+
+  const pageVisuals = cleanDocumentVisionPages(document.pageVisuals, {
+    pageLimit: compact ? 1 : 2,
+    textLimit: compact ? 90 : 140
+  });
+  const cleanedContent = cleanDocumentStudyText(document.content);
+  const contentLimit = pageVisuals.length
+    ? (compact ? 420 : 1400)
+    : (compact ? 1200 : 3200);
+
+  return {
+    title: clipText(String(document.title || "").trim(), 180),
+    type: clipText(String(document.type || "").trim(), 120),
+    content: clipText(cleanedContent, contentLimit),
+    pageVisuals
+  };
+}
+
+function isContextWindowError(error) {
+  const message = String(error instanceof Error ? error.message : error || "").toLowerCase();
+  return (
+    message.includes("context window") ||
+    message.includes("maximum context length") ||
+    message.includes("too many tokens") ||
+    message.includes("input exceeds")
+  );
 }
 
 function getRecommendedStudySectionCount(pageCount) {
@@ -703,6 +763,57 @@ async function runWithTimeout(taskFactory, timeoutMs, timeoutLabel) {
   });
 }
 
+async function createConfiguredLocalOcrWorker() {
+  const worker = await createWorker(localOcrLanguage, 1, {
+    cachePath: localOcrCachePath
+  });
+  await worker.setParameters({
+    preserve_interword_spaces: "1",
+    tessedit_pageseg_mode: String(PSM.AUTO),
+    user_defined_dpi: "300"
+  });
+  return worker;
+}
+
+async function getLocalOcrWorker() {
+  if (!localOcrWorkerPromise) {
+    localOcrWorkerPromise = createConfiguredLocalOcrWorker().catch((error) => {
+      localOcrWorkerPromise = null;
+      throw error;
+    });
+  }
+  return localOcrWorkerPromise;
+}
+
+async function recycleLocalOcrWorker() {
+  const workerPromise = localOcrWorkerPromise;
+  localOcrWorkerPromise = null;
+  localOcrWorkerJobCount = 0;
+  if (!workerPromise) {
+    return;
+  }
+  try {
+    const worker = await workerPromise;
+    await worker.terminate();
+  } catch (error) {
+    // Ignore worker teardown failures and allow the next request to recreate it.
+  }
+}
+
+async function runLocalOcrTask(taskFactory) {
+  const previousTask = localOcrQueue.catch(() => {});
+  let releaseQueue = () => {};
+  localOcrQueue = new Promise((resolve) => {
+    releaseQueue = resolve;
+  });
+  await previousTask;
+  try {
+    return await taskFactory();
+  } finally {
+    releaseQueue();
+  }
+}
+
 function applyOcrTranscriptsToPages(pages, ocrByPageNumber) {
   return pages.map((page) => {
     const transcriptText = String(ocrByPageNumber.get(page.pageNumber) || "").trim();
@@ -745,37 +856,37 @@ async function ocrPdfPagesLocally(pages) {
     return pages;
   }
 
-  const worker = await createWorker(localOcrLanguage, 1, {
-    cachePath: localOcrCachePath
-  });
-  const ocrByPageNumber = new Map();
-  try {
-    await worker.setParameters({
-      preserve_interword_spaces: "1",
-      tessedit_pageseg_mode: String(PSM.AUTO),
-      user_defined_dpi: "300"
-    });
-
-    for (const page of pagesNeedingOcr) {
-      const imageBuffer = decodeDataUrlToBuffer(page.imageUrl);
-      if (!imageBuffer?.length) {
-        continue;
+  return runLocalOcrTask(async () => {
+    const worker = await getLocalOcrWorker();
+    const ocrByPageNumber = new Map();
+    try {
+      for (const page of pagesNeedingOcr) {
+        const imageBuffer = decodeDataUrlToBuffer(page.imageUrl);
+        if (!imageBuffer?.length) {
+          continue;
+        }
+        const result = await runWithTimeout(
+          () => worker.recognize(imageBuffer),
+          localOcrTimeoutMs,
+          `Local OCR for page ${page.pageNumber}`
+        );
+        const transcriptText = String(result?.data?.text || "").trim();
+        if (transcriptText) {
+          ocrByPageNumber.set(page.pageNumber, transcriptText);
+        }
       }
-      const result = await runWithTimeout(
-        () => worker.recognize(imageBuffer),
-        localOcrTimeoutMs,
-        `Local OCR for page ${page.pageNumber}`
-      );
-      const transcriptText = String(result?.data?.text || "").trim();
-      if (transcriptText) {
-        ocrByPageNumber.set(page.pageNumber, transcriptText);
-      }
+    } catch (error) {
+      await recycleLocalOcrWorker();
+      throw error;
     }
-  } finally {
-    await worker.terminate();
-  }
 
-  return applyOcrTranscriptsToPages(pages, ocrByPageNumber);
+    localOcrWorkerJobCount += 1;
+    if (localOcrWorkerJobCount >= localOcrRecycleAfterJobs) {
+      await recycleLocalOcrWorker();
+    }
+
+    return applyOcrTranscriptsToPages(pages, ocrByPageNumber);
+  });
 }
 
 async function ocrPdfPagesWithOpenAi(pages) {
@@ -1187,6 +1298,84 @@ function normaliseRevisionResponseMap(value) {
   }, {});
 }
 
+async function requestAskModelAnswer({
+  subjectName,
+  question,
+  recentHistory = [],
+  nextAssessment = null,
+  documentContext = null
+} = {}) {
+  const responsePayload = await callOpenAiJson("responses", {
+    model: "gpt-4o-mini",
+    input: [
+      {
+        role: "system",
+        content: [
+          {
+            type: "input_text",
+            text:
+              "You are a helpful Australian school study support tutor. Explain clearly, use short paragraphs, keep language age-appropriate, and base your help on the provided subject and document context. If worksheet page images are provided, read them directly, including maths questions, formulas, labels, and diagrams. Give guidance, worked steps, and clarification rather than claiming to have unseen information."
+          }
+        ]
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: JSON.stringify(
+              {
+                subjectName,
+                question: clipText(String(question || "").trim(), 800),
+                recentHistory,
+                nextAssessment,
+                document: documentContext
+                  ? {
+                      title: documentContext.title,
+                      type: documentContext.type,
+                      content: documentContext.content,
+                      pageHints: documentContext.pageVisuals.map((page) => ({
+                        pageNumber: page.pageNumber,
+                        text: page.text
+                      }))
+                    }
+                  : null
+              },
+              null,
+              2
+            )
+          },
+          ...((documentContext?.pageVisuals || []).flatMap((page) => {
+            const pageContent = [];
+            if (page.text) {
+              pageContent.push({
+                type: "input_text",
+                text: `Document page ${page.pageNumber} extracted text:\n${page.text}`
+              });
+            }
+            if (page.imageUrl) {
+              pageContent.push({
+                type: "input_image",
+                image_url: page.imageUrl,
+                detail: "high"
+              });
+            }
+            return pageContent;
+          }))
+        ]
+      }
+    ],
+    max_output_tokens: 700
+  });
+
+  const answer = extractResponseText(responsePayload);
+  if (!answer) {
+    throw new Error("OpenAI returned an empty answer.");
+  }
+
+  return answer;
+}
+
 app.post("/api/ask", async (request, response) => {
   try {
     const { subjectName, question, recentHistory = [], nextAssessment = null, document = null } = request.body || {};
@@ -1195,80 +1384,32 @@ app.post("/api/ask", async (request, response) => {
       return;
     }
 
-    const documentContext = document && typeof document === "object"
-      ? {
-          title: String(document.title || "").trim(),
-          type: String(document.type || "").trim(),
-          content: cleanDocumentStudyText(document.content),
-          pageVisuals: cleanDocumentVisionPages(document.pageVisuals, { pageLimit: 4, textLimit: 220 })
-        }
-      : null;
+    const normalDocumentContext = buildAskDocumentContext(document, { compact: false });
+    const compactDocumentContext = buildAskDocumentContext(document, { compact: true });
+    const normalRecentHistory = cleanAskHistoryEntries(recentHistory, { limit: 3, textLimit: 220 });
+    const compactRecentHistory = cleanAskHistoryEntries(recentHistory, { limit: 2, textLimit: 120 });
+    const cleanedAssessment = cleanAskAssessment(nextAssessment);
 
-    const responsePayload = await callOpenAiJson("responses", {
-      model: "gpt-4o-mini",
-      input: [
-        {
-          role: "system",
-          content: [
-            {
-              type: "input_text",
-              text:
-                "You are a helpful Australian school study support tutor. Explain clearly, use short paragraphs, keep language age-appropriate, and base your help on the provided subject and document context. If worksheet page images are provided, read them directly, including maths questions, formulas, labels, and diagrams. Give guidance, worked steps, and clarification rather than claiming to have unseen information."
-            }
-          ]
-        },
-        {
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: JSON.stringify(
-                {
-                  subjectName,
-                  question,
-                  recentHistory,
-                  nextAssessment,
-                  document: documentContext
-                    ? {
-                        title: documentContext.title,
-                        type: documentContext.type,
-                        content: documentContext.content,
-                        pageHints: documentContext.pageVisuals.map((page) => ({
-                          pageNumber: page.pageNumber,
-                          text: page.text
-                        }))
-                      }
-                    : null
-                },
-                null,
-                2
-              )
-            },
-            ...((documentContext?.pageVisuals || []).flatMap((page) => {
-              const pageContent = [
-                {
-                  type: "input_text",
-                  text: `Document page ${page.pageNumber}${page.text ? ` extracted text:\n${page.text}` : ""}`
-                }
-              ];
-              if (page.imageUrl) {
-                pageContent.push({
-                  type: "input_image",
-                  image_url: page.imageUrl,
-                  detail: "high"
-                });
-              }
-              return pageContent;
-            }))
-          ]
-        }
-      ],
-      max_output_tokens: 700
-    });
-
-    const answer = extractResponseText(responsePayload);
-    if (!answer) {
-      throw new Error("OpenAI returned an empty answer.");
+    let answer = "";
+    try {
+      answer = await requestAskModelAnswer({
+        subjectName,
+        question,
+        recentHistory: normalRecentHistory,
+        nextAssessment: cleanedAssessment,
+        documentContext: normalDocumentContext
+      });
+    } catch (error) {
+      if (!isContextWindowError(error)) {
+        throw error;
+      }
+      answer = await requestAskModelAnswer({
+        subjectName,
+        question,
+        recentHistory: compactRecentHistory,
+        nextAssessment: cleanedAssessment,
+        documentContext: compactDocumentContext
+      });
     }
 
     response.json({ answer });

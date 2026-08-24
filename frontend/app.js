@@ -12924,11 +12924,12 @@ async function requestAskAnswer(question, subject, document) {
     : {};
   const pageVisuals = document
     ? await buildDocumentVisionPages(document, {
-        maxPages: 4,
-        maxTextPerPage: 180,
+        maxPages: 2,
+        maxTextPerPage: 120,
         ...pageVisualOptions
       })
     : [];
+  const contentLimit = pageVisuals.length ? 1200 : 3200;
   const responsePayload = await requestApi("/api/ask", {
     subjectName: subject.name,
     question,
@@ -12943,7 +12944,7 @@ async function requestAskAnswer(question, subject, document) {
       ? {
           title: document.title,
           type: document.type,
-          content: clipText(document.content || "Preview text is not available for this document."),
+          content: clipText(document.content || "Preview text is not available for this document.", contentLimit),
           pageVisuals
         }
       : null
@@ -12993,13 +12994,13 @@ function getLandingAskRequestDocument(documentRecord) {
       content: [
         `Focus page: ${pageNumber}`,
         pageText
-          ? `Current page text:\n${pageText}`
+          ? `Current page text:\n${clipText(pageText, 1200)}`
           : "Current page text is limited. Use the supplied page image for the exact worksheet content.",
         documentRecord.studyOverview ? `Document overview:\n${clipText(documentRecord.studyOverview, 600)}` : ""
       ].filter(Boolean).join("\n\n"),
       pageVisualOptions: {
-        maxPages: 4,
-        maxTextPerPage: 180,
+        maxPages: 1,
+        maxTextPerPage: 120,
         prioritizedPageNumbers: [pageNumber]
       }
     };
@@ -13025,17 +13026,17 @@ function getLandingAskRequestDocument(documentRecord) {
       Array.isArray(currentPiece?.bullets) && currentPiece.bullets.length
         ? `Key points:\n${currentPiece.bullets.map((bullet) => `- ${bullet}`).join("\n")}`
         : "",
-      section?.sectionText ? `Source detail:\n${clipText(section.sectionText, 2400)}` : ""
+      section?.sectionText ? `Source detail:\n${clipText(section.sectionText, 1200)}` : ""
     ].filter(Boolean).join("\n\n"),
     pageVisualOptions: prioritizedPageNumbers.length
       ? {
-          maxPages: 4,
-          maxTextPerPage: 180,
+          maxPages: 2,
+          maxTextPerPage: 120,
           prioritizedPageNumbers
         }
       : {
-          maxPages: 4,
-          maxTextPerPage: 180
+          maxPages: 2,
+          maxTextPerPage: 120
         }
   };
 }
@@ -20010,8 +20011,8 @@ async function extractPdfData(file) {
     formData.append("file", file, file.name);
     try {
       return await requestApiFormData("/api/upload/pdf", formData, {
-        timeoutMs: 90_000,
-        timeoutMessage: "PDF OCR took too long. Try a smaller file or start the backend with a working OPENAI_API_KEY."
+        timeoutMs: 240_000,
+        timeoutMessage: "PDF OCR took too long. Try a smaller file or let the backend finish downloading its OCR model, then upload again."
       });
     } catch (error) {
       console.warn("Backend OCR PDF processing failed; using browser-extracted PDF content instead.", error);
