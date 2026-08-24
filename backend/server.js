@@ -548,11 +548,15 @@ function getPdfTextSignal(text) {
   const meaningfulText = getMeaningfulPdfText(text);
   const words = meaningfulText ? meaningfulText.split(/\s+/).filter(Boolean) : [];
   const alphaChars = (meaningfulText.match(/[A-Za-z]/g) || []).length;
+  const digitChars = (meaningfulText.match(/\d/g) || []).length;
+  const mathsSymbolChars = (meaningfulText.match(/[=+\-*/^%<>()[\]{}|\\_~×÷±√∑∫∞≈≠≤≥πθ∆]/g) || []).length;
   const longWords = words.filter((word) => /[A-Za-z]{3,}/.test(word)).length;
   return {
     meaningfulText,
     length: meaningfulText.length,
     alphaChars,
+    digitChars,
+    mathsSymbolChars,
     wordCount: words.length,
     longWordCount: longWords
   };
@@ -560,11 +564,17 @@ function getPdfTextSignal(text) {
 
 function shouldOcrPdfPage(page) {
   const signal = getPdfTextSignal(page?.text);
+  const symbolHeavyLowContext =
+    signal.length >= 80 &&
+    signal.longWordCount < 6 &&
+    signal.alphaChars < 36 &&
+    signal.digitChars + signal.mathsSymbolChars >= 18;
   return (
     signal.length < 80 ||
     signal.longWordCount < 8 ||
     (signal.alphaChars < 28 && signal.wordCount < 18) ||
-    (signal.alphaChars < 48 && signal.length < 180)
+    (signal.alphaChars < 48 && signal.length < 180) ||
+    symbolHeavyLowContext
   );
 }
 
@@ -757,7 +767,11 @@ async function parsePdfBufferWithOcrFallback(buffer) {
   const sparsePages = pdfData.pages.filter((page) => shouldOcrPdfPage(page)).length;
   const needsOcrFallback =
     sparsePages > 0 &&
-    (sparsePages === pdfData.pages.length || getMeaningfulPdfText(pdfData.fullText).length < pdfData.pages.length * 30);
+    (
+      sparsePages === pdfData.pages.length ||
+      sparsePages >= Math.ceil(pdfData.pages.length / 2) ||
+      getMeaningfulPdfText(pdfData.fullText).length < pdfData.pages.length * 30
+    );
 
   if (!needsOcrFallback) {
     return {

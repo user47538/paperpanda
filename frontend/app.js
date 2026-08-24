@@ -2442,6 +2442,14 @@ function getAskDocument() {
   return getAllReaderDocuments(subject || { documents: [] }).find((doc) => doc.id === state.askDocumentId) || null;
 }
 
+function getActiveAskDocument(surface = getActiveAskSurface()) {
+  const subject = getSelectedSubject();
+  if (surface?.kind === "landing") {
+    return getSubjectLandingOpenDocument(subject);
+  }
+  return getAskDocument() || getSelectedDocument();
+}
+
 function getUploadSubject() {
   return state.subjects.find((subject) => subject.id === elements.uploadSubjectSelect.value) || null;
 }
@@ -12840,10 +12848,14 @@ async function requestAskAnswer(question, subject, document) {
     .slice(-4)
     .map((entry) => ({ question: entry.question, answer: entry.answer }));
   const nextAssessment = getNextSubjectAssessment(subject);
+  const pageVisualOptions = document?.pageVisualOptions && typeof document.pageVisualOptions === "object"
+    ? document.pageVisualOptions
+    : {};
   const pageVisuals = document
     ? await buildDocumentVisionPages(document, {
         maxPages: 4,
-        maxTextPerPage: 180
+        maxTextPerPage: 180,
+        ...pageVisualOptions
       })
     : [];
   const responsePayload = await requestApi("/api/ask", {
@@ -12872,6 +12884,89 @@ async function requestAskAnswer(question, subject, document) {
   }
 
   return answer;
+}
+
+function getLandingAskContextLabel(documentRecord) {
+  if (!documentRecord) {
+    return "No document selected for Ask yet.";
+  }
+
+  if (state.subjectLandingView === "original") {
+    const currentPageIndex = getCurrentDocumentPageIndex(documentRecord);
+    const currentPage = getDocumentPages(documentRecord)[currentPageIndex] || null;
+    const pageNumber = Number(currentPage?.pageNumber || currentPageIndex + 1) || 1;
+    return `Asking about: ${documentRecord.title} · page ${pageNumber}`;
+  }
+
+  const pieces = getSubjectLandingSimplifiedPieces(documentRecord);
+  const pieceIndex = Math.max(0, Math.min(state.subjectLandingPieceIndex, Math.max(0, pieces.length - 1)));
+  const currentPiece = pieces[pieceIndex] || null;
+  return currentPiece?.title
+    ? `Asking about: ${documentRecord.title} · ${currentPiece.title}`
+    : `Asking about: ${documentRecord.title}`;
+}
+
+function getLandingAskRequestDocument(documentRecord) {
+  if (!documentRecord) {
+    return null;
+  }
+
+  if (state.subjectLandingView === "original") {
+    const pages = getDocumentPages(documentRecord);
+    const currentPageIndex = getCurrentDocumentPageIndex(documentRecord);
+    const currentPage = pages[currentPageIndex] || null;
+    const pageNumber = Number(currentPage?.pageNumber || currentPageIndex + 1) || 1;
+    const pageText = getDocumentPageText(currentPage);
+    return {
+      ...documentRecord,
+      content: [
+        `Focus page: ${pageNumber}`,
+        pageText
+          ? `Current page text:\n${pageText}`
+          : "Current page text is limited. Use the supplied page image for the exact worksheet content.",
+        documentRecord.studyOverview ? `Document overview:\n${clipText(documentRecord.studyOverview, 600)}` : ""
+      ].filter(Boolean).join("\n\n"),
+      pageVisualOptions: {
+        maxPages: 4,
+        maxTextPerPage: 180,
+        prioritizedPageNumbers: [pageNumber]
+      }
+    };
+  }
+
+  const pieces = getSubjectLandingSimplifiedPieces(documentRecord);
+  const pieceIndex = Math.max(0, Math.min(state.subjectLandingPieceIndex, Math.max(0, pieces.length - 1)));
+  const currentPiece = pieces[pieceIndex] || null;
+  const section = getDocumentSections(documentRecord)[pieceIndex] || getSelectedDocumentSection(documentRecord) || null;
+  const prioritizedPageNumbers = [];
+  if (section?.pageStart && section?.pageEnd) {
+    for (let pageNumber = section.pageStart; pageNumber <= section.pageEnd; pageNumber += 1) {
+      prioritizedPageNumbers.push(pageNumber);
+    }
+  }
+
+  return {
+    ...documentRecord,
+    content: [
+      currentPiece?.badge ? `Focus: ${currentPiece.badge}` : "",
+      currentPiece?.title ? `Section title: ${currentPiece.title}` : "",
+      currentPiece?.summary ? `Simplified summary:\n${currentPiece.summary}` : "",
+      Array.isArray(currentPiece?.bullets) && currentPiece.bullets.length
+        ? `Key points:\n${currentPiece.bullets.map((bullet) => `- ${bullet}`).join("\n")}`
+        : "",
+      section?.sectionText ? `Source detail:\n${clipText(section.sectionText, 2400)}` : ""
+    ].filter(Boolean).join("\n\n"),
+    pageVisualOptions: prioritizedPageNumbers.length
+      ? {
+          maxPages: 4,
+          maxTextPerPage: 180,
+          prioritizedPageNumbers
+        }
+      : {
+          maxPages: 4,
+          maxTextPerPage: 180
+        }
+  };
 }
 
 function getLatestAskAnswer() {
@@ -12923,7 +13018,12 @@ async function compressDocumentPageImage(imageUrl, { maxWidth = 960, quality = 0
   return canvas.toDataURL("image/jpeg", quality);
 }
 
-async function buildDocumentVisionPages(documentRecord, { maxPages = 4, maxTextPerPage = 220, sparseThreshold = 140 } = {}) {
+async function buildDocumentVisionPages(documentRecord, {
+  maxPages = 4,
+  maxTextPerPage = 220,
+  sparseThreshold = 140,
+  prioritizedPageNumbers = []
+} = {}) {
   await hydrateDocumentPreviewImages(documentRecord);
   const pages = getDocumentPages(documentRecord);
   if (!pages.length) {
@@ -12935,15 +13035,31 @@ async function buildDocumentVisionPages(documentRecord, { maxPages = 4, maxTextP
       pageNumber: Number(page?.pageNumber || index + 1) || index + 1,
       text: clipText(getDocumentPageText(page), maxTextPerPage),
       imageUrl: String(page?.imageUrl || "").trim(),
-      isSparse: getMeaningfulPdfText(page?.text).length < sparseThreshold
+      isSparse: shouldUseBackendOcrForPdfPage(page) || getMeaningfulPdfText(page?.text).length < sparseThreshold
     }));
 
+  const prioritizedSet = new Set(
+    (Array.isArray(prioritizedPageNumbers) ? prioritizedPageNumbers : [])
+      .map((pageNumber) => Number(pageNumber) || 0)
+      .filter((pageNumber) => pageNumber > 0)
+  );
+  const prioritizedPages = candidatePages.filter((page) => prioritizedSet.has(page.pageNumber) && page.imageUrl);
   const sparsePages = candidatePages.filter((page) => page.imageUrl && page.isSparse);
   const fallbackPages =
     !sparsePages.length && getMeaningfulPdfText(documentRecord?.content).length < 220
       ? candidatePages.filter((page) => page.imageUrl)
       : [];
-  const selectedPages = (sparsePages.length ? sparsePages : fallbackPages).slice(0, maxPages);
+  const selectedPages = [...prioritizedPages];
+  const fillPages = sparsePages.length ? sparsePages : fallbackPages;
+  fillPages.forEach((page) => {
+    if (selectedPages.length >= maxPages) {
+      return;
+    }
+    if (selectedPages.some((candidate) => candidate.pageNumber === page.pageNumber)) {
+      return;
+    }
+    selectedPages.push(page);
+  });
 
   const visuals = [];
   for (const page of selectedPages) {
@@ -13847,9 +13963,7 @@ function renderAskContext() {
   }
   const landingSurface = getSubjectLandingAskSurface();
   if (landingSurface?.context) {
-    landingSurface.context.textContent = askDocument
-      ? `Asking about: ${askDocument.title}`
-      : "No document selected for Ask yet.";
+    landingSurface.context.textContent = getLandingAskContextLabel(getSubjectLandingOpenDocument(subject));
   }
   if (landingSurface?.response) {
     const landingResponse = state.subjectLandingAskStatus || getAskIdleStatus(landingSurface);
@@ -19060,11 +19174,13 @@ function buildPracticeGrammarSpotlight(subject) {
 
 async function handleAsk() {
   const subject = getSelectedSubject();
-  const document = getAskDocument() || getSelectedDocument();
   const activeSurface = getActiveAskSurface();
   if (!subject) {
     return;
   }
+  const document = activeSurface?.kind === "landing"
+    ? getLandingAskRequestDocument(getSubjectLandingOpenDocument(subject))
+    : getActiveAskDocument(activeSurface);
 
   const question = activeSurface?.input?.value.trim() || "";
   if (!question) {
@@ -19125,7 +19241,9 @@ function handleAskListen() {
   }
 
   const subject = getSelectedSubject();
-  const document = getAskDocument() || getSelectedDocument();
+  const document = activeSurface?.kind === "landing"
+    ? getLandingAskRequestDocument(getSubjectLandingOpenDocument(subject))
+    : getActiveAskDocument(activeSurface);
   const question = activeSurface?.input?.value.trim() || "";
   const playAnswer = (answerToPlay) => {
     speakTextWithOpenAi(answerToPlay, {
@@ -19613,11 +19731,15 @@ function getPdfTextSignal(text) {
   const meaningfulText = getMeaningfulPdfText(text);
   const words = meaningfulText ? meaningfulText.split(/\s+/).filter(Boolean) : [];
   const alphaChars = (meaningfulText.match(/[A-Za-z]/g) || []).length;
+  const digitChars = (meaningfulText.match(/\d/g) || []).length;
+  const mathsSymbolChars = (meaningfulText.match(/[=+\-*/^%<>()[\]{}|\\_~×÷±√∑∫∞≈≠≤≥πθ∆]/g) || []).length;
   const longWords = words.filter((word) => /[A-Za-z]{3,}/.test(word)).length;
   return {
     meaningfulText,
     length: meaningfulText.length,
     alphaChars,
+    digitChars,
+    mathsSymbolChars,
     wordCount: words.length,
     longWordCount: longWords
   };
@@ -19625,11 +19747,17 @@ function getPdfTextSignal(text) {
 
 function shouldUseBackendOcrForPdfPage(page) {
   const signal = getPdfTextSignal(page?.text);
+  const symbolHeavyLowContext =
+    signal.length >= 80 &&
+    signal.longWordCount < 6 &&
+    signal.alphaChars < 36 &&
+    signal.digitChars + signal.mathsSymbolChars >= 18;
   return (
     signal.length < 80 ||
     signal.longWordCount < 8 ||
     (signal.alphaChars < 28 && signal.wordCount < 18) ||
-    (signal.alphaChars < 48 && signal.length < 180)
+    (signal.alphaChars < 48 && signal.length < 180) ||
+    symbolHeavyLowContext
   );
 }
 
@@ -19640,7 +19768,14 @@ function shouldUseBackendPdfOcr(pdfData) {
   }
 
   const sparsePages = pages.filter((page) => shouldUseBackendOcrForPdfPage(page)).length;
-  return sparsePages > 0 && (sparsePages === pages.length || getPdfTextSignal(pdfData.fullText).length < pages.length * 60);
+  return (
+    sparsePages > 0 &&
+    (
+      sparsePages === pages.length ||
+      sparsePages >= Math.ceil(pages.length / 2) ||
+      getPdfTextSignal(pdfData.fullText).length < pages.length * 60
+    )
+  );
 }
 
 async function renderPdfPageToDataUrl(page) {
