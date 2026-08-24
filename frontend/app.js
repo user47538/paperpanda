@@ -18,6 +18,7 @@ const subjectSnapshotRestoreTimeoutMs = 1_500;
 const GOOGLE_DOCS_SCOPE = "https://www.googleapis.com/auth/documents";
 const GOOGLE_IDENTITY_SCRIPT_ID = "google-identity-client";
 const GOOGLE_IDENTITY_SCRIPT_URL = "https://accounts.google.com/gsi/client";
+const STANDALONE_ASK_CHANNEL_NAME = "paperpanda-standalone-ask";
 
 function resolveDefaultApiBaseUrl() {
   const configuredBaseUrl = String(import.meta.env.VITE_API_BASE_URL || "").trim().replace(/\/$/, "");
@@ -66,6 +67,7 @@ let remoteSubjectsSaveWaiters = [];
 let remoteSettingsSaveQueuedSnapshot = null;
 let remoteSettingsSaveInFlight = false;
 let googleIdentityClientPromise = null;
+let standaloneAskChannel = null;
 const defaultGrade = "7";
 const defaultPageBackgroundColor = "#FBF7F0";
 const documentQuizPassPoints = 10;
@@ -3501,19 +3503,27 @@ function buildStandaloneDocumentPageHtml(payload, stylesMarkup = "") {
       }
 
       function askInApp() {
+        const askPayload = {
+          subjectId: payload.subjectId || "",
+          documentId: payload.documentId || "",
+          view: state.view,
+          pieceIndex: state.pieceIndex,
+          pageIndex: state.pageIndex
+        };
         if (window.opener && typeof window.opener.__paperpandaOpenStandaloneAsk === "function") {
-          const opened = window.opener.__paperpandaOpenStandaloneAsk({
-            subjectId: payload.subjectId || "",
-            documentId: payload.documentId || "",
-            view: state.view,
-            pieceIndex: state.pieceIndex,
-            pageIndex: state.pageIndex
-          });
+          const opened = window.opener.__paperpandaOpenStandaloneAsk(askPayload);
           if (opened) {
             window.opener.focus();
             window.close();
             return;
           }
+        }
+        if (typeof BroadcastChannel === "function") {
+          const channel = new BroadcastChannel(${JSON.stringify(STANDALONE_ASK_CHANNEL_NAME)});
+          channel.postMessage(askPayload);
+          channel.close();
+          window.close();
+          return;
         }
         window.alert("Open this document in the main PaperPanda window to use Ask Panda.");
       }
@@ -3686,6 +3696,21 @@ function openSubjectLandingDocument(subject, documentId) {
   if (subject && isWholeStudyDocument(documentRecord)) {
     void ensureDocumentStudyPlan(documentRecord, subject).then(() => render()).catch(() => render());
   }
+}
+
+function initStandaloneAskBridge() {
+  if (standaloneAskChannel || typeof BroadcastChannel !== "function") {
+    return;
+  }
+
+  standaloneAskChannel = new BroadcastChannel(STANDALONE_ASK_CHANNEL_NAME);
+  standaloneAskChannel.onmessage = (event) => {
+    const payload = event?.data && typeof event.data === "object" ? event.data : {};
+    const opened = window.__paperpandaOpenStandaloneAsk?.(payload);
+    if (opened && typeof window.focus === "function") {
+      window.focus();
+    }
+  };
 }
 
 window.__paperpandaOpenStandaloneAsk = function __paperpandaOpenStandaloneAsk({
@@ -11815,6 +11840,10 @@ function normaliseDocument(documentRecord) {
     studyOverview: String(documentRecord.studyOverview || "").trim(),
     studyPlanStatus: String(documentRecord.studyPlanStatus || "idle"),
     studyPlanVersion: Math.max(0, Number(documentRecord.studyPlanVersion || 0) || 0),
+    readabilityWarning: String(documentRecord.readabilityWarning || "").trim(),
+    ocrAttempted: Boolean(documentRecord.ocrAttempted),
+    ocrUsed: Boolean(documentRecord.ocrUsed),
+    ocrError: String(documentRecord.ocrError || "").trim(),
     studySections: Array.isArray(documentRecord.studySections)
       ? documentRecord.studySections.map(normaliseStudySection).filter((section) => section.sectionText)
       : [],
@@ -12799,11 +12828,28 @@ async function requestApi(endpoint, payload, expectBlob = false, options = {}) {
   return expectBlob ? response.blob() : response.json();
 }
 
-async function requestApiFormData(endpoint, formData) {
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-    method: "POST",
-    body: formData
-  });
+async function requestApiFormData(endpoint, formData, options = {}) {
+  const rawTimeoutMs = Number(options.timeoutMs);
+  const timeoutMs = Number.isFinite(rawTimeoutMs) && rawTimeoutMs > 0 ? Math.max(1_000, rawTimeoutMs) : 0;
+  const abortController = timeoutMs ? new AbortController() : null;
+  const timeoutHandle = abortController ? setTimeout(() => abortController.abort(), timeoutMs) : null;
+  let response;
+  try {
+    response = await fetch(`${API_BASE_URL}${endpoint}`, {
+      method: options.method || "POST",
+      body: formData,
+      signal: abortController?.signal
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(options.timeoutMessage || "The request timed out.");
+    }
+    throw error instanceof Error ? error : new Error("Request failed.");
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+  }
 
   const responseText = await response.text();
   let parsedPayload = null;
@@ -13222,6 +13268,54 @@ function closeSubjectLandingAsk({ stopAudio = true } = {}) {
     stopListening();
   }
   resetSubjectLandingAskState();
+}
+
+function openDockAskForDocument(documentRecord) {
+  if (!documentRecord) {
+    return;
+  }
+
+  state.selectedDocumentId = documentRecord.id;
+  state.askDocumentId = documentRecord.id;
+  elements.askInput.value = "";
+  render();
+  renderAskContext();
+  elements.askResponse.textContent = "Ask a question about the selected document.";
+  focusAskComposer();
+}
+
+function openAskForDocument(documentRecord, { preferOriginalView = false } = {}) {
+  if (!documentRecord) {
+    return;
+  }
+
+  const subject = getSelectedSubject();
+  const shouldUseLandingAsk = Boolean(
+    subject &&
+    state.currentView === "subjects" &&
+    isWholeStudyDocument(documentRecord)
+  );
+
+  if (!shouldUseLandingAsk) {
+    openDockAskForDocument(documentRecord);
+    return;
+  }
+
+  state.subjectWorkspaceExpanded = false;
+  state.subjectWorkspaceExpandedSubjectId = "";
+  openSubjectLandingDocument(subject, documentRecord.id);
+  state.subjectLandingView = preferOriginalView && getDocumentPages(documentRecord).length ? "original" : "simple";
+  const landingDocument = getSubjectLandingOpenDocument(subject) || documentRecord;
+  const pieces = getSubjectLandingSimplifiedPieces(landingDocument);
+  const pieceIndex = Math.max(0, Math.min(state.subjectLandingPieceIndex, Math.max(0, pieces.length - 1)));
+  const piece = pieces[pieceIndex] || null;
+  const currentPageIndex = getCurrentDocumentPageIndex(landingDocument);
+  const currentPage = getDocumentPages(landingDocument)[currentPageIndex] || null;
+  const pageNumber = Number(currentPage?.pageNumber || currentPageIndex + 1) || 1;
+  openSubjectLandingAsk(landingDocument, {
+    pageNumber,
+    pieceTitle: piece?.title || ""
+  });
 }
 
 function openSubjectLandingAsk(documentRecord, { pageNumber = 1, pieceTitle = "" } = {}) {
@@ -14370,12 +14464,7 @@ function renderDocuments() {
       }
 
       if (button.dataset.action === "ask") {
-        state.askDocumentId = documentRecord.id;
-        elements.askInput.value = "";
-        renderDocuments();
-        renderAskContext();
-        elements.askResponse.textContent = "Ask a question about the selected document.";
-        focusAskComposer();
+        openAskForDocument(documentRecord);
       }
 
       if (button.dataset.action === "revision") {
@@ -14920,11 +15009,9 @@ function attachReaderActionHandlers() {
       }
 
       if (action === "ask" && selectedDocument) {
-        state.askDocumentId = selectedDocument.id;
-        elements.askInput.value = "";
-        renderAskContext();
-        elements.askResponse.textContent = "Ask a question about the selected document.";
-        focusAskComposer();
+        openAskForDocument(selectedDocument, {
+          preferOriginalView: Boolean(getDocumentPages(selectedDocument).length)
+        });
       }
     });
   });
@@ -15017,6 +15104,14 @@ function deleteDocuments(documentIds) {
     return;
   }
   const documentRecordsToDelete = subject.documents.filter((documentRecord) => uniqueDocumentIds.includes(documentRecord.id));
+  const nextPageIndexes = { ...(state.currentDocumentPageIndexes || {}) };
+  uniqueDocumentIds.forEach((documentId) => {
+    delete nextPageIndexes[documentId];
+  });
+  const shouldResetSubjectLanding = documentRecordsToDelete.some((documentRecord) => {
+    const bundleId = documentRecord.uploadGroupId || documentRecord.id;
+    return state.subjectLandingOpenDocumentId === documentRecord.id || state.subjectLandingOpenDocumentId === bundleId;
+  });
 
   if (uniqueDocumentIds.includes(state.listeningDocumentId)) {
     stopListening();
@@ -15033,6 +15128,14 @@ function deleteDocuments(documentIds) {
   }
   if (uniqueDocumentIds.includes(state.askDocumentId)) {
     state.askDocumentId = getReaderDocuments(subject)[0]?.id || getRevisionReaderDocuments(subject)[0]?.id || null;
+  }
+  state.currentDocumentPageIndexes = nextPageIndexes;
+  if (shouldResetSubjectLanding) {
+    state.subjectLandingOpenDocumentId = "";
+    state.subjectLandingView = "simple";
+    state.subjectLandingPieceIndex = 0;
+    state.subjectLandingSubjectMenuOpen = false;
+    closeSubjectLandingAsk();
   }
   syncAutoWatchForSubject(subject);
   persistSubjects();
@@ -19656,8 +19759,15 @@ function buildFallbackStudyPlan(documentRecord) {
 }
 
 function getDocumentReadabilityWarning(documentRecord) {
+  const storedWarning = String(documentRecord?.readabilityWarning || "").trim();
+  if (storedWarning) {
+    return storedWarning;
+  }
+
   if (!documentRecord?.ocrAttempted || documentRecord?.ocrUsed) {
-    return "";
+    return !getMeaningfulPdfText(documentRecord?.content).length && Array.isArray(documentRecord?.pages) && documentRecord.pages.length
+      ? "PaperPanda could not find enough readable text in this document. Upload a searchable PDF with selectable text or a cleaner export."
+      : "";
   }
 
   const errorDetail = String(documentRecord.ocrError || "").trim();
@@ -19696,13 +19806,14 @@ function createWholeStudyDocumentRecord(fileName, flags, originalFile, extracted
     {
       title: sanitizedName,
       type: flags.classNotes ? "Class Notes" : flags.assessment ? "Assessment" : flags.homework ? "Homework" : "Document",
-      content: fullText || readabilityWarning || "No readable text was detected in this document."
+      content: fullText
     },
     flags
   );
   record.originalFile = originalFile;
   record.previewImageUrl = firstPagePreview;
   record.pages = pages;
+  record.readabilityWarning = readabilityWarning;
   record.ocrAttempted = ocrAttempted;
   record.ocrUsed = ocrUsed;
   record.ocrError = ocrError;
@@ -19898,7 +20009,10 @@ async function extractPdfData(file) {
     const formData = new FormData();
     formData.append("file", file, file.name);
     try {
-      return await requestApiFormData("/api/upload/pdf", formData);
+      return await requestApiFormData("/api/upload/pdf", formData, {
+        timeoutMs: 90_000,
+        timeoutMessage: "PDF OCR took too long. Try a smaller file or start the backend with a working OPENAI_API_KEY."
+      });
     } catch (error) {
       console.warn("Backend OCR PDF processing failed; using browser-extracted PDF content instead.", error);
       return {
@@ -20196,7 +20310,7 @@ async function readUploadedDocument(file, flags) {
     const content = await extractDocxText(file);
     const records = [
       createWholeStudyDocumentRecord(file.name, flags, originalFile, {
-        fullText: content || "No readable text was detected in this document.",
+        fullText: String(content || "").trim(),
         pages: []
       })
     ];
@@ -20209,7 +20323,7 @@ async function readUploadedDocument(file, flags) {
     const content = await extractPptxText(file);
     const records = [
       createWholeStudyDocumentRecord(file.name, flags, originalFile, {
-        fullText: content || "No readable text was detected in this presentation.",
+        fullText: String(content || "").trim(),
         pages: []
       })
     ];
@@ -21564,4 +21678,5 @@ void migrateLegacyBackgroundAssets();
 void hydrateBackgroundAssets();
 restoreSubjects();
 void restoreSessionUser();
+initStandaloneAskBridge();
 render();
