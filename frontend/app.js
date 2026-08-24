@@ -12787,6 +12787,10 @@ async function requestDocumentStudyPlan(documentRecord, subject) {
           return result;
         }, [])
     : [];
+  const pageVisuals = await buildDocumentVisionPages(documentRecord, {
+    maxPages: 6,
+    maxTextPerPage: 220
+  });
 
   return requestApi("/api/document/study-plan", {
     subjectName: subject.name,
@@ -12794,7 +12798,8 @@ async function requestDocumentStudyPlan(documentRecord, subject) {
     type: documentRecord.type,
     pageCount: Array.isArray(documentRecord.pages) ? documentRecord.pages.length : 0,
     content: clipText(documentRecord.content || "", pageExcerpts.length ? 5000 : 24000),
-    pageExcerpts
+    pageExcerpts,
+    pageVisuals
   });
 }
 
@@ -12803,6 +12808,12 @@ async function requestAskAnswer(question, subject, document) {
     .slice(-4)
     .map((entry) => ({ question: entry.question, answer: entry.answer }));
   const nextAssessment = getNextSubjectAssessment(subject);
+  const pageVisuals = document
+    ? await buildDocumentVisionPages(document, {
+        maxPages: 4,
+        maxTextPerPage: 180
+      })
+    : [];
   const responsePayload = await requestApi("/api/ask", {
     subjectName: subject.name,
     question,
@@ -12817,7 +12828,8 @@ async function requestAskAnswer(question, subject, document) {
       ? {
           title: document.title,
           type: document.type,
-          content: clipText(document.content || "Preview text is not available for this document.")
+          content: clipText(document.content || "Preview text is not available for this document."),
+          pageVisuals
         }
       : null
   });
@@ -12847,6 +12859,75 @@ function getAskIdleStatus(surface = getActiveAskSurface()) {
   return surface?.kind === "landing"
     ? "Write a question, then choose Listen to response."
     : "Write a question, then choose Listen to response.";
+}
+
+function loadImageFromUrl(url) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Image could not be loaded."));
+    image.src = url;
+  });
+}
+
+async function compressDocumentPageImage(imageUrl, { maxWidth = 960, quality = 0.72 } = {}) {
+  const source = String(imageUrl || "").trim();
+  if (!source || !/^data:image\//i.test(source)) {
+    return source;
+  }
+
+  const image = await loadImageFromUrl(source);
+  const scale = Math.min(1, maxWidth / Math.max(1, image.naturalWidth || image.width || maxWidth));
+  const targetWidth = Math.max(1, Math.round((image.naturalWidth || image.width || maxWidth) * scale));
+  const targetHeight = Math.max(1, Math.round((image.naturalHeight || image.height || maxWidth) * scale));
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return source;
+  }
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+  context.drawImage(image, 0, 0, targetWidth, targetHeight);
+  return canvas.toDataURL("image/jpeg", quality);
+}
+
+async function buildDocumentVisionPages(documentRecord, { maxPages = 4, maxTextPerPage = 220, sparseThreshold = 140 } = {}) {
+  const pages = Array.isArray(documentRecord?.pages) ? documentRecord.pages : [];
+  if (!pages.length) {
+    return [];
+  }
+
+  const candidatePages = pages
+    .map((page, index) => ({
+      pageNumber: Number(page?.pageNumber || index + 1) || index + 1,
+      text: clipText(getDocumentPageText(page), maxTextPerPage),
+      imageUrl: String(page?.imageUrl || "").trim(),
+      isSparse: getMeaningfulPdfText(page?.text).length < sparseThreshold
+    }));
+
+  const sparsePages = candidatePages.filter((page) => page.imageUrl && page.isSparse);
+  const fallbackPages =
+    !sparsePages.length && getMeaningfulPdfText(documentRecord?.content).length < 220
+      ? candidatePages.filter((page) => page.imageUrl)
+      : [];
+  const selectedPages = (sparsePages.length ? sparsePages : fallbackPages).slice(0, maxPages);
+
+  const visuals = [];
+  for (const page of selectedPages) {
+    let imageUrl = page.imageUrl;
+    try {
+      imageUrl = await compressDocumentPageImage(page.imageUrl, { maxWidth: 960, quality: 0.72 });
+    } catch (error) {
+      imageUrl = page.imageUrl;
+    }
+    visuals.push({
+      pageNumber: page.pageNumber,
+      text: page.text,
+      imageUrl
+    });
+  }
+
+  return visuals;
 }
 
 function getAskReadyStatus() {
@@ -19079,7 +19160,7 @@ function createId() {
   return `doc-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-const STUDY_PLAN_VERSION = 2;
+const STUDY_PLAN_VERSION = 3;
 
 function createDocumentRecord({ title, type, content }) {
   return {
@@ -19475,14 +19556,38 @@ function getMeaningfulPdfText(text) {
     .trim();
 }
 
+function getPdfTextSignal(text) {
+  const meaningfulText = getMeaningfulPdfText(text);
+  const words = meaningfulText ? meaningfulText.split(/\s+/).filter(Boolean) : [];
+  const alphaChars = (meaningfulText.match(/[A-Za-z]/g) || []).length;
+  const longWords = words.filter((word) => /[A-Za-z]{3,}/.test(word)).length;
+  return {
+    meaningfulText,
+    length: meaningfulText.length,
+    alphaChars,
+    wordCount: words.length,
+    longWordCount: longWords
+  };
+}
+
+function shouldUseBackendOcrForPdfPage(page) {
+  const signal = getPdfTextSignal(page?.text);
+  return (
+    signal.length < 80 ||
+    signal.longWordCount < 8 ||
+    (signal.alphaChars < 28 && signal.wordCount < 18) ||
+    (signal.alphaChars < 48 && signal.length < 180)
+  );
+}
+
 function shouldUseBackendPdfOcr(pdfData) {
   const pages = Array.isArray(pdfData?.pages) ? pdfData.pages : [];
   if (!pages.length) {
     return false;
   }
 
-  const sparsePages = pages.filter((page) => getMeaningfulPdfText(page.text).length < 40).length;
-  return sparsePages > 0 && (sparsePages === pages.length || getMeaningfulPdfText(pdfData.fullText).length < pages.length * 30);
+  const sparsePages = pages.filter((page) => shouldUseBackendOcrForPdfPage(page)).length;
+  return sparsePages > 0 && (sparsePages === pages.length || getPdfTextSignal(pdfData.fullText).length < pages.length * 60);
 }
 
 async function renderPdfPageToDataUrl(page) {

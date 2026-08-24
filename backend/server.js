@@ -195,6 +195,24 @@ function cleanDocumentStudyPageExcerpts(pageExcerpts) {
     .slice(0, 90);
 }
 
+function cleanDocumentVisionPages(pageVisuals, { pageLimit = 6, textLimit = 260 } = {}) {
+  if (!Array.isArray(pageVisuals)) {
+    return [];
+  }
+
+  return pageVisuals
+    .map((page, index) => {
+      const imageUrl = String(page?.imageUrl || "").trim();
+      return {
+        pageNumber: Math.max(1, Number(page?.pageNumber || index + 1) || index + 1),
+        text: clipText(String(page?.text || "").replace(/\s+/g, " ").trim(), textLimit),
+        imageUrl
+      };
+    })
+    .filter((page) => page.imageUrl && (/^data:image\//i.test(page.imageUrl) || /^https?:\/\//i.test(page.imageUrl)))
+    .slice(0, pageLimit);
+}
+
 function getRecommendedStudySectionCount(pageCount) {
   const totalPages = Math.max(1, Number(pageCount || 0) || 1);
   if (totalPages <= 1) {
@@ -526,8 +544,28 @@ function getMeaningfulPdfText(text) {
     .trim();
 }
 
+function getPdfTextSignal(text) {
+  const meaningfulText = getMeaningfulPdfText(text);
+  const words = meaningfulText ? meaningfulText.split(/\s+/).filter(Boolean) : [];
+  const alphaChars = (meaningfulText.match(/[A-Za-z]/g) || []).length;
+  const longWords = words.filter((word) => /[A-Za-z]{3,}/.test(word)).length;
+  return {
+    meaningfulText,
+    length: meaningfulText.length,
+    alphaChars,
+    wordCount: words.length,
+    longWordCount: longWords
+  };
+}
+
 function shouldOcrPdfPage(page) {
-  return getMeaningfulPdfText(page?.text).length < 40;
+  const signal = getPdfTextSignal(page?.text);
+  return (
+    signal.length < 80 ||
+    signal.longWordCount < 8 ||
+    (signal.alphaChars < 28 && signal.wordCount < 18) ||
+    (signal.alphaChars < 48 && signal.length < 180)
+  );
 }
 
 function rebuildPdfTextIndexes(pages) {
@@ -582,7 +620,7 @@ async function ocrPdfPagesWithOpenAi(pages) {
             {
               type: "input_text",
               text:
-                "You extract worksheet text from school PDF page images. Return only JSON. Read all visible text carefully. Preserve headings, labels, numbered questions, and answer lines where readable. Do not summarise. If a page has little or no readable text, return an empty string for that page."
+                "You extract worksheet text from school PDF page images. Return only JSON. Read all visible text carefully. Preserve headings, labels, numbered questions, answer lines, mathematical symbols, equations, units, tables, and multiple-choice options where readable. Do not summarise. If a page has little or no readable text, return an empty string for that page."
             }
           ]
         },
@@ -955,6 +993,15 @@ app.post("/api/ask", async (request, response) => {
       return;
     }
 
+    const documentContext = document && typeof document === "object"
+      ? {
+          title: String(document.title || "").trim(),
+          type: String(document.type || "").trim(),
+          content: cleanDocumentStudyText(document.content),
+          pageVisuals: cleanDocumentVisionPages(document.pageVisuals, { pageLimit: 4, textLimit: 220 })
+        }
+      : null;
+
     const responsePayload = await callOpenAiJson("responses", {
       model: "gpt-4o-mini",
       input: [
@@ -964,7 +1011,7 @@ app.post("/api/ask", async (request, response) => {
             {
               type: "input_text",
               text:
-                "You are a helpful Australian school study support tutor. Explain clearly, use short paragraphs, keep language age-appropriate, and base your help on the provided subject and document context. Give guidance, examples, steps, and clarification rather than claiming to have unseen information."
+                "You are a helpful Australian school study support tutor. Explain clearly, use short paragraphs, keep language age-appropriate, and base your help on the provided subject and document context. If worksheet page images are provided, read them directly, including maths questions, formulas, labels, and diagrams. Give guidance, worked steps, and clarification rather than claiming to have unseen information."
             }
           ]
         },
@@ -979,16 +1026,42 @@ app.post("/api/ask", async (request, response) => {
                   question,
                   recentHistory,
                   nextAssessment,
-                  document
+                  document: documentContext
+                    ? {
+                        title: documentContext.title,
+                        type: documentContext.type,
+                        content: documentContext.content,
+                        pageHints: documentContext.pageVisuals.map((page) => ({
+                          pageNumber: page.pageNumber,
+                          text: page.text
+                        }))
+                      }
+                    : null
                 },
                 null,
                 2
               )
-            }
+            },
+            ...((documentContext?.pageVisuals || []).flatMap((page) => {
+              const pageContent = [
+                {
+                  type: "input_text",
+                  text: `Document page ${page.pageNumber}${page.text ? ` extracted text:\n${page.text}` : ""}`
+                }
+              ];
+              if (page.imageUrl) {
+                pageContent.push({
+                  type: "input_image",
+                  image_url: page.imageUrl,
+                  detail: "high"
+                });
+              }
+              return pageContent;
+            }))
           ]
         }
       ],
-      max_output_tokens: 500
+      max_output_tokens: 700
     });
 
     const answer = extractResponseText(responsePayload);
@@ -1113,11 +1186,12 @@ app.post("/api/document/study-plan", async (request, response) => {
     const pageCount = Number(request.body?.pageCount || 0);
     const content = cleanDocumentStudyText(request.body?.content);
     const pageExcerpts = cleanDocumentStudyPageExcerpts(request.body?.pageExcerpts);
+    const pageVisuals = cleanDocumentVisionPages(request.body?.pageVisuals, { pageLimit: 6, textLimit: 260 });
     const effectivePageCount = pageCount || pageExcerpts.length || Math.max(1, Math.ceil(content.length / 1800));
     const sectionCountGuidance = getStudyPlanSectionCountGuidance(effectivePageCount);
 
-    if (!subjectName || !title || !content) {
-      response.status(400).json({ error: "subjectName, title, and content are required." });
+    if (!subjectName || !title || (!content && !pageExcerpts.length && !pageVisuals.length)) {
+      response.status(400).json({ error: "subjectName, title, and readable document context are required." });
       return;
     }
 
@@ -1130,7 +1204,7 @@ app.post("/api/document/study-plan", async (request, response) => {
             {
               type: "input_text",
               text:
-                "You are organising a school study document for a student. Return only JSON. Your job is to act like a sharp tutor who decides what is genuinely worth learning for the syllabus and assessed work. Surface the core knowledge, vocabulary, processes, evidence, examples, arguments, and success criteria the student must actually know to succeed in the unit. Break the document into sequential study sections. Make the section titles useful and specific. Preserve subject detail. For maths or science, name the actual concepts, formulas, processes, and examples covered. For humanities or English, name the actual themes, source skills, arguments, text ideas, and evidence focus. Ignore decorative, repetitive, or administrative text unless it directly affects the assessed task. Also create a short end-of-document quiz. Do not use markdown in the JSON."
+                "You are organising a school study document for a student. Return only JSON. Your job is to act like a sharp tutor who decides what is genuinely worth learning for the syllabus and assessed work. Surface the core knowledge, vocabulary, processes, evidence, examples, arguments, success criteria, and any worksheet questions or worked examples the student must actually know. Break the document into sequential study sections. Make the section titles useful and specific. Preserve subject detail. For maths or science, name the actual concepts, formulas, processes, questions, and examples covered. Read any provided page images directly, including mathematical notation, tables, diagrams, labels, and answer choices. Ignore decorative, repetitive, or administrative text unless it directly affects the assessed task. Also create a short end-of-document quiz. Do not use markdown in the JSON."
             }
           ]
         },
@@ -1147,9 +1221,13 @@ app.post("/api/document/study-plan", async (request, response) => {
                     type,
                     pageCount: effectivePageCount,
                     targetSectionCount: sectionCountGuidance.target,
-                    content
+                    content: content || "Preview text is limited. Use the supplied page excerpts and page images."
                   },
                   pageExcerpts,
+                  pageVisuals: pageVisuals.map((page) => ({
+                    pageNumber: page.pageNumber,
+                    text: page.text
+                  })),
                   outputSchema: {
                     overview: "string",
                     importantTerms: ["string"],
@@ -1198,7 +1276,23 @@ app.post("/api/document/study-plan", async (request, response) => {
                 null,
                 2
               )
-            }
+            },
+            ...pageVisuals.flatMap((page) => {
+              const pageContent = [
+                {
+                  type: "input_text",
+                  text: `Document page ${page.pageNumber}${page.text ? ` extracted text:\n${page.text}` : ""}`
+                }
+              ];
+              if (page.imageUrl) {
+                pageContent.push({
+                  type: "input_image",
+                  image_url: page.imageUrl,
+                  detail: "high"
+                });
+              }
+              return pageContent;
+            })
           ]
         }
       ],
