@@ -1295,6 +1295,25 @@ async function requestAskModelAnswer({
   nextAssessment = null,
   documentContext = null
 } = {}) {
+  const mathsAskSource = [
+    subjectName,
+    question,
+    documentContext?.title,
+    documentContext?.type,
+    documentContext?.content,
+    ...(Array.isArray(documentContext?.pageVisuals)
+      ? documentContext.pageVisuals.flatMap((page) => [page?.text || ""])
+      : [])
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const isLikelyMathsAsk = /(?:^|\b)(maths?|mathematics?|numeracy|algebra|equation|fraction|decimal|percentage|integer|ratio|geometry|perimeter|area|volume|probability|statistics|solve|calculate|working)\b/i.test(mathsAskSource)
+    || /[=+\-*/^%<>()[\]{}|\\_~×÷±√∑∫∞≈≠≤≥πθ∆]/.test(mathsAskSource);
+  const baseTutorInstruction =
+    "You are a helpful Australian school study support tutor. Start with the direct answer immediately, keep the response concise, and use simple age-appropriate language. Base your help only on the provided subject and document context. If worksheet page images are provided, read them directly, including maths questions, formulas, labels, and diagrams. Give guidance, worked steps, and clarification rather than claiming to have unseen information.";
+  const mathsTutorInstruction = isLikelyMathsAsk
+    ? "For maths questions, explain it at about an Australian Year 7 high school level. Keep only the absolute necessary information. Use this exact structure: first write 'What it is asking:' followed by one very short sentence. Then write 'Steps:' followed by a short numbered list with 3 to 5 steps. Keep each step simple and practical. Do not add background theory, extra tips, or multiple methods unless they are required to solve the question. If a formula is needed, include only that formula."
+    : "";
   const responsePayload = await callOpenAiJson("responses", {
     model: "gpt-4o-mini",
     input: [
@@ -1303,8 +1322,7 @@ async function requestAskModelAnswer({
         content: [
           {
             type: "input_text",
-            text:
-              "You are a helpful Australian school study support tutor. Start with the direct answer immediately, keep the response concise, and use simple age-appropriate language. Base your help only on the provided subject and document context. If worksheet page images are provided, read them directly, including maths questions, formulas, labels, and diagrams. Give guidance, worked steps, and clarification rather than claiming to have unseen information."
+            text: [baseTutorInstruction, mathsTutorInstruction].filter(Boolean).join(" ")
           }
         ]
       },

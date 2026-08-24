@@ -1671,8 +1671,10 @@ const elements = {
   uploadStatus: document.getElementById("upload-status"),
   aiConnectionStatus: document.getElementById("ai-connection-status"),
   askInput: document.getElementById("ask-input"),
+  askRewindButton: document.getElementById("ask-rewind-button"),
   askMicButton: document.getElementById("ask-mic-button"),
   askListenButton: document.getElementById("ask-listen-button"),
+  askForwardButton: document.getElementById("ask-forward-button"),
   askStopButton: document.getElementById("ask-stop-button"),
   askContext: document.getElementById("ask-context"),
   askResponse: document.getElementById("ask-response"),
@@ -2480,8 +2482,10 @@ function getDockAskSurface() {
   return {
     kind: "dock",
     input: elements.askInput,
+    rewindButton: elements.askRewindButton,
     micButton: elements.askMicButton,
     listenButton: elements.askListenButton,
+    forwardButton: elements.askForwardButton,
     stopButton: elements.askStopButton,
     context: elements.askContext,
     response: elements.askResponse
@@ -2501,8 +2505,10 @@ function getSubjectLandingAskSurface() {
   return {
     kind: "landing",
     input: popup.querySelector("[data-subject-landing-ask-input]"),
+    rewindButton: popup.querySelector("[data-subject-landing-ask-rewind]"),
     micButton: popup.querySelector("[data-subject-landing-ask-mic]"),
     listenButton: popup.querySelector("[data-subject-landing-ask-listen]"),
+    forwardButton: popup.querySelector("[data-subject-landing-ask-forward]"),
     stopButton: popup.querySelector("[data-subject-landing-ask-stop]"),
     context: popup.querySelector("[data-subject-landing-ask-context]"),
     response: popup.querySelector("[data-subject-landing-ask-response]")
@@ -4097,8 +4103,12 @@ function renderSubjectLanding() {
                   >${escapeHtml(state.subjectLandingAskDraft)}</textarea>
                   <div class="subject-landing-ask-popup__actions">
                     <button type="button" class="subject-landing-ask-popup__submit" data-subject-landing-ask-submit>Read response</button>
-                    <button type="button" class="subject-landing-ask-popup__listen" data-subject-landing-ask-listen>${state.askResponseSpeaking ? (state.askResponsePaused ? "Resume" : "Pause") : "Listen to response"}</button>
-                    <button type="button" class="subject-landing-ask-popup__listen" data-subject-landing-ask-stop ${state.askResponseSpeaking ? "" : "disabled"}>Stop</button>
+                    <div class="subject-landing-ask-popup__transport" role="group" aria-label="Response playback controls">
+                      <button type="button" class="subject-landing-ask-popup__control" data-subject-landing-ask-rewind aria-label="Rewind 10 seconds" title="Rewind 10 seconds" ${currentAudioContext === "ask" && canSeekCurrentAskPlayback() ? "" : "disabled"}>⏪</button>
+                      <button type="button" class="subject-landing-ask-popup__control" data-subject-landing-ask-listen aria-label="${escapeHtml(state.askResponseSpeaking ? (state.askResponsePaused ? "Resume response" : "Pause response") : "Play response")}" title="${escapeHtml(state.askResponseSpeaking ? (state.askResponsePaused ? "Resume response" : "Pause response") : "Play response")}">⏯</button>
+                      <button type="button" class="subject-landing-ask-popup__control" data-subject-landing-ask-forward aria-label="Fast-forward 10 seconds" title="Fast-forward 10 seconds" ${currentAudioContext === "ask" && canSeekCurrentAskPlayback() ? "" : "disabled"}>⏩</button>
+                      <button type="button" class="subject-landing-ask-popup__control" data-subject-landing-ask-stop aria-label="Stop response" title="Stop response" ${state.askResponseSpeaking ? "" : "disabled"}>⏹</button>
+                    </div>
                   </div>
                 </aside>
               `
@@ -4170,8 +4180,12 @@ function renderSubjectLanding() {
                   >${escapeHtml(state.subjectLandingAskDraft)}</textarea>
                   <div class="subject-landing-ask-popup__actions">
                     <button type="button" class="subject-landing-ask-popup__submit" data-subject-landing-ask-submit>Read response</button>
-                    <button type="button" class="subject-landing-ask-popup__listen" data-subject-landing-ask-listen>${state.askResponseSpeaking ? (state.askResponsePaused ? "Resume" : "Pause") : "Listen to response"}</button>
-                    <button type="button" class="subject-landing-ask-popup__listen" data-subject-landing-ask-stop ${state.askResponseSpeaking ? "" : "disabled"}>Stop</button>
+                    <div class="subject-landing-ask-popup__transport" role="group" aria-label="Response playback controls">
+                      <button type="button" class="subject-landing-ask-popup__control" data-subject-landing-ask-rewind aria-label="Rewind 10 seconds" title="Rewind 10 seconds" ${currentAudioContext === "ask" && canSeekCurrentAskPlayback() ? "" : "disabled"}>⏪</button>
+                      <button type="button" class="subject-landing-ask-popup__control" data-subject-landing-ask-listen aria-label="${escapeHtml(state.askResponseSpeaking ? (state.askResponsePaused ? "Resume response" : "Pause response") : "Play response")}" title="${escapeHtml(state.askResponseSpeaking ? (state.askResponsePaused ? "Resume response" : "Pause response") : "Play response")}">⏯</button>
+                      <button type="button" class="subject-landing-ask-popup__control" data-subject-landing-ask-forward aria-label="Fast-forward 10 seconds" title="Fast-forward 10 seconds" ${currentAudioContext === "ask" && canSeekCurrentAskPlayback() ? "" : "disabled"}>⏩</button>
+                      <button type="button" class="subject-landing-ask-popup__control" data-subject-landing-ask-stop aria-label="Stop response" title="Stop response" ${state.askResponseSpeaking ? "" : "disabled"}>⏹</button>
+                    </div>
                   </div>
                 </aside>
               `
@@ -4370,7 +4384,9 @@ function renderSubjectLanding() {
     }
   });
   host.querySelector("[data-subject-landing-ask-mic]")?.addEventListener("click", handleAskMicToggle);
+  host.querySelector("[data-subject-landing-ask-rewind]")?.addEventListener("click", handleAskRewind);
   host.querySelector("[data-subject-landing-ask-listen]")?.addEventListener("click", handleAskListen);
+  host.querySelector("[data-subject-landing-ask-forward]")?.addEventListener("click", handleAskFastForward);
   host.querySelector("[data-subject-landing-ask-stop]")?.addEventListener("click", handleAskStop);
 }
 
@@ -13389,15 +13405,26 @@ function openSubjectLandingAsk(documentRecord, { pageNumber = 1, pieceTitle = ""
 }
 
 function renderAskVoiceControls() {
+  const canSeekAskResponse = currentAudioContext === "ask" && canSeekCurrentAskPlayback();
   getAskSurfaces().forEach((surface) => {
     if (surface.micButton) {
       surface.micButton.textContent = state.askMicActive ? "Stop microphone" : "Use microphone";
     }
     if (surface.listenButton) {
-      surface.listenButton.textContent = state.askResponseSpeaking
-        ? (state.askResponsePaused ? "Resume" : "Pause")
-        : "Listen to response";
+      surface.listenButton.textContent = "⏯";
+      surface.listenButton.setAttribute("aria-label", state.askResponseSpeaking
+        ? (state.askResponsePaused ? "Resume response" : "Pause response")
+        : "Play response");
+      surface.listenButton.setAttribute("title", state.askResponseSpeaking
+        ? (state.askResponsePaused ? "Resume response" : "Pause response")
+        : "Play response");
       surface.listenButton.disabled = false;
+    }
+    if (surface.rewindButton) {
+      surface.rewindButton.disabled = !canSeekAskResponse;
+    }
+    if (surface.forwardButton) {
+      surface.forwardButton.disabled = !canSeekAskResponse;
     }
     if (surface.stopButton) {
       surface.stopButton.disabled = !state.askResponseSpeaking;
@@ -13430,6 +13457,28 @@ function hasResumableAudioElementPlayback() {
     !currentAudioPlayback.ended &&
     currentAudioPlayback.currentTime > 0
   );
+}
+
+function canSeekCurrentAskPlayback() {
+  return Boolean(
+    currentAudioPlaybackMode === "audio-element" &&
+    currentAudioPlayback &&
+    currentAudioPlayback.getAttribute("src") &&
+    Number.isFinite(currentAudioPlayback.currentTime)
+  );
+}
+
+function seekCurrentAskPlayback(deltaSeconds) {
+  if (!canSeekCurrentAskPlayback()) {
+    return false;
+  }
+
+  const duration = Number.isFinite(currentAudioPlayback.duration) ? currentAudioPlayback.duration : null;
+  const nextTime = Math.max(0, currentAudioPlayback.currentTime + deltaSeconds);
+  currentAudioPlayback.currentTime = duration === null
+    ? nextTime
+    : Math.min(Math.max(0, duration), nextTime);
+  return true;
 }
 
 async function pauseListening() {
@@ -19622,6 +19671,24 @@ function handleAskStop() {
   );
 }
 
+function handleAskRewind() {
+  if (currentAudioContext !== "ask") {
+    return;
+  }
+  if (seekCurrentAskPlayback(-10)) {
+    renderAskVoiceControls();
+  }
+}
+
+function handleAskFastForward() {
+  if (currentAudioContext !== "ask") {
+    return;
+  }
+  if (seekCurrentAskPlayback(10)) {
+    renderAskVoiceControls();
+  }
+}
+
 function formatDate() {
   return new Intl.DateTimeFormat("en-AU", {
     day: "numeric",
@@ -21512,8 +21579,10 @@ async function handleDashboardOpen() {
   }
 }
 
+elements.askRewindButton?.addEventListener("click", handleAskRewind);
 elements.askMicButton?.addEventListener("click", handleAskMicToggle);
 elements.askListenButton?.addEventListener("click", handleAskListen);
+elements.askForwardButton?.addEventListener("click", handleAskFastForward);
 elements.askStopButton?.addEventListener("click", handleAskStop);
 elements.signInModeCreateButton.addEventListener("click", () => {
   setAuthMode("create");
