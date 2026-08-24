@@ -4038,6 +4038,7 @@ function renderSubjectLanding() {
                     placeholder="Ask Panda about this document here."
                   >${escapeHtml(state.subjectLandingAskDraft)}</textarea>
                   <div class="subject-landing-ask-popup__actions">
+                    <button type="button" class="subject-landing-ask-popup__submit" data-subject-landing-ask-submit>Ask now</button>
                     <button type="button" class="subject-landing-ask-popup__listen" data-subject-landing-ask-listen>${state.askResponseSpeaking ? "Stop" : "Listen to response"}</button>
                   </div>
                 </aside>
@@ -4100,6 +4101,7 @@ function renderSubjectLanding() {
                     placeholder="Ask Panda about this document here."
                   >${escapeHtml(state.subjectLandingAskDraft)}</textarea>
                   <div class="subject-landing-ask-popup__actions">
+                    <button type="button" class="subject-landing-ask-popup__submit" data-subject-landing-ask-submit>Ask now</button>
                     <button type="button" class="subject-landing-ask-popup__listen" data-subject-landing-ask-listen>${state.askResponseSpeaking ? "Stop" : "Listen to response"}</button>
                   </div>
                 </aside>
@@ -4239,34 +4241,46 @@ function renderSubjectLanding() {
     }
     speakDocument(documentRecord);
   });
-  host.querySelector("[data-subject-landing-ask]")?.addEventListener("click", () => {
-    const documentRecord = getSubjectLandingOpenDocument(subject);
-    if (!documentRecord) {
-      return;
-    }
-    const pieces = getSubjectLandingSimplifiedPieces(documentRecord);
-    const piece = pieces[Math.max(0, Math.min(state.subjectLandingPieceIndex, Math.max(0, pieces.length - 1)))] || null;
-    const pageNumber = currentPage?.pageNumber || currentPageIndex + 1;
-    state.askDocumentId = documentRecord.id;
-    state.subjectLandingAskOpen = true;
-    state.subjectLandingAskDraft = state.subjectLandingAskDraft || (state.subjectLandingView === "original"
-      ? `Can you explain page ${pageNumber} in simpler language?`
-      : piece?.title
-        ? `Can you explain "${piece.title}" in even simpler language?`
-        : "Can you explain this section in simpler language?");
-    state.subjectLandingAskStatus = state.subjectLandingAskStatus || "Ask Panda about the current document here.";
-    render();
-    requestAnimationFrame(() => {
-      renderAskContext();
-      focusAskComposer();
+  host.querySelectorAll("[data-subject-landing-ask]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const documentRecord = getSubjectLandingOpenDocument(subject);
+      if (!documentRecord) {
+        return;
+      }
+      const pieces = getSubjectLandingSimplifiedPieces(documentRecord);
+      const piece = pieces[Math.max(0, Math.min(state.subjectLandingPieceIndex, Math.max(0, pieces.length - 1)))] || null;
+      const pageNumber = currentPage?.pageNumber || currentPageIndex + 1;
+      openSubjectLandingAsk(documentRecord, {
+        pageNumber,
+        pieceTitle: piece?.title || ""
+      });
     });
   });
-  host.querySelector("[data-subject-landing-ask-close]")?.addEventListener("click", () => {
-    closeSubjectLandingAsk();
-    render();
+  host.querySelectorAll("[data-subject-landing-ask-close]").forEach((button) => {
+    button.addEventListener("click", () => {
+      closeSubjectLandingAsk();
+      render();
+    });
+  });
+  host.querySelectorAll("[data-subject-landing-ask-submit]").forEach((button) => {
+    button.addEventListener("click", () => {
+      void handleAsk();
+    });
   });
   host.querySelector("[data-subject-landing-ask-input]")?.addEventListener("input", (event) => {
     state.subjectLandingAskDraft = event.target.value;
+  });
+  host.querySelector("[data-subject-landing-ask-input]")?.addEventListener("keydown", (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+      event.preventDefault();
+      void handleAsk();
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeSubjectLandingAsk();
+      render();
+    }
   });
   host.querySelector("[data-subject-landing-ask-mic]")?.addEventListener("click", handleAskMicToggle);
   host.querySelector("[data-subject-landing-ask-listen]")?.addEventListener("click", handleAskListen);
@@ -11423,6 +11437,12 @@ function getStoredSubjectsForAccount(account) {
   return buildResolvedSubjectsFromStore(account, storedSubjectsMap[accountKey]);
 }
 
+function getFastMergedStoredSubjectsForAccount(account, primarySubjects = null) {
+  const accountKey = normaliseAccountKey(account?.email);
+  const storedSubjectsMap = loadStoredSubjectsMap();
+  return mergeAvailableSubjectSources(primarySubjects, storedSubjectsMap[accountKey]);
+}
+
 async function getMergedStoredSubjectsForAccount(account, primarySubjects = null) {
   const accountKey = normaliseAccountKey(account?.email);
   const storedSubjectsMap = loadStoredSubjectsMap();
@@ -11798,7 +11818,6 @@ function restoreSubjectsForAccount(account, subjectsOverride = null, { skipRemot
     mergedSubjectsSource || subjectsOverride || storedSubjectsMap[accountKey]
   );
   state.subjects = resolvedSubjects;
-  saveStoredSubjectsMapForAccount(storedSubjectsMap, accountKey, state.subjects);
 
   if (!state.subjects.some((subject) => subject.id === state.selectedSubjectId)) {
     state.selectedSubjectId = state.subjects[0]?.id || "";
@@ -11846,7 +11865,7 @@ async function restoreSessionUser() {
         timeoutMessage: "Session restore took too long. Sign in again."
       });
       state.authToken = savedToken;
-      const mergedSubjects = await getMergedStoredSubjectsForAccount(session.account, session.subjects);
+      const mergedSubjects = getFastMergedStoredSubjectsForAccount(session.account, session.subjects);
       applyAuthenticatedAccount(session.account, {
         token: savedToken,
         subjects: mergedSubjects,
@@ -11874,7 +11893,7 @@ async function restoreSessionUser() {
   }
 
     try {
-      const durableLegacySubjects = await getMergedStoredSubjectsForAccount(account, getStoredSubjectsForAccount(account));
+      const durableLegacySubjects = getFastMergedStoredSubjectsForAccount(account, getStoredSubjectsForAccount(account));
       let payload;
       try {
         payload = await registerCloudAccountWithFallback({
@@ -13048,6 +13067,26 @@ function closeSubjectLandingAsk({ stopAudio = true } = {}) {
     stopListening();
   }
   resetSubjectLandingAskState();
+}
+
+function openSubjectLandingAsk(documentRecord, { pageNumber = 1, pieceTitle = "" } = {}) {
+  if (!documentRecord) {
+    return;
+  }
+
+  state.askDocumentId = documentRecord.id;
+  state.subjectLandingAskOpen = true;
+  state.subjectLandingAskDraft = state.subjectLandingAskDraft || (state.subjectLandingView === "original"
+    ? `Can you explain page ${pageNumber} in simpler language?`
+    : pieceTitle
+      ? `Can you explain "${pieceTitle}" in even simpler language?`
+      : "Can you explain this section in simpler language?");
+  state.subjectLandingAskStatus = state.subjectLandingAskStatus || "Ask Panda about the current document here.";
+  render();
+  requestAnimationFrame(() => {
+    renderAskContext();
+    focusAskComposer();
+  });
 }
 
 function renderAskVoiceControls() {
@@ -20865,7 +20904,7 @@ async function handleDashboardOpen() {
         });
         elements.signInStatus.textContent = "Loading your study space...";
         state.authToken = payload.token || "";
-        const mergedSubjects = await getMergedStoredSubjectsForAccount(payload.account, payload.subjects);
+        const mergedSubjects = getFastMergedStoredSubjectsForAccount(payload.account, payload.subjects);
         applyAuthenticatedAccount(payload.account, {
           token: payload.token || "",
           subjects: mergedSubjects,
@@ -20883,7 +20922,7 @@ async function handleDashboardOpen() {
         ) {
           try {
             elements.signInStatus.textContent = "Restoring your saved account...";
-            const legacySubjects = await getMergedStoredSubjectsForAccount(
+            const legacySubjects = getFastMergedStoredSubjectsForAccount(
               existingLegacyAccount,
               getStoredSubjectsForAccount(existingLegacyAccount)
             );
@@ -20918,7 +20957,7 @@ async function handleDashboardOpen() {
     }
 
     const desiredSubjects = existingLegacyAccount
-      ? await getMergedStoredSubjectsForAccount(existingLegacyAccount, getStoredSubjectsForAccount(existingLegacyAccount))
+      ? getFastMergedStoredSubjectsForAccount(existingLegacyAccount, getStoredSubjectsForAccount(existingLegacyAccount))
       : createInitialSubjectsForAccount({
           email: studentEmail,
           grade: studentGrade,
