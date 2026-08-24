@@ -71,7 +71,7 @@ let standaloneAskChannel = null;
 let currentAudioPlaybackMode = "";
 let currentAudioPlaybackResumeWaiters = [];
 const askPageImageCache = new Map();
-const aiSpeechPlaybackRate = 0.7;
+const aiSpeechPlaybackRate = 0.73;
 const defaultGrade = "7";
 const defaultPageBackgroundColor = "#FBF7F0";
 const documentQuizPassPoints = 10;
@@ -4096,7 +4096,7 @@ function renderSubjectLanding() {
                     placeholder="Ask Panda about this document here."
                   >${escapeHtml(state.subjectLandingAskDraft)}</textarea>
                   <div class="subject-landing-ask-popup__actions">
-                    <button type="button" class="subject-landing-ask-popup__submit" data-subject-landing-ask-submit>Ask now</button>
+                    <button type="button" class="subject-landing-ask-popup__submit" data-subject-landing-ask-submit>Read response</button>
                     <button type="button" class="subject-landing-ask-popup__listen" data-subject-landing-ask-listen>${state.askResponseSpeaking ? (state.askResponsePaused ? "Resume" : "Pause") : "Listen to response"}</button>
                     <button type="button" class="subject-landing-ask-popup__listen" data-subject-landing-ask-stop ${state.askResponseSpeaking ? "" : "disabled"}>Stop</button>
                   </div>
@@ -4169,7 +4169,7 @@ function renderSubjectLanding() {
                     placeholder="Ask Panda about this document here."
                   >${escapeHtml(state.subjectLandingAskDraft)}</textarea>
                   <div class="subject-landing-ask-popup__actions">
-                    <button type="button" class="subject-landing-ask-popup__submit" data-subject-landing-ask-submit>Ask now</button>
+                    <button type="button" class="subject-landing-ask-popup__submit" data-subject-landing-ask-submit>Read response</button>
                     <button type="button" class="subject-landing-ask-popup__listen" data-subject-landing-ask-listen>${state.askResponseSpeaking ? (state.askResponsePaused ? "Resume" : "Pause") : "Listen to response"}</button>
                     <button type="button" class="subject-landing-ask-popup__listen" data-subject-landing-ask-stop ${state.askResponseSpeaking ? "" : "disabled"}>Stop</button>
                   </div>
@@ -4351,7 +4351,7 @@ function renderSubjectLanding() {
   });
   host.querySelectorAll("[data-subject-landing-ask-submit]").forEach((button) => {
     button.addEventListener("click", () => {
-      void handleAsk();
+      void handleAsk({ autoPlayResponse: true });
     });
   });
   host.querySelector("[data-subject-landing-ask-input]")?.addEventListener("input", (event) => {
@@ -19456,7 +19456,31 @@ function buildPracticeGrammarSpotlight(subject) {
   `;
 }
 
-async function handleAsk() {
+function playAskResponseForSurface(activeSurface, answerToPlay) {
+  speakTextWithOpenAi(answerToPlay, {
+    context: "ask",
+    statusElement: activeSurface?.response || null,
+    statusMessages: {
+      preparing: "Preparing Panda's answer...",
+      playing: "Playing Panda's answer...",
+      error: "AI voice playback failed for this answer."
+    },
+    onStatusChange: (_status, message) => {
+      setAskSurfaceStatus(activeSurface, message);
+    },
+    onFinished: () => {
+      setAskSurfaceStatus(activeSurface, getAskReadyStatus());
+      renderAskContext();
+    }
+  }).catch((error) => {
+    console.error("OpenAI speech failed.", error);
+    stopListening();
+    const message = error instanceof Error ? `Listen failed: ${error.message}` : "Listen failed.";
+    setAskSurfaceStatus(activeSurface, message);
+  });
+}
+
+async function handleAsk({ autoPlayResponse = false } = {}) {
   const subject = getSelectedSubject();
   const activeSurface = getActiveAskSurface();
   if (!subject) {
@@ -19506,6 +19530,9 @@ async function handleAsk() {
     state.askLatestAnswer = answer;
   }
   renderAskContext();
+  if (autoPlayResponse) {
+    playAskResponseForSurface(activeSurface, answer);
+  }
 }
 
 function handleAskMicToggle() {
@@ -19547,34 +19574,11 @@ function handleAskListen() {
     ? getLandingAskRequestDocument(getSubjectLandingOpenDocument(subject))
     : getActiveAskDocument(activeSurface);
   const question = activeSurface?.input?.value.trim() || "";
-  const playAnswer = (answerToPlay) => {
-    speakTextWithOpenAi(answerToPlay, {
-      context: "ask",
-      statusElement: activeSurface?.response || null,
-      statusMessages: {
-        preparing: "Preparing Panda's answer...",
-        playing: "Playing Panda's answer...",
-        error: "AI voice playback failed for this answer."
-      },
-      onStatusChange: (_status, message) => {
-        setAskSurfaceStatus(activeSurface, message);
-      },
-      onFinished: () => {
-        setAskSurfaceStatus(activeSurface, getAskReadyStatus());
-        renderAskContext();
-      }
-    }).catch((error) => {
-      console.error("OpenAI speech failed.", error);
-      stopListening();
-      const message = error instanceof Error ? `Listen failed: ${error.message}` : "Listen failed.";
-      setAskSurfaceStatus(activeSurface, message);
-    });
-  };
 
   if (canReplayStoredAskAnswer(activeSurface, question)) {
     const answerToPlay = getAskPlaybackText(activeSurface);
     if (answerToPlay) {
-      playAnswer(answerToPlay);
+      playAskResponseForSurface(activeSurface, answerToPlay);
       return;
     }
   }
@@ -19601,7 +19605,7 @@ function handleAskListen() {
       });
       persistSubjects();
       storeAskAnswerForSurface(activeSurface, question, answer);
-      playAnswer(answer);
+      playAskResponseForSurface(activeSurface, answer);
     })
     .catch((error) => {
       const message = error instanceof Error ? `Ask AI failed: ${error.message}` : "Ask AI failed.";
