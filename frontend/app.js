@@ -3442,9 +3442,11 @@ function getSubjectLandingStandalonePayload(subject, documentRecord, initialView
   }));
 
   return {
+    subjectId: subject?.id || "",
     subjectName: subject?.name || "Subject",
     subjectIconMarkup: getSubjectTileCodeMarkup(subject),
     yearLabel: `Year ${state.studentGrade}`,
+    documentId: documentRecord?.id || "",
     documentTitle: documentRecord?.title || "Document",
     pieces,
     pages,
@@ -3480,6 +3482,24 @@ function buildStandaloneDocumentPageHtml(payload, stylesMarkup = "") {
           .replaceAll(">", "&gt;")
           .replaceAll('"', "&quot;")
           .replaceAll("'", "&#39;");
+      }
+
+      function askInApp() {
+        if (window.opener && typeof window.opener.__paperpandaOpenStandaloneAsk === "function") {
+          const opened = window.opener.__paperpandaOpenStandaloneAsk({
+            subjectId: payload.subjectId || "",
+            documentId: payload.documentId || "",
+            view: state.view,
+            pieceIndex: state.pieceIndex,
+            pageIndex: state.pageIndex
+          });
+          if (opened) {
+            window.opener.focus();
+            window.close();
+            return;
+          }
+        }
+        window.alert("Open this document in the main PaperPanda window to use Ask Panda.");
       }
 
       function renderStandalone() {
@@ -3574,6 +3594,12 @@ function buildStandaloneDocumentPageHtml(payload, stylesMarkup = "") {
                   <button type="button" class="subject-landing__arrow" data-standalone-page-move="1" \${!pages.length || pageIndex >= pages.length - 1 ? "disabled" : ""}>→</button>
                 </div>
               \`}
+            <div class="subject-landing__dock">
+              <div class="subject-landing__dock-inner">
+                <span class="subject-landing__dock-label">\${state.view === "original" ? "Original doc" : "This piece"}</span>
+                <button type="button" class="subject-landing__dock-ask" data-standalone-ask="true">Ask Panda in app</button>
+              </div>
+            </div>
           </section>
         \`;
 
@@ -3595,6 +3621,7 @@ function buildStandaloneDocumentPageHtml(payload, stylesMarkup = "") {
             renderStandalone();
           });
         });
+        host.querySelector("[data-standalone-ask]")?.addEventListener("click", askInApp);
         host.querySelector("[data-standalone-close]")?.addEventListener("click", () => window.close());
       }
 
@@ -3614,7 +3641,6 @@ function openSubjectLandingStandalonePage(subject, documentRecord, initialView =
     return;
   }
 
-  popup.opener = null;
   popup.document.open();
   popup.document.write(
     buildStandaloneDocumentPageHtml(
@@ -3645,6 +3671,42 @@ function openSubjectLandingDocument(subject, documentId) {
     void ensureDocumentStudyPlan(documentRecord, subject).then(() => render()).catch(() => render());
   }
 }
+
+window.__paperpandaOpenStandaloneAsk = function __paperpandaOpenStandaloneAsk({
+  subjectId = "",
+  documentId = "",
+  view = "simple",
+  pieceIndex = 0,
+  pageIndex = 0
+} = {}) {
+  const subject = getSubjectById(subjectId);
+  if (!subject || !documentId) {
+    return false;
+  }
+
+  selectSubjectForSubjectsView(subject.id);
+  openSubjectLandingDocument(subject, documentId);
+  state.subjectLandingView = view === "original" ? "original" : "simple";
+  state.subjectLandingPieceIndex = Math.max(0, Number(pieceIndex) || 0);
+  const documentRecord = getSubjectLandingOpenDocument(subject);
+  if (!documentRecord) {
+    render();
+    return false;
+  }
+  setCurrentDocumentPageIndex(documentRecord, Math.max(0, Number(pageIndex) || 0));
+  state.askDocumentId = documentRecord.id;
+  state.subjectLandingAskOpen = true;
+  state.subjectLandingAskDraft = state.subjectLandingView === "original"
+    ? `Can you explain page ${(Number(pageIndex) || 0) + 1} in simpler language?`
+    : "Can you explain this section in simpler language?";
+  state.subjectLandingAskStatus = state.subjectLandingAskStatus || "Ask Panda about the current document here.";
+  render();
+  requestAnimationFrame(() => {
+    renderAskContext();
+    focusAskComposer();
+  });
+  return true;
+};
 
 function renderSubjectLanding() {
   const host = elements.subjectLandingView;
@@ -4606,6 +4668,7 @@ function renderFocusHomeCard() {
       <div class="focus-home-next-card__actions">
         <button type="button" class="primary-button primary-button--dark" id="focus-home-next-open-button">🎯 See the steps</button>
         <button type="button" class="ghost-button" id="focus-home-next-read-button">▶ Read it to me</button>
+        <button type="button" class="ghost-button" id="focus-home-next-calendar-button">Calendar</button>
       </div>
     </article>
   `;
@@ -4616,6 +4679,7 @@ function renderFocusHomeCard() {
   host.querySelector("#focus-home-next-read-button")?.addEventListener("click", () => {
     speakAssessmentEntry(nextEntry, { context: `focus:home-assessment:${nextEntry.assessment.id}` });
   });
+  host.querySelector("#focus-home-next-calendar-button")?.addEventListener("click", openUpcomingModal);
 }
 
 function renderFocusAskFab() {
