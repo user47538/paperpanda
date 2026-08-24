@@ -69,6 +69,7 @@ let remoteSettingsSaveInFlight = false;
 let googleIdentityClientPromise = null;
 let standaloneAskChannel = null;
 const askPageImageCache = new Map();
+const aiSpeechPlaybackRate = 0.7;
 const defaultGrade = "7";
 const defaultPageBackgroundColor = "#FBF7F0";
 const documentQuizPassPoints = 10;
@@ -13595,6 +13596,8 @@ async function playSpeechBlobThroughAudioElement(speechBlob, { statusMessages = 
   playbackElement.onended = null;
   playbackElement.onerror = null;
   playbackElement.src = currentAudioObjectUrl;
+  playbackElement.defaultPlaybackRate = aiSpeechPlaybackRate;
+  playbackElement.playbackRate = aiSpeechPlaybackRate;
   playbackElement.load();
 
   await new Promise((resolve, reject) => {
@@ -13671,6 +13674,7 @@ async function playSpeechChunk(chunkText, { listenSessionId, statusMessages = {}
     const source = audioContext.createBufferSource();
     currentAudioBufferSource = source;
     source.buffer = decodedBuffer;
+    source.playbackRate.value = aiSpeechPlaybackRate;
     source.connect(audioContext.destination);
     source.onended = () => {
       if (currentAudioBufferSource === source) {
