@@ -68,6 +68,7 @@ let remoteSettingsSaveQueuedSnapshot = null;
 let remoteSettingsSaveInFlight = false;
 let googleIdentityClientPromise = null;
 let standaloneAskChannel = null;
+const askPageImageCache = new Map();
 const defaultGrade = "7";
 const defaultPageBackgroundColor = "#FBF7F0";
 const documentQuizPassPoints = 10;
@@ -12942,12 +12943,12 @@ async function requestAskAnswer(question, subject, document) {
     : {};
   const pageVisuals = document
     ? await buildDocumentVisionPages(document, {
-        maxPages: 2,
-        maxTextPerPage: 120,
+        maxPages: 1,
+        maxTextPerPage: 90,
         ...pageVisualOptions
       })
     : [];
-  const contentLimit = pageVisuals.length ? 1200 : 3200;
+  const contentLimit = pageVisuals.length ? 900 : 2400;
   const responsePayload = await requestApi("/api/ask", {
     subjectName: subject.name,
     question,
@@ -13087,10 +13088,28 @@ function loadImageFromUrl(url) {
   });
 }
 
+function storeAskPageImageCacheEntry(cacheKey, value) {
+  if (!cacheKey || !value) {
+    return;
+  }
+  if (askPageImageCache.size >= 24) {
+    const oldestKey = askPageImageCache.keys().next().value;
+    if (oldestKey) {
+      askPageImageCache.delete(oldestKey);
+    }
+  }
+  askPageImageCache.set(cacheKey, value);
+}
+
 async function compressDocumentPageImage(imageUrl, { maxWidth = 960, quality = 0.72 } = {}) {
   const source = String(imageUrl || "").trim();
   if (!source || !/^data:image\//i.test(source)) {
     return source;
+  }
+  const cacheKey = `${maxWidth}:${quality}:${source}`;
+  const cachedImage = askPageImageCache.get(cacheKey);
+  if (cachedImage) {
+    return cachedImage;
   }
 
   const image = await loadImageFromUrl(source);
@@ -13105,7 +13124,9 @@ async function compressDocumentPageImage(imageUrl, { maxWidth = 960, quality = 0
   canvas.width = targetWidth;
   canvas.height = targetHeight;
   context.drawImage(image, 0, 0, targetWidth, targetHeight);
-  return canvas.toDataURL("image/jpeg", quality);
+  const compressedImage = canvas.toDataURL("image/jpeg", quality);
+  storeAskPageImageCacheEntry(cacheKey, compressedImage);
+  return compressedImage;
 }
 
 async function buildDocumentVisionPages(documentRecord, {

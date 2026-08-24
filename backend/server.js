@@ -255,12 +255,12 @@ function buildAskDocumentContext(document, { compact = false } = {}) {
 
   const pageVisuals = cleanDocumentVisionPages(document.pageVisuals, {
     pageLimit: compact ? 1 : 2,
-    textLimit: compact ? 90 : 140
+    textLimit: compact ? 80 : 120
   });
   const cleanedContent = cleanDocumentStudyText(document.content);
   const contentLimit = pageVisuals.length
-    ? (compact ? 420 : 1400)
-    : (compact ? 1200 : 3200);
+    ? (compact ? 320 : 900)
+    : (compact ? 1800 : 2400);
 
   return {
     title: clipText(String(document.title || "").trim(), 180),
@@ -268,16 +268,6 @@ function buildAskDocumentContext(document, { compact = false } = {}) {
     content: clipText(cleanedContent, contentLimit),
     pageVisuals
   };
-}
-
-function isContextWindowError(error) {
-  const message = String(error instanceof Error ? error.message : error || "").toLowerCase();
-  return (
-    message.includes("context window") ||
-    message.includes("maximum context length") ||
-    message.includes("too many tokens") ||
-    message.includes("input exceeds")
-  );
 }
 
 function getRecommendedStudySectionCount(pageCount) {
@@ -1314,7 +1304,7 @@ async function requestAskModelAnswer({
           {
             type: "input_text",
             text:
-              "You are a helpful Australian school study support tutor. Explain clearly, use short paragraphs, keep language age-appropriate, and base your help on the provided subject and document context. If worksheet page images are provided, read them directly, including maths questions, formulas, labels, and diagrams. Give guidance, worked steps, and clarification rather than claiming to have unseen information."
+              "You are a helpful Australian school study support tutor. Start with the direct answer immediately, keep the response concise, and use simple age-appropriate language. Base your help only on the provided subject and document context. If worksheet page images are provided, read them directly, including maths questions, formulas, labels, and diagrams. Give guidance, worked steps, and clarification rather than claiming to have unseen information."
           }
         ]
       },
@@ -1340,9 +1330,7 @@ async function requestAskModelAnswer({
                       }))
                     }
                   : null
-              },
-              null,
-              2
+              }
             )
           },
           ...((documentContext?.pageVisuals || []).flatMap((page) => {
@@ -1357,7 +1345,7 @@ async function requestAskModelAnswer({
               pageContent.push({
                 type: "input_image",
                 image_url: page.imageUrl,
-                detail: "high"
+                detail: "low"
               });
             }
             return pageContent;
@@ -1365,7 +1353,7 @@ async function requestAskModelAnswer({
         ]
       }
     ],
-    max_output_tokens: 700
+    max_output_tokens: 420
   });
 
   const answer = extractResponseText(responsePayload);
@@ -1384,33 +1372,17 @@ app.post("/api/ask", async (request, response) => {
       return;
     }
 
-    const normalDocumentContext = buildAskDocumentContext(document, { compact: false });
-    const compactDocumentContext = buildAskDocumentContext(document, { compact: true });
-    const normalRecentHistory = cleanAskHistoryEntries(recentHistory, { limit: 3, textLimit: 220 });
-    const compactRecentHistory = cleanAskHistoryEntries(recentHistory, { limit: 2, textLimit: 120 });
+    const askDocumentContext = buildAskDocumentContext(document, { compact: true });
+    const askRecentHistory = cleanAskHistoryEntries(recentHistory, { limit: 2, textLimit: 120 });
     const cleanedAssessment = cleanAskAssessment(nextAssessment);
 
-    let answer = "";
-    try {
-      answer = await requestAskModelAnswer({
-        subjectName,
-        question,
-        recentHistory: normalRecentHistory,
-        nextAssessment: cleanedAssessment,
-        documentContext: normalDocumentContext
-      });
-    } catch (error) {
-      if (!isContextWindowError(error)) {
-        throw error;
-      }
-      answer = await requestAskModelAnswer({
-        subjectName,
-        question,
-        recentHistory: compactRecentHistory,
-        nextAssessment: cleanedAssessment,
-        documentContext: compactDocumentContext
-      });
-    }
+    const answer = await requestAskModelAnswer({
+      subjectName,
+      question,
+      recentHistory: askRecentHistory,
+      nextAssessment: cleanedAssessment,
+      documentContext: askDocumentContext
+    });
 
     response.json({ answer });
   } catch (error) {
