@@ -4251,7 +4251,9 @@ function renderSubjectLanding() {
     speakDocument(documentRecord);
   });
   host.querySelectorAll("[data-subject-landing-ask]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
       const documentRecord = getSubjectLandingOpenDocument(subject);
       if (!documentRecord) {
         return;
@@ -14536,10 +14538,19 @@ function renderReader() {
       ${getReaderToolbarMarkup()}
     </div>
   `;
+  const readabilityWarning = getDocumentReadabilityWarning(selectedDocument);
+  const readabilityWarningMarkup = readabilityWarning
+    ? `
+      <div class="empty-state empty-state--compact">
+        ${escapeHtml(readabilityWarning)}
+      </div>
+    `
+    : "";
 
   if (selectedDocument.flags?.homework) {
     elements.readerContent.innerHTML = `
       ${reviewToggleMarkup}
+      ${readabilityWarningMarkup}
       ${previewImageMarkup}
       <textarea class="reader-editor" id="reader-editor">${escapeHtml(readableContent)}</textarea>
       <div class="reader-actions">
@@ -14630,6 +14641,7 @@ function renderReader() {
 
     elements.readerContent.innerHTML = `
       ${reviewToggleMarkup}
+      ${readabilityWarningMarkup}
       <div class="reader-document-progress">
         <div class="progress-meter progress-meter--wide">
           <span class="progress-meter__bar" style="width:${Math.round(progressRatio * 100)}%"></span>
@@ -14764,6 +14776,7 @@ function renderReader() {
 
   elements.readerContent.innerHTML = `
     ${reviewToggleMarkup}
+    ${readabilityWarningMarkup}
     ${previewImageMarkup}
     <div class="reader-content__text">${escapeHtml(readableContent).replaceAll("\n", "<br />")}</div>
     ${openOriginalMarkup}
@@ -19619,6 +19632,21 @@ function buildFallbackStudyPlan(documentRecord) {
   };
 }
 
+function getDocumentReadabilityWarning(documentRecord) {
+  if (!documentRecord?.ocrAttempted || documentRecord?.ocrUsed) {
+    return "";
+  }
+
+  const errorDetail = String(documentRecord.ocrError || "").trim();
+  return [
+    "This PDF appears to be image-only, so PaperPanda could not extract readable text directly.",
+    errorDetail
+      ? `OCR could not finish: ${errorDetail}`
+      : "OCR could not finish for this file.",
+    "To make it read properly, run the backend with a working OpenAI key or upload a searchable PDF with selectable text."
+  ].join(" ");
+}
+
 function createWholeStudyDocumentRecord(fileName, flags, originalFile, extracted = {}) {
   const sanitizedName = fileName.replace(/\.[^.]+$/, "");
   const pages = Array.isArray(extracted?.pages)
@@ -19630,17 +19658,31 @@ function createWholeStudyDocumentRecord(fileName, flags, originalFile, extracted
     : [];
   const firstPagePreview = pages.find((page) => page.imageUrl)?.imageUrl || null;
   const fullText = String(extracted?.fullText || "").trim();
+  const ocrAttempted = Boolean(extracted?.ocrAttempted);
+  const ocrUsed = Boolean(extracted?.ocrUsed);
+  const ocrError = String(extracted?.ocrError || "").trim();
+  const readabilityWarning =
+    !fullText && ocrAttempted && !ocrUsed
+      ? [
+          "This PDF appears to be image-only, and PaperPanda could not complete OCR for it.",
+          ocrError ? `OCR error: ${ocrError}` : "",
+          "Start the backend with a working OPENAI_API_KEY or upload a searchable PDF with selectable text."
+        ].filter(Boolean).join(" ")
+      : "";
   const record = createDocumentWithFlags(
     {
       title: sanitizedName,
       type: flags.classNotes ? "Class Notes" : flags.assessment ? "Assessment" : flags.homework ? "Homework" : "Document",
-      content: fullText || "No readable text was detected in this document."
+      content: fullText || readabilityWarning || "No readable text was detected in this document."
     },
     flags
   );
   record.originalFile = originalFile;
   record.previewImageUrl = firstPagePreview;
   record.pages = pages;
+  record.ocrAttempted = ocrAttempted;
+  record.ocrUsed = ocrUsed;
+  record.ocrError = ocrError;
   return record;
 }
 
@@ -19836,11 +19878,21 @@ async function extractPdfData(file) {
       return await requestApiFormData("/api/upload/pdf", formData);
     } catch (error) {
       console.warn("Backend OCR PDF processing failed; using browser-extracted PDF content instead.", error);
-      return pdfData;
+      return {
+        ...pdfData,
+        ocrAttempted: true,
+        ocrUsed: false,
+        ocrError: error instanceof Error ? error.message : "OCR failed."
+      };
     }
   }
 
-  return pdfData;
+  return {
+    ...pdfData,
+    ocrAttempted: false,
+    ocrUsed: false,
+    ocrError: ""
+  };
 }
 
 async function loadPdfJs() {
