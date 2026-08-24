@@ -36,6 +36,12 @@ const localOcrRecycleAfterJobs = Math.max(1, Number(process.env.LOCAL_OCR_RECYCL
 const writingImageSectionTextLimit = 420;
 const writingImagePreviousTextLimit = 220;
 const writingImageFeedbackLimit = 280;
+const greatTeacherStudentProfile =
+  "The student is 13, in Australian Year 7 high school, loves horses, is an intermediate rider, and lives and breathes horses.";
+const greatTeacherTeachingLens =
+  "Teach like a great teacher, not a textbook. Start with the clearest path into the student's thinking. Use plain language first. Use horse-related framing only when it genuinely makes an idea easier to picture, easier to remember, or more engaging. Keep horse references light, relevant, and selective. Never force them into simple ideas or add a novelty layer that makes the explanation harder. If plain wording is better, use plain wording. When a horse frame truly helps, prefer familiar ideas like riding, horse care, tack, timing, balance, rhythm, height in hands, distance, pace, or feed.";
+const greatTeacherAssessmentGuard =
+  "Do not distort source content, assessment wording, answer guides, required terminology, or tested content just to add horse language. Keep the academic meaning exact.";
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -127,6 +133,14 @@ function requireGeminiKey() {
   if (!geminiApiKey) {
     throw new Error("GEMINI_API_KEY is not configured on the backend.");
   }
+}
+
+function buildGreatTeacherInstruction(...extraRules) {
+  return [
+    greatTeacherStudentProfile,
+    greatTeacherTeachingLens,
+    ...extraRules.filter(Boolean)
+  ].join(" ");
 }
 
 function extractResponseText(responsePayload) {
@@ -1309,8 +1323,9 @@ async function requestAskModelAnswer({
     .join("\n");
   const isLikelyMathsAsk = /(?:^|\b)(maths?|mathematics?|numeracy|algebra|equation|fraction|decimal|percentage|integer|ratio|geometry|perimeter|area|volume|probability|statistics|solve|calculate|working)\b/i.test(mathsAskSource)
     || /[=+\-*/^%<>()[\]{}|\\_~×÷±√∑∫∞≈≠≤≥πθ∆]/.test(mathsAskSource);
-  const baseTutorInstruction =
-    "You are a helpful Australian school study support tutor. Start with the direct answer immediately, keep the response concise, and use simple age-appropriate language. Base your help only on the provided subject and document context. If worksheet page images are provided, read them directly, including maths questions, formulas, labels, and diagrams. Give guidance, worked steps, and clarification rather than claiming to have unseen information.";
+  const baseTutorInstruction = buildGreatTeacherInstruction(
+    "You are a helpful Australian school study support tutor. Start with the direct answer immediately, keep the response concise, and use simple age-appropriate language. Base your help only on the provided subject and document context. If worksheet page images are provided, read them directly, including maths questions, formulas, labels, and diagrams. Give guidance, worked steps, and clarification rather than claiming to have unseen information."
+  );
   const mathsTutorInstruction = isLikelyMathsAsk
     ? "For maths questions, explain it at about an Australian Year 7 high school level. Keep only the absolute necessary information. Use this exact structure: first write 'What it is asking:' followed by one very short sentence. Then write 'Steps:' followed by a short numbered list with 3 to 5 steps. Keep each step simple and practical. Do not add background theory, extra tips, or multiple methods unless they are required to solve the question. If a formula is needed, include only that formula."
     : "";
@@ -1424,7 +1439,7 @@ app.post("/api/speak", async (request, response) => {
       response_format: "wav",
       input: text,
       instructions:
-        "Speak as a warm, fluent female tutor for an Australian school student. Use natural pauses, clear emphasis, and calm expressive delivery."
+        "Speak as a warm, fluent female tutor for an Australian Year 7 high school student. Sound like a great teacher: calm, clear, grounded, and easy to follow. Use natural pauses, clear emphasis, and calm expressive delivery. If the script contains a horse-related comparison, deliver it naturally as normal teaching language, not as a joke or gimmick."
     });
 
     response.setHeader("Content-Type", speech.contentType);
@@ -1536,8 +1551,11 @@ app.post("/api/document/study-plan", async (request, response) => {
           content: [
             {
               type: "input_text",
-              text:
-                "You are organising a school study document for a student. Return only JSON. Your job is to act like a sharp tutor who decides what is genuinely worth learning for the syllabus and assessed work. Surface the core knowledge, vocabulary, processes, evidence, examples, arguments, success criteria, and any worksheet questions or worked examples the student must actually know. Break the document into sequential study sections. Make the section titles useful and specific. Preserve subject detail. For maths or science, name the actual concepts, formulas, processes, questions, and examples covered. Read any provided page images directly, including mathematical notation, tables, diagrams, labels, and answer choices. Ignore decorative, repetitive, or administrative text unless it directly affects the assessed task. Also create a short end-of-document quiz. Do not use markdown in the JSON."
+              text: buildGreatTeacherInstruction(
+                "You are organising a school study document for a student. Return only JSON. Your job is to act like a sharp tutor who decides what is genuinely worth learning for the syllabus and assessed work. Surface the core knowledge, vocabulary, processes, evidence, examples, arguments, success criteria, and any worksheet questions or worked examples the student must actually know. Break the document into sequential study sections. Make the section titles useful and specific. Preserve subject detail. For maths or science, name the actual concepts, formulas, processes, questions, and examples covered. Read any provided page images directly, including mathematical notation, tables, diagrams, labels, and answer choices. Ignore decorative, repetitive, or administrative text unless it directly affects the assessed task. Also create a short end-of-document quiz. Do not use markdown in the JSON.",
+                "Write the overview, section summaries, bullets, sectionText, and quiz explanations as if a great teacher prepared them for this specific student.",
+                greatTeacherAssessmentGuard
+              )
             }
           ]
         },
@@ -1684,8 +1702,11 @@ app.post("/api/document/revision-test", async (request, response) => {
           content: [
             {
               type: "input_text",
-              text:
-                "You build Australian school revision tests from one study document. Return only JSON. Create exactly 15 questions total using this structure: 8 multiple-choice, 5 short-answer, and 2 extended-response. Base every question directly on the supplied document only. Do not include answers in the student-facing instructions. Every question must include an id, number, type, prompt, marks, skill, and answerGuide. Every multiple-choice question must include exactly 4 options and a correctOption that matches one option exactly."
+              text: buildGreatTeacherInstruction(
+                "You build Australian school revision tests from one study document. Return only JSON. Create exactly 15 questions total using this structure: 8 multiple-choice, 5 short-answer, and 2 extended-response. Base every question directly on the supplied document only. Do not include answers in the student-facing instructions. Every question must include an id, number, type, prompt, marks, skill, and answerGuide. Every multiple-choice question must include exactly 4 options and a correctOption that matches one option exactly.",
+                "Keep student-facing instructions and question wording clear, uncluttered, and confidence-building. Only use the student's horse-related language if it helps engagement without changing the tested idea.",
+                greatTeacherAssessmentGuard
+              )
             }
           ]
         },
@@ -1814,8 +1835,11 @@ app.post("/api/revision/generate-test", async (request, response) => {
           content: [
             {
               type: "input_text",
-              text:
-                "You build Australian school revision tests. Return only JSON. Use a NAPLAN-inspired structure. The test must contain exactly 9 questions total: exactly 5 multiple-choice questions, exactly 3 short-answer questions, and exactly 1 extended-response question. Do not include answers in the instructions. For English, stay closest to NAPLAN reading/language/writing style. For other subjects, adapt that structure to the subject while keeping the question style clear and age-appropriate. Every question must include an id, marks, skill, and answerGuide. Every multiple-choice question must include exactly 4 options and a correctOption value that matches one option exactly."
+              text: buildGreatTeacherInstruction(
+                "You build Australian school revision tests. Return only JSON. Use a NAPLAN-inspired structure. The test must contain exactly 9 questions total: exactly 5 multiple-choice questions, exactly 3 short-answer questions, and exactly 1 extended-response question. Do not include answers in the instructions. For English, stay closest to NAPLAN reading/language/writing style. For other subjects, adapt that structure to the subject while keeping the question style clear and age-appropriate. Every question must include an id, marks, skill, and answerGuide. Every multiple-choice question must include exactly 4 options and a correctOption value that matches one option exactly.",
+                "Keep student-facing instructions and question wording clear, uncluttered, and confidence-building. Only use the student's horse-related language if it helps engagement without changing the tested idea.",
+                greatTeacherAssessmentGuard
+              )
             }
           ]
         },
@@ -1984,8 +2008,11 @@ app.post("/api/revision/submit-test", async (request, response) => {
             content: [
               {
                 type: "input_text",
-                text:
-                  "You are marking Australian school revision responses. Return only JSON. Mark fairly and give fuller feedback that helps the student improve next time. Reward what is correct, explain the main gap clearly, describe what a stronger answer needed, and give one practical next step. Use 2 to 4 sentences for each response unless the answer is blank. Use the provided answer guide and marks only. Do not invent extra criteria."
+                text: buildGreatTeacherInstruction(
+                  "You are marking Australian school revision responses. Return only JSON. Mark fairly and give fuller feedback that helps the student improve next time. Reward what is correct, explain the main gap clearly, describe what a stronger answer needed, and give one practical next step. Use 2 to 4 sentences for each response unless the answer is blank. Use the provided answer guide and marks only. Do not invent extra criteria.",
+                  "Feedback should sound like a great teacher standing beside the student: calm, direct, practical, and easy to act on.",
+                  greatTeacherAssessmentGuard
+                )
               }
             ]
           },
