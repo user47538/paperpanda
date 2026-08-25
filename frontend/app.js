@@ -13180,6 +13180,38 @@ async function compressDocumentPageImage(imageUrl, { maxWidth = 960, quality = 0
   return compressedImage;
 }
 
+function isImageDocumentFile(file) {
+  const lowerName = String(file?.name || "").toLowerCase();
+  const mimeType = String(file?.type || "").toLowerCase();
+  return mimeType.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp)$/i.test(lowerName);
+}
+
+async function buildImageDocumentData(file) {
+  const sourceImageUrl = await readFileAsDataUrl(file);
+  let imageUrl = sourceImageUrl;
+  try {
+    imageUrl = await compressDocumentPageImage(sourceImageUrl, { maxWidth: 1600, quality: 0.88 });
+  } catch (error) {
+    imageUrl = sourceImageUrl;
+  }
+
+  return {
+    fullText: "Image-based document. Use the page image for the exact worksheet content.",
+    pages: [
+      {
+        pageNumber: 1,
+        text: "",
+        imageUrl,
+        startIndex: 0,
+        endIndex: 0
+      }
+    ],
+    ocrAttempted: false,
+    ocrUsed: false,
+    ocrError: ""
+  };
+}
+
 async function buildDocumentVisionPages(documentRecord, {
   maxPages = 4,
   maxTextPerPage = 220,
@@ -13227,7 +13259,10 @@ async function buildDocumentVisionPages(documentRecord, {
   for (const page of selectedPages) {
     let imageUrl = page.imageUrl;
     try {
-      imageUrl = await compressDocumentPageImage(page.imageUrl, { maxWidth: 960, quality: 0.72 });
+      imageUrl = await compressDocumentPageImage(
+        page.imageUrl,
+        page.isSparse ? { maxWidth: 1400, quality: 0.84 } : { maxWidth: 960, quality: 0.72 }
+      );
     } catch (error) {
       imageUrl = page.imageUrl;
     }
@@ -20542,6 +20577,9 @@ function detectOriginalKind(file) {
   if (file.type.startsWith("text/") || /\.(txt|md|csv)$/i.test(lowerName)) {
     return "text";
   }
+  if (isImageDocumentFile(file)) {
+    return "image";
+  }
   if (lowerName.endsWith(".pdf")) {
     return "pdf";
   }
@@ -20574,6 +20612,14 @@ async function readUploadedDocument(file, flags) {
   if (lowerName.endsWith(".pdf")) {
     const pdfData = await extractPdfData(file);
     const records = [createWholeStudyDocumentRecord(file.name, flags, originalFile, pdfData)];
+    return {
+      records
+    };
+  }
+
+  if (isImageDocumentFile(file)) {
+    const imageData = await buildImageDocumentData(file);
+    const records = [createWholeStudyDocumentRecord(file.name, flags, originalFile, imageData)];
     return {
       records
     };

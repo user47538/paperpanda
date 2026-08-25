@@ -300,6 +300,26 @@ function isContextWindowError(error) {
   );
 }
 
+function extractWorksheetQuestionReferences(text) {
+  const source = String(text || "");
+  const references = new Set();
+  const patterns = [
+    /\bq(?:uestion)?\s*([0-9]{1,3}[a-z]?)\b/gi,
+    /\bitem\s*([0-9]{1,3}[a-z]?)\b/gi,
+    /\bnumber\s*([0-9]{1,3}[a-z]?)\b/gi
+  ];
+
+  patterns.forEach((pattern) => {
+    let match = pattern.exec(source);
+    while (match) {
+      references.add(`Q${String(match[1] || "").toUpperCase()}`);
+      match = pattern.exec(source);
+    }
+  });
+
+  return [...references].slice(0, 4);
+}
+
 function getRecommendedStudySectionCount(pageCount) {
   const totalPages = Math.max(1, Number(pageCount || 0) || 1);
   if (totalPages <= 1) {
@@ -1325,6 +1345,7 @@ async function requestAskModelAnswer({
   nextAssessment = null,
   documentContext = null
 } = {}) {
+  const worksheetQuestionReferences = extractWorksheetQuestionReferences(question);
   const mathsAskSource = [
     subjectName,
     question,
@@ -1352,6 +1373,10 @@ async function requestAskModelAnswer({
   const nonMathsTutorInstruction = !isLikelyMathsAsk
     ? "For non-maths questions, keep the answer lean and teacher-led. Open with one short sentence that frames the idea or task. Then, if needed, use 2 to 5 short bullet points or numbered steps. Use at most one light horse-based comparison, and only when it clearly improves understanding."
     : "";
+  const worksheetFocusInstruction =
+    worksheetQuestionReferences.length && Array.isArray(documentContext?.pageVisuals) && documentContext.pageVisuals.length
+      ? `If the student refers to a numbered worksheet question such as ${worksheetQuestionReferences.join(", ")}, first locate that exact question number in the supplied page images or extracted text. Answer only from that exact numbered item. Ignore nearby questions with different numbers. If the exact question number is not visible, say so clearly instead of answering a different question.`
+      : "";
   const responsePayload = await callOpenAiJson("responses", {
     model: "gpt-4o-mini",
     input: [
@@ -1360,7 +1385,7 @@ async function requestAskModelAnswer({
         content: [
           {
             type: "input_text",
-            text: [baseTutorInstruction, mathsTutorInstruction, nonMathsTutorInstruction].filter(Boolean).join(" ")
+            text: [baseTutorInstruction, mathsTutorInstruction, nonMathsTutorInstruction, worksheetFocusInstruction].filter(Boolean).join(" ")
           }
         ]
       },
@@ -1379,6 +1404,7 @@ async function requestAskModelAnswer({
                 },
                 subjectName,
                 question: clipText(String(question || "").trim(), 800),
+                worksheetQuestionReferences,
                 recentHistory,
                 nextAssessment,
                 document: documentContext
@@ -1395,6 +1421,14 @@ async function requestAskModelAnswer({
               }
             )
           },
+          ...(worksheetQuestionReferences.length
+            ? [
+                {
+                  type: "input_text",
+                  text: `Focus on worksheet item(s): ${worksheetQuestionReferences.join(", ")}. Ignore nearby question numbers unless the exact item is unclear in the source.`
+                }
+              ]
+            : []),
           ...((documentContext?.pageVisuals || []).flatMap((page) => {
             const pageContent = [];
             if (page.text) {
