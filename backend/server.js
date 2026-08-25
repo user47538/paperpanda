@@ -320,6 +320,94 @@ function extractWorksheetQuestionReferences(text) {
   return [...references].slice(0, 4);
 }
 
+async function extractFocusedWorksheetQuestion({
+  question,
+  worksheetQuestionReferences = [],
+  documentContext = null
+} = {}) {
+  const references = Array.isArray(worksheetQuestionReferences)
+    ? worksheetQuestionReferences.map((value) => String(value || "").trim()).filter(Boolean).slice(0, 4)
+    : [];
+  const pageVisuals = Array.isArray(documentContext?.pageVisuals) ? documentContext.pageVisuals : [];
+  if (!references.length || !pageVisuals.length) {
+    return null;
+  }
+
+  const responsePayload = await callOpenAiJson("responses", {
+    model: "gpt-4o-mini",
+    input: [
+      {
+        role: "system",
+        content: [
+          {
+            type: "input_text",
+            text:
+              "You locate exact worksheet questions in school page images. Return only JSON. Do not solve the question. Match only the exact requested question number. Ignore nearby questions with different numbers."
+          }
+        ]
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: JSON.stringify({
+              requestedQuestion: String(question || "").trim(),
+              targetQuestionNumbers: references,
+              instructions: "Find the exact requested worksheet item. Return the matched question number, page number, and a faithful transcription of that question only."
+            })
+          },
+          ...pageVisuals.flatMap((page) => {
+            const content = [];
+            if (page?.text) {
+              content.push({
+                type: "input_text",
+                text: `Page ${page.pageNumber} extracted text:\n${page.text}`
+              });
+            }
+            if (page?.imageUrl) {
+              content.push({
+                type: "input_image",
+                image_url: page.imageUrl,
+                detail: "high"
+              });
+            }
+            return content;
+          })
+        ]
+      }
+    ],
+    text: {
+      format: {
+        type: "json_object"
+      }
+    },
+    max_output_tokens: 1200
+  });
+
+  const parsed = extractResponseJson(responsePayload);
+  const matchedQuestionNumber = String(parsed?.matchedQuestionNumber || "").trim().toUpperCase();
+  const extractedText = String(parsed?.extractedText || parsed?.questionText || "").trim();
+  const pageNumber = Math.max(1, Number(parsed?.pageNumber || 0) || 0);
+  const found = Boolean(parsed?.found) || (matchedQuestionNumber && extractedText);
+  const normalizedReferences = new Set(references.map((value) => String(value || "").trim().toUpperCase()));
+  if (!found || !matchedQuestionNumber || !normalizedReferences.has(matchedQuestionNumber) || !extractedText) {
+    return {
+      found: false,
+      matchedQuestionNumber,
+      extractedText: "",
+      pageNumber: 0
+    };
+  }
+
+  return {
+    found: true,
+    matchedQuestionNumber,
+    extractedText: clipText(extractedText, 2400),
+    pageNumber
+  };
+}
+
 function getRecommendedStudySectionCount(pageCount) {
   const totalPages = Math.max(1, Number(pageCount || 0) || 1);
   if (totalPages <= 1) {
@@ -1346,14 +1434,39 @@ async function requestAskModelAnswer({
   documentContext = null
 } = {}) {
   const worksheetQuestionReferences = extractWorksheetQuestionReferences(question);
+  const focusedWorksheetQuestion = worksheetQuestionReferences.length
+    ? await extractFocusedWorksheetQuestion({
+        question,
+        worksheetQuestionReferences,
+        documentContext
+      })
+    : null;
+  if (worksheetQuestionReferences.length && focusedWorksheetQuestion && !focusedWorksheetQuestion.found) {
+    return `I can't clearly find ${worksheetQuestionReferences.join(" or ")} on this page yet. Open the exact page or upload a closer image of that question and I'll explain that exact item.`;
+  }
+  const effectiveDocumentContext =
+    focusedWorksheetQuestion?.found && documentContext
+      ? {
+          ...documentContext,
+          content: [
+            `Exact worksheet item: ${focusedWorksheetQuestion.matchedQuestionNumber}`,
+            focusedWorksheetQuestion.pageNumber ? `Page: ${focusedWorksheetQuestion.pageNumber}` : "",
+            `Transcribed question:\n${focusedWorksheetQuestion.extractedText}`,
+            documentContext.content || ""
+          ].filter(Boolean).join("\n\n"),
+          pageVisuals: Array.isArray(documentContext.pageVisuals)
+            ? documentContext.pageVisuals.filter((page) => Number(page?.pageNumber || 0) === focusedWorksheetQuestion.pageNumber)
+            : []
+        }
+      : documentContext;
   const mathsAskSource = [
     subjectName,
     question,
-    documentContext?.title,
-    documentContext?.type,
-    documentContext?.content,
-    ...(Array.isArray(documentContext?.pageVisuals)
-      ? documentContext.pageVisuals.flatMap((page) => [page?.text || ""])
+    effectiveDocumentContext?.title,
+    effectiveDocumentContext?.type,
+    effectiveDocumentContext?.content,
+    ...(Array.isArray(effectiveDocumentContext?.pageVisuals)
+      ? effectiveDocumentContext.pageVisuals.flatMap((page) => [page?.text || ""])
       : [])
   ]
     .filter(Boolean)
@@ -1374,9 +1487,12 @@ async function requestAskModelAnswer({
     ? "For non-maths questions, keep the answer lean and teacher-led. Open with one short sentence that frames the idea or task. Then, if needed, use 2 to 5 short bullet points or numbered steps. Use at most one light horse-based comparison, and only when it clearly improves understanding."
     : "";
   const worksheetFocusInstruction =
-    worksheetQuestionReferences.length && Array.isArray(documentContext?.pageVisuals) && documentContext.pageVisuals.length
+    worksheetQuestionReferences.length && Array.isArray(effectiveDocumentContext?.pageVisuals) && effectiveDocumentContext.pageVisuals.length
       ? `If the student refers to a numbered worksheet question such as ${worksheetQuestionReferences.join(", ")}, first locate that exact question number in the supplied page images or extracted text. Answer only from that exact numbered item. Ignore nearby questions with different numbers. If the exact question number is not visible, say so clearly instead of answering a different question.`
       : "";
+  const extractedWorksheetInstruction = focusedWorksheetQuestion?.found
+    ? `Use the extracted worksheet item ${focusedWorksheetQuestion.matchedQuestionNumber} below as the primary source. Do not switch to a different nearby question.`
+    : "";
   const responsePayload = await callOpenAiJson("responses", {
     model: "gpt-4o-mini",
     input: [
@@ -1385,7 +1501,13 @@ async function requestAskModelAnswer({
         content: [
           {
             type: "input_text",
-            text: [baseTutorInstruction, mathsTutorInstruction, nonMathsTutorInstruction, worksheetFocusInstruction].filter(Boolean).join(" ")
+            text: [
+              baseTutorInstruction,
+              mathsTutorInstruction,
+              nonMathsTutorInstruction,
+              worksheetFocusInstruction,
+              extractedWorksheetInstruction
+            ].filter(Boolean).join(" ")
           }
         ]
       },
@@ -1407,12 +1529,19 @@ async function requestAskModelAnswer({
                 worksheetQuestionReferences,
                 recentHistory,
                 nextAssessment,
-                document: documentContext
+                focusedWorksheetQuestion: focusedWorksheetQuestion?.found
                   ? {
-                      title: documentContext.title,
-                      type: documentContext.type,
-                      content: documentContext.content,
-                      pageHints: documentContext.pageVisuals.map((page) => ({
+                      matchedQuestionNumber: focusedWorksheetQuestion.matchedQuestionNumber,
+                      pageNumber: focusedWorksheetQuestion.pageNumber,
+                      extractedText: focusedWorksheetQuestion.extractedText
+                    }
+                  : null,
+                document: effectiveDocumentContext
+                  ? {
+                      title: effectiveDocumentContext.title,
+                      type: effectiveDocumentContext.type,
+                      content: effectiveDocumentContext.content,
+                      pageHints: effectiveDocumentContext.pageVisuals.map((page) => ({
                         pageNumber: page.pageNumber,
                         text: page.text
                       }))
@@ -1429,7 +1558,7 @@ async function requestAskModelAnswer({
                 }
               ]
             : []),
-          ...((documentContext?.pageVisuals || []).flatMap((page) => {
+          ...((effectiveDocumentContext?.pageVisuals || []).flatMap((page) => {
             const pageContent = [];
             if (page.text) {
               pageContent.push({
