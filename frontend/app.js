@@ -12993,8 +12993,6 @@ async function requestAskAnswer(question, subject, document) {
       ? {
           title: document.title,
           type: document.type,
-          focusPageNumber: Number(document.focusPageNumber || 0) || null,
-          focusQuestionNumber: Number(document.focusQuestionNumber || 0) || null,
           content: clipText(document.content || "Preview text is not available for this document.", contentLimit),
           pageVisuals
         }
@@ -13029,56 +13027,6 @@ function getLandingAskContextLabel(documentRecord) {
     : `Asking about: ${documentRecord.title}`;
 }
 
-function extractAskQuestionNumber(value = "") {
-  const questionMatch = String(value || "").match(/\b(?:q(?:uestion)?\s*)(\d{1,3})\b/i);
-  return questionMatch ? Number(questionMatch[1]) || 0 : 0;
-}
-
-function extractFocusedQuestionBlock(pageText = "", questionNumber = 0) {
-  const targetNumber = Number(questionNumber) || 0;
-  const normalizedPageText = String(pageText || "").trim();
-  if (!targetNumber || !normalizedPageText) {
-    return "";
-  }
-
-  const escapedNumber = String(targetNumber).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const directPattern = new RegExp(
-    String.raw`(?:^|\n)\s*(?:q(?:uestion)?\s*)?${escapedNumber}(?:\s*[\)\].:-]|[\)\].:-])[\s\S]*?(?=(?:\n\s*(?:q(?:uestion)?\s*)?\d{1,3}(?:\s*[\)\].:-]|[\)\].:-]))|$)`,
-    "i"
-  );
-  const directMatch = normalizedPageText.match(directPattern)?.[0]?.trim();
-  if (directMatch) {
-    return directMatch;
-  }
-
-  const lines = normalizedPageText.split(/\n+/);
-  const startIndex = lines.findIndex((line) =>
-    new RegExp(String.raw`^\s*(?:q(?:uestion)?\s*)?${escapedNumber}(?:\s*[\)\].:-]|[\)\].:-])`, "i").test(line.trim())
-  );
-  if (startIndex < 0) {
-    return "";
-  }
-
-  const collectedLines = [];
-  for (let index = startIndex; index < lines.length; index += 1) {
-    const trimmedLine = String(lines[index] || "").trim();
-    if (
-      index > startIndex &&
-      /^(?:q(?:uestion)?\s*)?\d{1,3}(?:\s*[\)\].:-]|[\)\].:-])/i.test(trimmedLine)
-    ) {
-      break;
-    }
-    if (trimmedLine) {
-      collectedLines.push(trimmedLine);
-    }
-    if (collectedLines.join("\n").length >= 1200) {
-      break;
-    }
-  }
-
-  return collectedLines.join("\n").trim();
-}
-
 function getSubjectLandingAskPlaceholder(documentRecord) {
   if (!documentRecord) {
     return "Ask Panda about this document here.";
@@ -13100,7 +13048,7 @@ function getSubjectLandingAskPlaceholder(documentRecord) {
     : "Example: Can you explain this section in simpler language?";
 }
 
-function getLandingAskRequestDocument(documentRecord, questionText = "") {
+function getLandingAskRequestDocument(documentRecord) {
   if (!documentRecord) {
     return null;
   }
@@ -13111,24 +13059,18 @@ function getLandingAskRequestDocument(documentRecord, questionText = "") {
     const currentPage = pages[currentPageIndex] || null;
     const pageNumber = Number(currentPage?.pageNumber || currentPageIndex + 1) || 1;
     const pageText = getDocumentPageText(currentPage);
-    const focusQuestionNumber = extractAskQuestionNumber(questionText);
-    const focusedQuestionText = extractFocusedQuestionBlock(pageText, focusQuestionNumber);
     return {
       ...documentRecord,
       content: [
         `Focus page: ${pageNumber}`,
-        focusQuestionNumber ? `Focus question: ${focusQuestionNumber}` : "",
-        focusedQuestionText
-          ? `Target question text:\n${clipText(focusedQuestionText, 1200)}`
-          : pageText
-            ? `Current page text:\n${clipText(pageText, 1800)}`
+        pageText
+          ? `Current page text:\n${clipText(pageText, 1200)}`
           : "Current page text is limited. Use the supplied page image for the exact worksheet content.",
+        documentRecord.studyOverview ? `Document overview:\n${clipText(documentRecord.studyOverview, 600)}` : ""
       ].filter(Boolean).join("\n\n"),
-      focusPageNumber: pageNumber,
-      focusQuestionNumber: focusQuestionNumber || null,
       pageVisualOptions: {
         maxPages: 1,
-        maxTextPerPage: focusedQuestionText ? 180 : 140,
+        maxTextPerPage: 120,
         prioritizedPageNumbers: [pageNumber]
       }
     };
@@ -13156,7 +13098,6 @@ function getLandingAskRequestDocument(documentRecord, questionText = "") {
         : "",
       section?.sectionText ? `Source detail:\n${clipText(section.sectionText, 1200)}` : ""
     ].filter(Boolean).join("\n\n"),
-    focusQuestionNumber: extractAskQuestionNumber(questionText) || null,
     pageVisualOptions: prioritizedPageNumbers.length
       ? {
           maxPages: 2,
@@ -19619,7 +19560,7 @@ async function handleAsk({ autoPlayResponse = false } = {}) {
   }
   const question = activeSurface?.input?.value.trim() || "";
   const document = activeSurface?.kind === "landing"
-    ? getLandingAskRequestDocument(getSubjectLandingOpenDocument(subject), question)
+    ? getLandingAskRequestDocument(getSubjectLandingOpenDocument(subject))
     : getActiveAskDocument(activeSurface);
   if (!question) {
     setAskSurfaceStatus(activeSurface, "Write a question first so the AI can focus on what you need help with.");
@@ -19682,7 +19623,7 @@ function handleAskListen() {
   const subject = getSelectedSubject();
   const question = activeSurface?.input?.value.trim() || "";
   const document = activeSurface?.kind === "landing"
-    ? getLandingAskRequestDocument(getSubjectLandingOpenDocument(subject), question)
+    ? getLandingAskRequestDocument(getSubjectLandingOpenDocument(subject))
     : getActiveAskDocument(activeSurface);
 
   if (canReplayStoredAskAnswer(activeSurface, question)) {
