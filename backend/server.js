@@ -239,7 +239,8 @@ function cleanDocumentVisionPages(pageVisuals, { pageLimit = 6, textLimit = 260 
         pageNumber: Math.max(1, Number(page?.pageNumber || index + 1) || index + 1),
         text: clipText(String(page?.text || "").replace(/\s+/g, " ").trim(), textLimit),
         imageUrl,
-        askImageUrl
+        askImageUrl,
+        questionBlocks: cleanDocumentQuestionBlocks(page?.questionBlocks)
       };
     })
     .filter((page) => {
@@ -247,6 +248,21 @@ function cleanDocumentVisionPages(pageVisuals, { pageLimit = 6, textLimit = 260 
       return sourceImageUrl && (/^data:image\//i.test(sourceImageUrl) || /^https?:\/\//i.test(sourceImageUrl));
     })
     .slice(0, pageLimit);
+}
+
+function cleanDocumentQuestionBlocks(blocks) {
+  if (!Array.isArray(blocks)) {
+    return [];
+  }
+
+  return blocks
+    .map((block, index) => ({
+      questionNumber: normaliseWorksheetQuestionNumber(block?.questionNumber || block?.id || ""),
+      pageNumber: Math.max(1, Number(block?.pageNumber || 0) || 0),
+      text: clipText(String(block?.text || "").replace(/\s+\n/g, "\n").trim(), 2600),
+      order: Math.max(0, Number(block?.order || index) || index)
+    }))
+    .filter((block) => block.questionNumber && block.text);
 }
 
 function cleanAskHistoryEntries(history, { limit = 4, textLimit = 240 } = {}) {
@@ -325,6 +341,124 @@ function extractWorksheetQuestionReferences(text) {
   return [...references].slice(0, 4);
 }
 
+function normaliseWorksheetQuestionNumber(value) {
+  const raw = String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/^QUESTION\s*/i, "")
+    .replace(/^Q\s*/i, "")
+    .replace(/\s+/g, "");
+  if (!/^\d{1,3}[A-Z]?$/.test(raw)) {
+    return "";
+  }
+  return `Q${raw}`;
+}
+
+function splitWorksheetTextIntoLines(text) {
+  return String(text || "")
+    .replace(/^Page\s+\d+\s*/i, "")
+    .split(/\n+/)
+    .map((line) => String(line || "").replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+}
+
+function getWorksheetQuestionLineMatch(line) {
+  const source = String(line || "").trim();
+  if (!source) {
+    return null;
+  }
+
+  const patterns = [
+    /^(?:question|q)\s*([0-9]{1,3}[a-z]?)\b[\s:.)-]*(.*)$/i,
+    /^([0-9]{1,3}[a-z]?)\s*[\])}.:-]\s*(.+)$/i,
+    /^([0-9]{1,3}[a-z]?)\s+(?=[A-Z(])(.+)$/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = source.match(pattern);
+    if (!match) {
+      continue;
+    }
+    const questionNumber = normaliseWorksheetQuestionNumber(match[1]);
+    if (!questionNumber) {
+      continue;
+    }
+    return {
+      questionNumber,
+      remainder: String(match[2] || "").trim()
+    };
+  }
+
+  return null;
+}
+
+function buildWorksheetQuestionBlocks(text, pageNumber = 0) {
+  const lines = splitWorksheetTextIntoLines(text);
+  const blocks = [];
+  let currentBlock = null;
+
+  lines.forEach((line) => {
+    const questionLine = getWorksheetQuestionLineMatch(line);
+    if (questionLine) {
+      if (currentBlock?.textLines?.length) {
+        blocks.push(currentBlock);
+      }
+      currentBlock = {
+        questionNumber: questionLine.questionNumber,
+        pageNumber: Math.max(1, Number(pageNumber || 0) || 0),
+        textLines: [line],
+        order: blocks.length
+      };
+      return;
+    }
+
+    if (currentBlock) {
+      currentBlock.textLines.push(line);
+    }
+  });
+
+  if (currentBlock?.textLines?.length) {
+    blocks.push(currentBlock);
+  }
+
+  return blocks
+    .map((block) => ({
+      questionNumber: block.questionNumber,
+      pageNumber: block.pageNumber,
+      order: block.order,
+      text: clipText(block.textLines.join("\n").trim(), 2600)
+    }))
+    .filter((block) => block.questionNumber && block.text);
+}
+
+function findStructuredWorksheetQuestion({ references = [], pageVisuals = [] } = {}) {
+  const normalizedReferences = new Set(
+    (Array.isArray(references) ? references : [])
+      .map((value) => normaliseWorksheetQuestionNumber(value))
+      .filter(Boolean)
+  );
+  if (!normalizedReferences.size) {
+    return null;
+  }
+
+  for (const page of Array.isArray(pageVisuals) ? pageVisuals : []) {
+    const candidateBlocks = cleanDocumentQuestionBlocks(page?.questionBlocks).length
+      ? cleanDocumentQuestionBlocks(page?.questionBlocks)
+      : buildWorksheetQuestionBlocks(page?.text, page?.pageNumber);
+    const match = candidateBlocks.find((block) => normalizedReferences.has(block.questionNumber));
+    if (match) {
+      return {
+        found: true,
+        matchedQuestionNumber: match.questionNumber,
+        extractedText: match.text,
+        pageNumber: match.pageNumber
+      };
+    }
+  }
+
+  return null;
+}
+
 async function extractFocusedWorksheetQuestion({
   question,
   worksheetQuestionReferences = [],
@@ -336,6 +470,14 @@ async function extractFocusedWorksheetQuestion({
   const pageVisuals = Array.isArray(documentContext?.pageVisuals) ? documentContext.pageVisuals : [];
   if (!references.length || !pageVisuals.length) {
     return null;
+  }
+
+  const structuredMatch = findStructuredWorksheetQuestion({
+    references,
+    pageVisuals
+  });
+  if (structuredMatch?.found) {
+    return structuredMatch;
   }
 
   const responsePayload = await callOpenAiJson("responses", {
@@ -951,11 +1093,15 @@ function applyOcrTranscriptsToPages(pages, ocrByPageNumber) {
   return pages.map((page) => {
     const transcriptText = String(ocrByPageNumber.get(page.pageNumber) || "").trim();
     if (!transcriptText) {
-      return page;
+      return {
+        ...page,
+        questionBlocks: buildWorksheetQuestionBlocks(page?.text, page?.pageNumber)
+      };
     }
     return {
       ...page,
-      text: getPdfPageBlockText(page.pageNumber, transcriptText)
+      text: getPdfPageBlockText(page.pageNumber, transcriptText),
+      questionBlocks: buildWorksheetQuestionBlocks(transcriptText, page.pageNumber)
     };
   });
 }
@@ -1154,6 +1300,7 @@ async function parsePdfBuffer(buffer) {
         imageUrl,
         askImageUrl,
         ocrImageUrl,
+        questionBlocks: buildWorksheetQuestionBlocks(pageText, pageNumber),
         startIndex: currentIndex,
         endIndex: currentIndex + blockText.length
       });
@@ -1166,6 +1313,7 @@ async function parsePdfBuffer(buffer) {
         imageUrl,
         askImageUrl,
         ocrImageUrl,
+        questionBlocks: [],
         startIndex: currentIndex,
         endIndex: currentIndex
       });

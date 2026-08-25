@@ -3122,6 +3122,10 @@ function getDocumentPages(documentRecord) {
         .map((page, index) => ({
           ...page,
           pageNumber: Number(page?.pageNumber || index + 1) || index + 1,
+          askImageUrl: page?.askImageUrl || page?.imageUrl || null,
+          questionBlocks: Array.isArray(page?.questionBlocks)
+            ? page.questionBlocks.map(normaliseQuestionBlock).filter((block) => block.questionNumber && block.text)
+            : buildWorksheetQuestionBlocksFromText(String(page?.text || ""), Number(page?.pageNumber || index + 1) || index + 1),
           imageUrl:
             page?.imageUrl ||
             (index === 0 && documentRecord?.previewImageUrl ? documentRecord.previewImageUrl : null)
@@ -5970,7 +5974,10 @@ function createPersistableDocument(documentRecord) {
     pages: Array.isArray(documentRecord.pages)
       ? documentRecord.pages.map((page) => ({
           pageNumber: Number(page?.pageNumber || 0),
-          text: String(page?.text || "").trim()
+          text: String(page?.text || "").trim(),
+          questionBlocks: Array.isArray(page?.questionBlocks)
+            ? page.questionBlocks.map(normaliseQuestionBlock).filter((block) => block.questionNumber && block.text)
+            : []
         }))
       : [],
     previewImageUrl: null,
@@ -5999,7 +6006,17 @@ function createQuotaFallbackDocument(documentRecord) {
     pages: Array.isArray(documentRecord.pages)
       ? documentRecord.pages.slice(0, 10).map((page) => ({
           pageNumber: Number(page?.pageNumber || 0),
-          text: String(page?.text || "").slice(0, 1200)
+          text: String(page?.text || "").slice(0, 1200),
+          questionBlocks: Array.isArray(page?.questionBlocks)
+            ? page.questionBlocks
+                .slice(0, 6)
+                .map(normaliseQuestionBlock)
+                .filter((block) => block.questionNumber && block.text)
+                .map((block) => ({
+                  ...block,
+                  text: String(block.text || "").slice(0, 800)
+                }))
+            : []
         }))
       : [],
     studyOverview: String(documentRecord.studyOverview || "").slice(0, 1200),
@@ -11871,6 +11888,28 @@ function normaliseSavedRevisionTest(testRecord) {
   };
 }
 
+function normaliseWorksheetQuestionNumber(value) {
+  const raw = String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/^QUESTION\s*/i, "")
+    .replace(/^Q\s*/i, "")
+    .replace(/\s+/g, "");
+  if (!/^\d{1,3}[A-Z]?$/.test(raw)) {
+    return "";
+  }
+  return `Q${raw}`;
+}
+
+function normaliseQuestionBlock(block, index = 0) {
+  return {
+    questionNumber: normaliseWorksheetQuestionNumber(block?.questionNumber || block?.id || ""),
+    pageNumber: Math.max(1, Number(block?.pageNumber || 0) || 0),
+    text: String(block?.text || "").trim(),
+    order: Math.max(0, Number(block?.order || index) || index)
+  };
+}
+
 function normaliseDocument(documentRecord) {
   return {
     ...documentRecord,
@@ -11883,7 +11922,11 @@ function normaliseDocument(documentRecord) {
       ? documentRecord.pages.map((page) => ({
           pageNumber: Number(page?.pageNumber || 0),
           text: String(page?.text || "").trim(),
-          imageUrl: page?.imageUrl || null
+          imageUrl: page?.imageUrl || null,
+          askImageUrl: page?.askImageUrl || page?.imageUrl || null,
+          questionBlocks: Array.isArray(page?.questionBlocks)
+            ? page.questionBlocks.map(normaliseQuestionBlock).filter((block) => block.questionNumber && block.text)
+            : []
         }))
       : [],
     studyOverview: String(documentRecord.studyOverview || "").trim(),
@@ -13202,6 +13245,8 @@ async function buildImageDocumentData(file) {
         pageNumber: 1,
         text: "",
         imageUrl,
+        askImageUrl: imageUrl,
+        questionBlocks: [],
         startIndex: 0,
         endIndex: 0
       }
@@ -13272,7 +13317,11 @@ async function buildDocumentVisionPages(documentRecord, {
     visuals.push({
       pageNumber: page.pageNumber,
       text: page.text,
-      imageUrl
+      imageUrl,
+      askImageUrl: page.askImageUrl || imageUrl,
+      questionBlocks: Array.isArray(page.questionBlocks)
+        ? page.questionBlocks.map(normaliseQuestionBlock).filter((block) => block.questionNumber && block.text)
+        : []
     });
   }
 
@@ -20098,7 +20147,10 @@ function createWholeStudyDocumentRecord(fileName, flags, originalFile, extracted
         pageNumber: Number(page?.pageNumber || 0),
         text: String(page?.text || "").trim(),
         imageUrl: page?.imageUrl || null,
-        askImageUrl: page?.askImageUrl || page?.imageUrl || null
+        askImageUrl: page?.askImageUrl || page?.imageUrl || null,
+        questionBlocks: Array.isArray(page?.questionBlocks)
+          ? page.questionBlocks.map(normaliseQuestionBlock).filter((block) => block.questionNumber && block.text)
+          : []
       }))
     : [];
   const firstPagePreview = pages.find((page) => page.imageUrl)?.imageUrl || null;
@@ -20215,6 +20267,83 @@ function getMeaningfulPdfText(text) {
     .trim();
 }
 
+function splitWorksheetTextIntoLines(text) {
+  return String(text || "")
+    .replace(/^Page\s+\d+\s*/i, "")
+    .split(/\n+/)
+    .map((line) => String(line || "").replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+}
+
+function getWorksheetQuestionLineMatch(line) {
+  const source = String(line || "").trim();
+  if (!source) {
+    return null;
+  }
+
+  const patterns = [
+    /^(?:question|q)\s*([0-9]{1,3}[a-z]?)\b[\s:.)-]*(.*)$/i,
+    /^([0-9]{1,3}[a-z]?)\s*[\])}.:-]\s*(.+)$/i,
+    /^([0-9]{1,3}[a-z]?)\s+(?=[A-Z(])(.+)$/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = source.match(pattern);
+    if (!match) {
+      continue;
+    }
+    const questionNumber = normaliseWorksheetQuestionNumber(match[1]);
+    if (!questionNumber) {
+      continue;
+    }
+    return {
+      questionNumber,
+      remainder: String(match[2] || "").trim()
+    };
+  }
+
+  return null;
+}
+
+function buildWorksheetQuestionBlocksFromText(text, pageNumber = 0) {
+  const lines = splitWorksheetTextIntoLines(text);
+  const blocks = [];
+  let currentBlock = null;
+
+  lines.forEach((line) => {
+    const questionLine = getWorksheetQuestionLineMatch(line);
+    if (questionLine) {
+      if (currentBlock?.textLines?.length) {
+        blocks.push(currentBlock);
+      }
+      currentBlock = {
+        questionNumber: questionLine.questionNumber,
+        pageNumber: Math.max(1, Number(pageNumber || 0) || 0),
+        order: blocks.length,
+        textLines: [line]
+      };
+      return;
+    }
+
+    if (currentBlock) {
+      currentBlock.textLines.push(line);
+    }
+  });
+
+  if (currentBlock?.textLines?.length) {
+    blocks.push(currentBlock);
+  }
+
+  return blocks
+    .map((block) => normaliseQuestionBlock({
+      questionNumber: block.questionNumber,
+      pageNumber: block.pageNumber,
+      order: block.order,
+      text: block.textLines.join("\n").trim()
+    }))
+    .filter((block) => block.questionNumber && block.text);
+}
+
 function getPdfTextSignal(text) {
   const meaningfulText = getMeaningfulPdfText(text);
   const words = meaningfulText ? meaningfulText.split(/\s+/).filter(Boolean) : [];
@@ -20277,6 +20406,17 @@ async function renderPdfPageToDataUrl(page) {
 }
 
 async function extractPdfData(file) {
+  const formData = new FormData();
+  formData.append("file", file, file.name);
+  try {
+    return await requestApiFormData("/api/upload/pdf", formData, {
+      timeoutMs: 240_000,
+      timeoutMessage: "PDF processing took too long. Try a smaller file or let the backend finish downloading its OCR model, then upload again."
+    });
+  } catch (backendError) {
+    console.warn("Backend PDF processing failed; using browser-extracted PDF content instead.", backendError);
+  }
+
   const pdfjsLib = await loadPdfJs();
   const bytes = new Uint8Array(await file.arrayBuffer());
   const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
@@ -20289,13 +20429,15 @@ async function extractPdfData(file) {
     const textContent = await page.getTextContent();
     const pageText = extractPdfPageText(textContent.items).trim();
     const imageUrl = await renderPdfPageToDataUrl(page);
+    const blockText = pageText ? `Page ${pageNumber}\n${pageText}` : "";
 
     if (pageText) {
-      const blockText = `Page ${pageNumber}\n${pageText}`;
       pages.push({
         pageNumber,
         text: blockText,
         imageUrl,
+        askImageUrl: imageUrl,
+        questionBlocks: buildWorksheetQuestionBlocksFromText(pageText, pageNumber),
         startIndex: currentIndex,
         endIndex: currentIndex + blockText.length
       });
@@ -20306,41 +20448,20 @@ async function extractPdfData(file) {
         pageNumber,
         text: "",
         imageUrl,
+        askImageUrl: imageUrl,
+        questionBlocks: [],
         startIndex: currentIndex,
         endIndex: currentIndex
       });
     }
   }
 
-  const pdfData = {
-    fullText,
-    pages
-  };
-
-  if (shouldUseBackendPdfOcr(pdfData)) {
-    const formData = new FormData();
-    formData.append("file", file, file.name);
-    try {
-      return await requestApiFormData("/api/upload/pdf", formData, {
-        timeoutMs: 240_000,
-        timeoutMessage: "PDF OCR took too long. Try a smaller file or let the backend finish downloading its OCR model, then upload again."
-      });
-    } catch (error) {
-      console.warn("Backend OCR PDF processing failed; using browser-extracted PDF content instead.", error);
-      return {
-        ...pdfData,
-        ocrAttempted: true,
-        ocrUsed: false,
-        ocrError: error instanceof Error ? error.message : "OCR failed."
-      };
-    }
-  }
-
   return {
-    ...pdfData,
-    ocrAttempted: false,
+    fullText,
+    pages,
+    ocrAttempted: true,
     ocrUsed: false,
-    ocrError: ""
+    ocrError: "Backend PDF processing failed; browser text extraction was used instead."
   };
 }
 
