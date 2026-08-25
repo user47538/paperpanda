@@ -13229,6 +13229,7 @@ async function buildDocumentVisionPages(documentRecord, {
       pageNumber: Number(page?.pageNumber || index + 1) || index + 1,
       text: clipText(getDocumentPageText(page), maxTextPerPage),
       imageUrl: String(page?.imageUrl || "").trim(),
+      askImageUrl: String(page?.askImageUrl || page?.imageUrl || "").trim(),
       isSparse: shouldUseBackendOcrForPdfPage(page) || getMeaningfulPdfText(page?.text).length < sparseThreshold
     }));
 
@@ -13237,11 +13238,11 @@ async function buildDocumentVisionPages(documentRecord, {
       .map((pageNumber) => Number(pageNumber) || 0)
       .filter((pageNumber) => pageNumber > 0)
   );
-  const prioritizedPages = candidatePages.filter((page) => prioritizedSet.has(page.pageNumber) && page.imageUrl);
-  const sparsePages = candidatePages.filter((page) => page.imageUrl && page.isSparse);
+  const prioritizedPages = candidatePages.filter((page) => prioritizedSet.has(page.pageNumber) && (page.askImageUrl || page.imageUrl));
+  const sparsePages = candidatePages.filter((page) => (page.askImageUrl || page.imageUrl) && page.isSparse);
   const fallbackPages =
     !sparsePages.length && getMeaningfulPdfText(documentRecord?.content).length < 220
-      ? candidatePages.filter((page) => page.imageUrl)
+      ? candidatePages.filter((page) => page.askImageUrl || page.imageUrl)
       : [];
   const selectedPages = [...prioritizedPages];
   const fillPages = sparsePages.length ? sparsePages : fallbackPages;
@@ -13257,14 +13258,16 @@ async function buildDocumentVisionPages(documentRecord, {
 
   const visuals = [];
   for (const page of selectedPages) {
-    let imageUrl = page.imageUrl;
-    try {
-      imageUrl = await compressDocumentPageImage(
-        page.imageUrl,
-        page.isSparse ? { maxWidth: 1400, quality: 0.84 } : { maxWidth: 960, quality: 0.72 }
-      );
-    } catch (error) {
-      imageUrl = page.imageUrl;
+    let imageUrl = page.askImageUrl || page.imageUrl;
+    if (!page.isSparse || !page.askImageUrl) {
+      try {
+        imageUrl = await compressDocumentPageImage(
+          page.askImageUrl || page.imageUrl,
+          page.isSparse ? { maxWidth: 1400, quality: 0.84 } : { maxWidth: 960, quality: 0.72 }
+        );
+      } catch (error) {
+        imageUrl = page.askImageUrl || page.imageUrl;
+      }
     }
     visuals.push({
       pageNumber: page.pageNumber,
@@ -20094,7 +20097,8 @@ function createWholeStudyDocumentRecord(fileName, flags, originalFile, extracted
     ? extracted.pages.map((page) => ({
         pageNumber: Number(page?.pageNumber || 0),
         text: String(page?.text || "").trim(),
-        imageUrl: page?.imageUrl || null
+        imageUrl: page?.imageUrl || null,
+        askImageUrl: page?.askImageUrl || page?.imageUrl || null
       }))
     : [];
   const firstPagePreview = pages.find((page) => page.imageUrl)?.imageUrl || null;

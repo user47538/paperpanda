@@ -234,13 +234,18 @@ function cleanDocumentVisionPages(pageVisuals, { pageLimit = 6, textLimit = 260 
   return pageVisuals
     .map((page, index) => {
       const imageUrl = String(page?.imageUrl || "").trim();
+      const askImageUrl = String(page?.askImageUrl || imageUrl).trim();
       return {
         pageNumber: Math.max(1, Number(page?.pageNumber || index + 1) || index + 1),
         text: clipText(String(page?.text || "").replace(/\s+/g, " ").trim(), textLimit),
-        imageUrl
+        imageUrl,
+        askImageUrl
       };
     })
-    .filter((page) => page.imageUrl && (/^data:image\//i.test(page.imageUrl) || /^https?:\/\//i.test(page.imageUrl)))
+    .filter((page) => {
+      const sourceImageUrl = page.askImageUrl || page.imageUrl;
+      return sourceImageUrl && (/^data:image\//i.test(sourceImageUrl) || /^https?:\/\//i.test(sourceImageUrl));
+    })
     .slice(0, pageLimit);
 }
 
@@ -275,7 +280,7 @@ function buildAskDocumentContext(document, { compact = false } = {}) {
 
   const pageVisuals = cleanDocumentVisionPages(document.pageVisuals, {
     pageLimit: compact ? 1 : 2,
-    textLimit: compact ? 90 : 140
+    textLimit: compact ? 160 : 320
   });
   const cleanedContent = cleanDocumentStudyText(document.content);
   const contentLimit = pageVisuals.length
@@ -365,10 +370,10 @@ async function extractFocusedWorksheetQuestion({
                 text: `Page ${page.pageNumber} extracted text:\n${page.text}`
               });
             }
-            if (page?.imageUrl) {
+            if (page?.askImageUrl || page?.imageUrl) {
               content.push({
                 type: "input_image",
-                image_url: page.imageUrl,
+                image_url: page.askImageUrl || page.imageUrl,
                 detail: "high"
               });
             }
@@ -1140,12 +1145,14 @@ async function parsePdfBuffer(buffer) {
     const ocrImageUrl = needsOcrAssist
       ? await renderPdfPageToDataUrl(page, { scale: pdfOcrRenderScale, preprocessForOcr: true })
       : "";
+    const askImageUrl = ocrImageUrl || imageUrl;
 
     if (pageText) {
       pages.push({
         pageNumber,
         text: blockText,
         imageUrl,
+        askImageUrl,
         ocrImageUrl,
         startIndex: currentIndex,
         endIndex: currentIndex + blockText.length
@@ -1157,6 +1164,7 @@ async function parsePdfBuffer(buffer) {
         pageNumber,
         text: "",
         imageUrl,
+        askImageUrl,
         ocrImageUrl,
         startIndex: currentIndex,
         endIndex: currentIndex
@@ -1441,9 +1449,6 @@ async function requestAskModelAnswer({
         documentContext
       })
     : null;
-  if (worksheetQuestionReferences.length && focusedWorksheetQuestion && !focusedWorksheetQuestion.found) {
-    return `I can't clearly find ${worksheetQuestionReferences.join(" or ")} on this page yet. Open the exact page or upload a closer image of that question and I'll explain that exact item.`;
-  }
   const effectiveDocumentContext =
     focusedWorksheetQuestion?.found && documentContext
       ? {
@@ -1566,10 +1571,10 @@ async function requestAskModelAnswer({
                 text: `Document page ${page.pageNumber} extracted text:\n${page.text}`
               });
             }
-            if (page.imageUrl) {
+            if (page.askImageUrl || page.imageUrl) {
               pageContent.push({
                 type: "input_image",
-                image_url: page.imageUrl,
+                image_url: page.askImageUrl || page.imageUrl,
                 detail: "high"
               });
             }
