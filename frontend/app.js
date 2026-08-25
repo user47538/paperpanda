@@ -11883,7 +11883,8 @@ function normaliseDocument(documentRecord) {
       ? documentRecord.pages.map((page) => ({
           pageNumber: Number(page?.pageNumber || 0),
           text: String(page?.text || "").trim(),
-          imageUrl: page?.imageUrl || null
+          imageUrl: page?.imageUrl || null,
+          ocrImageUrl: page?.ocrImageUrl || null
         }))
       : [],
     studyOverview: String(documentRecord.studyOverview || "").trim(),
@@ -13196,7 +13197,7 @@ async function buildDocumentVisionPages(documentRecord, {
     .map((page, index) => ({
       pageNumber: Number(page?.pageNumber || index + 1) || index + 1,
       text: clipText(getDocumentPageText(page), maxTextPerPage),
-      imageUrl: String(page?.imageUrl || "").trim(),
+      imageUrl: String(page?.ocrImageUrl || page?.imageUrl || "").trim(),
       isSparse: shouldUseBackendOcrForPdfPage(page) || getMeaningfulPdfText(page?.text).length < sparseThreshold
     }));
 
@@ -13227,7 +13228,7 @@ async function buildDocumentVisionPages(documentRecord, {
   for (const page of selectedPages) {
     let imageUrl = page.imageUrl;
     try {
-      imageUrl = await compressDocumentPageImage(page.imageUrl, { maxWidth: 960, quality: 0.72 });
+      imageUrl = await compressDocumentPageImage(page.imageUrl, { maxWidth: 1400, quality: 0.84 });
     } catch (error) {
       imageUrl = page.imageUrl;
     }
@@ -20059,7 +20060,8 @@ function createWholeStudyDocumentRecord(fileName, flags, originalFile, extracted
     ? extracted.pages.map((page) => ({
         pageNumber: Number(page?.pageNumber || 0),
         text: String(page?.text || "").trim(),
-        imageUrl: page?.imageUrl || null
+        imageUrl: page?.imageUrl || null,
+        ocrImageUrl: page?.ocrImageUrl || null
       }))
     : [];
   const firstPagePreview = pages.find((page) => page.imageUrl)?.imageUrl || null;

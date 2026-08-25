@@ -696,10 +696,10 @@ function rebuildPdfTextIndexes(pages) {
 }
 
 function stripPdfOcrArtifacts(pages) {
-  return (Array.isArray(pages) ? pages : []).map((page) => {
-    const { ocrImageUrl, ...rest } = page || {};
-    return rest;
-  });
+  return (Array.isArray(pages) ? pages : []).map((page) => ({
+    ...(page || {}),
+    ocrImageUrl: String(page?.ocrImageUrl || "").trim() || null
+  }));
 }
 
 function didPdfPageTextsChange(beforePages, afterPages) {
@@ -1397,7 +1397,7 @@ async function requestAskModelAnswer({
               pageContent.push({
                 type: "input_image",
                 image_url: page.imageUrl,
-                detail: "low"
+                detail: "high"
               });
             }
             return pageContent;
