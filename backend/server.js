@@ -275,16 +275,18 @@ function buildAskDocumentContext(document, { compact = false } = {}) {
 
   const pageVisuals = cleanDocumentVisionPages(document.pageVisuals, {
     pageLimit: compact ? 1 : 2,
-    textLimit: compact ? 80 : 120
+    textLimit: compact ? 140 : 160
   });
   const cleanedContent = cleanDocumentStudyText(document.content);
   const contentLimit = pageVisuals.length
-    ? (compact ? 320 : 900)
+    ? (compact ? 700 : 1200)
     : (compact ? 1800 : 2400);
 
   return {
     title: clipText(String(document.title || "").trim(), 180),
     type: clipText(String(document.type || "").trim(), 120),
+    focusPageNumber: Math.max(1, Number(document.focusPageNumber || 0) || 0) || null,
+    focusQuestionNumber: Math.max(1, Number(document.focusQuestionNumber || 0) || 0) || null,
     content: clipText(cleanedContent, contentLimit),
     pageVisuals
   };
@@ -1330,7 +1332,7 @@ async function requestAskModelAnswer({
   const isLikelyMathsAsk = /(?:^|\b)(maths?|mathematics?|numeracy|algebra|equation|fraction|decimal|percentage|integer|ratio|geometry|perimeter|area|volume|probability|statistics|solve|calculate|working)\b/i.test(mathsAskSource)
     || /[=+\-*/^%<>()[\]{}|\\_~×÷±√∑∫∞≈≠≤≥πθ∆]/.test(mathsAskSource);
   const baseTutorInstruction = buildGreatTeacherInstruction(
-    "You are a helpful Australian school study support tutor. Start with the direct answer immediately, keep the response concise, and use simple age-appropriate language. Base your help only on the provided subject and document context. If worksheet page images are provided, read them directly, including maths questions, formulas, labels, and diagrams. Give guidance, worked steps, and clarification rather than claiming to have unseen information.",
+    "You are a helpful Australian school study support tutor. Start with the direct answer immediately, keep the response concise, and use simple age-appropriate language. Base your help only on the provided subject and document context. If worksheet page images are provided, read them directly, including maths questions, formulas, labels, and diagrams. Give guidance, worked steps, and clarification rather than claiming to have unseen information. If a focus page number or focus question number is provided, treat that as the exact target. Stay on that page and that numbered question unless the student clearly asks about something else nearby.",
     greatTeacherAskDecisionLens,
     greatTeacherAskDeliveryLens,
     greatTeacherAskResponseShape,
@@ -1375,6 +1377,8 @@ async function requestAskModelAnswer({
                   ? {
                       title: documentContext.title,
                       type: documentContext.type,
+                      focusPageNumber: documentContext.focusPageNumber,
+                      focusQuestionNumber: documentContext.focusQuestionNumber,
                       content: documentContext.content,
                       pageHints: documentContext.pageVisuals.map((page) => ({
                         pageNumber: page.pageNumber,
