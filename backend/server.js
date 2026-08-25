@@ -275,12 +275,12 @@ function buildAskDocumentContext(document, { compact = false } = {}) {
 
   const pageVisuals = cleanDocumentVisionPages(document.pageVisuals, {
     pageLimit: compact ? 1 : 2,
-    textLimit: compact ? 80 : 120
+    textLimit: compact ? 90 : 140
   });
   const cleanedContent = cleanDocumentStudyText(document.content);
   const contentLimit = pageVisuals.length
-    ? (compact ? 320 : 900)
-    : (compact ? 1800 : 2400);
+    ? (compact ? 420 : 1400)
+    : (compact ? 1200 : 3200);
 
   return {
     title: clipText(String(document.title || "").trim(), 180),
@@ -288,6 +288,16 @@ function buildAskDocumentContext(document, { compact = false } = {}) {
     content: clipText(cleanedContent, contentLimit),
     pageVisuals
   };
+}
+
+function isContextWindowError(error) {
+  const message = String(error instanceof Error ? error.message : error || "").toLowerCase();
+  return (
+    message.includes("context window") ||
+    message.includes("maximum context length") ||
+    message.includes("too many tokens") ||
+    message.includes("input exceeds")
+  );
 }
 
 function getRecommendedStudySectionCount(pageCount) {
@@ -696,10 +706,10 @@ function rebuildPdfTextIndexes(pages) {
 }
 
 function stripPdfOcrArtifacts(pages) {
-  return (Array.isArray(pages) ? pages : []).map((page) => ({
-    ...(page || {}),
-    ocrImageUrl: String(page?.ocrImageUrl || "").trim() || null
-  }));
+  return (Array.isArray(pages) ? pages : []).map((page) => {
+    const { ocrImageUrl, ...rest } = page || {};
+    return rest;
+  });
 }
 
 function didPdfPageTextsChange(beforePages, afterPages) {
@@ -1424,17 +1434,33 @@ app.post("/api/ask", async (request, response) => {
       return;
     }
 
-    const askDocumentContext = buildAskDocumentContext(document, { compact: true });
-    const askRecentHistory = cleanAskHistoryEntries(recentHistory, { limit: 2, textLimit: 120 });
+    const normalDocumentContext = buildAskDocumentContext(document, { compact: false });
+    const compactDocumentContext = buildAskDocumentContext(document, { compact: true });
+    const normalRecentHistory = cleanAskHistoryEntries(recentHistory, { limit: 3, textLimit: 220 });
+    const compactRecentHistory = cleanAskHistoryEntries(recentHistory, { limit: 2, textLimit: 120 });
     const cleanedAssessment = cleanAskAssessment(nextAssessment);
 
-    const answer = await requestAskModelAnswer({
-      subjectName,
-      question,
-      recentHistory: askRecentHistory,
-      nextAssessment: cleanedAssessment,
-      documentContext: askDocumentContext
-    });
+    let answer = "";
+    try {
+      answer = await requestAskModelAnswer({
+        subjectName,
+        question,
+        recentHistory: normalRecentHistory,
+        nextAssessment: cleanedAssessment,
+        documentContext: normalDocumentContext
+      });
+    } catch (error) {
+      if (!isContextWindowError(error)) {
+        throw error;
+      }
+      answer = await requestAskModelAnswer({
+        subjectName,
+        question,
+        recentHistory: compactRecentHistory,
+        nextAssessment: cleanedAssessment,
+        documentContext: compactDocumentContext
+      });
+    }
 
     response.json({ answer });
   } catch (error) {
