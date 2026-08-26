@@ -58,11 +58,11 @@ export const GP_TERMS = {
     audioText: "A noun names a person, a place, a thing or an idea. Rider is a noun. Gate is a noun. Courage is a noun, even though you cannot touch it. In this activity you will select only the nouns.",
     instruction: "Select the noun in each sentence.",
     items: [
-      { words: ["The", "rider", "opened", "the", "gate."], a: 1, skill: "nouns", why: "Rider is the naming word in this sentence." },
-      { words: ["Her", "saddle", "slipped", "off", "the", "rail."], a: 1, skill: "nouns", why: "Saddle names the thing." },
-      { words: ["Courage", "helped", "Mia", "finish", "the", "jump."], a: 0, skill: "nouns", why: "Courage is the idea being named." },
-      { words: ["The", "stable", "stayed", "cool", "all", "afternoon."], a: 1, skill: "nouns", why: "Stable names the place." },
-      { words: ["A", "helmet", "rested", "beside", "the", "bucket."], a: 1, skill: "nouns", why: "Helmet is the naming word here." }
+      { words: ["The", "rider", "opened", "the", "gate."], a: [1, 4], skill: "nouns", why: "Rider and gate are both naming words in this sentence." },
+      { words: ["Her", "saddle", "slipped", "off", "the", "rail."], a: [1, 5], skill: "nouns", why: "Saddle and rail are both nouns in this sentence." },
+      { words: ["Courage", "helped", "Mia", "finish", "the", "jump."], a: [0, 2, 5], skill: "nouns", why: "Courage, Mia, and jump are all nouns here." },
+      { words: ["The", "stable", "stayed", "cool", "all", "afternoon."], a: [1, 5], skill: "nouns", why: "Stable and afternoon are both nouns in this sentence." },
+      { words: ["A", "helmet", "rested", "beside", "the", "bucket."], a: [1, 5], skill: "nouns", why: "Helmet and bucket are both naming words here." }
     ]
   },
   verb: {
@@ -74,7 +74,7 @@ export const GP_TERMS = {
     items: [
       { words: ["The", "pony", "trots", "toward", "the", "gate."], a: 2, skill: "verbs", why: "Trots is the action word." },
       { words: ["Mia", "lifted", "the", "saddle", "carefully."], a: 1, skill: "verbs", why: "Lifted tells what Mia did." },
-      { words: ["They", "will", "ride", "at", "dawn."], a: 2, skill: "verbs", why: "Ride is the main action word in the verb group." },
+      { words: ["They", "will", "ride", "at", "dawn."], a: [1, 2], skill: "verbs", why: "Will ride works together as the verb group in this sentence." },
       { words: ["The", "farrier", "checked", "each", "hoof."], a: 2, skill: "verbs", why: "Checked tells the action." },
       { words: ["Smoke", "waited", "near", "the", "float."], a: 1, skill: "verbs", why: "Waited is the verb." }
     ]
@@ -87,8 +87,8 @@ export const GP_TERMS = {
     instruction: "Select the adjective in each sentence.",
     items: [
       { words: ["The", "grey", "pony", "waited", "by", "the", "gate."], a: 1, skill: "adjectives", why: "Grey describes the pony." },
-      { words: ["She", "held", "the", "heavy", "saddle", "steady."], a: 3, skill: "adjectives", why: "Heavy describes the saddle." },
-      { words: ["A", "nervous", "horse", "needs", "a", "calm", "rider."], a: 1, skill: "adjectives", why: "Nervous describes the horse." },
+      { words: ["She", "held", "the", "heavy", "saddle", "steady."], a: [3, 5], skill: "adjectives", why: "Heavy and steady both describe the saddle here." },
+      { words: ["A", "nervous", "horse", "needs", "a", "calm", "rider."], a: [1, 5], skill: "adjectives", why: "Nervous describes the horse, and calm describes the rider." },
       { words: ["The", "wooden", "fence", "shook", "in", "the", "wind."], a: 1, skill: "adjectives", why: "Wooden describes the fence." },
       { words: ["Her", "striped", "scarf", "slid", "off", "the", "bench."], a: 1, skill: "adjectives", why: "Striped describes the scarf." }
     ]
@@ -100,7 +100,7 @@ export const GP_TERMS = {
     audioText: "A pronoun takes the place of a noun. She can stand for Nina. Him can stand for Smoke. They can stand for more than one person. In this activity you will select only the pronouns.",
     instruction: "Select the pronoun in each sentence.",
     items: [
-      { words: ["Nina", "brushed", "Smoke,", "then", "she", "fed", "him."], a: 4, skill: "pronouns", why: "She takes the place of Nina." },
+      { words: ["Nina", "brushed", "Smoke,", "then", "she", "fed", "him."], a: [4, 6], skill: "pronouns", why: "She and him are both pronouns in this sentence." },
       { words: ["They", "opened", "the", "gate", "together."], a: 0, skill: "pronouns", why: "They stands in for more than one person." },
       { words: ["The", "saddle", "slipped,", "but", "it", "did", "not", "fall."], a: 4, skill: "pronouns", why: "It stands in for the saddle." },
       { words: ["Luca", "called", "to", "Mia,", "and", "she", "waved", "back."], a: 5, skill: "pronouns", why: "She replaces Mia." },

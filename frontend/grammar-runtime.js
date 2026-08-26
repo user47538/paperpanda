@@ -661,11 +661,14 @@ export function createGrammarProgram({
         return fallback;
       }
 
-      const savedItems = Array.isArray(savedActivity.items) && savedActivity.items.length
-        ? savedActivity.items
-        : Array.isArray(fallback.items) && fallback.items.length
-          ? fallback.items
-          : [];
+      const shouldPreferCanonicalItems = ["pick", "fix", "rewrite", "select", "build"].includes(sessionConfig?.act);
+      const savedItems = shouldPreferCanonicalItems
+        ? (Array.isArray(fallback.items) && fallback.items.length ? fallback.items : [])
+        : Array.isArray(savedActivity.items) && savedActivity.items.length
+          ? savedActivity.items
+          : Array.isArray(fallback.items) && fallback.items.length
+            ? fallback.items
+            : [];
       const itemCount = savedItems.length || 1;
 
       if (["mc", "tense", "pick", "comp", "binary", "join", "mixed"].includes(sessionConfig?.act)) {
@@ -1088,24 +1091,43 @@ export function createGrammarProgram({
       return activity?.items?.[activity.i] || null;
     }
 
+    function getAnswerIndices(item = getCurrentActivityItem()) {
+      if (!item) {
+        return [];
+      }
+      const rawAnswers = Array.isArray(item.a) ? item.a : [item.a];
+      return [...new Set(
+        rawAnswers
+          .map((value) => Number(value))
+          .filter((value) => Number.isInteger(value) && value >= 0)
+      )];
+    }
+
+    function isCorrectChoice(item = getCurrentActivityItem(), index = activity?.picked) {
+      if (!item || !Number.isInteger(index)) {
+        return false;
+      }
+      return getAnswerIndices(item).includes(index);
+    }
+
     function canAdvanceChoice(act = sessionConfig?.act, item = getCurrentActivityItem()) {
       if (!item || !activity) {
         return false;
       }
       if (act === "mc" || act === "tense") {
-        return activity.picked === item.a;
+        return isCorrectChoice(item, activity.picked);
       }
       if (act === "pick" || act === "comp" || act === "binary" || act === "join" || act === "mixed") {
-        return activity.picked === item.a || activity.attempts > 1;
+        return isCorrectChoice(item, activity.picked) || activity.attempts > 1;
       }
-      return activity.picked === item.a;
+      return isCorrectChoice(item, activity.picked);
     }
 
     function shouldRevealChoiceAnswer(act = sessionConfig?.act, item = getCurrentActivityItem()) {
       if (!item || !activity) {
         return false;
       }
-      if (activity.picked === item.a) {
+      if (isCorrectChoice(item, activity.picked)) {
         return true;
       }
       return activity.attempts > 1 && (act === "pick" || act === "comp" || act === "binary" || act === "join" || act === "mixed");
@@ -1116,12 +1138,12 @@ export function createGrammarProgram({
         return;
       }
       const item = getCurrentActivityItem();
-      if (!item || activity.picked === item.a) {
+      if (!item || isCorrectChoice(item, activity.picked)) {
         return;
       }
       const act = sessionConfig.act;
       const skillKey = act === "tense" ? "tense" : act === "pick" ? `${sessionConfig.content}s` : item.skill;
-      const isRight = index === item.a;
+      const isRight = isCorrectChoice(item, index);
       tallySkill(skillKey, isRight);
       activity.picked = index;
       if (isRight) {
@@ -1710,17 +1732,17 @@ export function createGrammarProgram({
             <div class="gp-card">
               <div class="gp-row-baseline">
                 <div class="gp-strong">${escapeHtml(term.instruction)}</div>
-                <div class="gp-meta">Tap the one word in the sentence that matches the term.</div>
+                <div class="gp-meta">Tap a word in the sentence that matches the term.</div>
               </div>
               <div class="gp-token-grid">
                 ${(item?.words || []).map((word, index) => {
                   const isChosen = activity.picked === index;
-                  const isRight = revealCorrect && index === item.a;
-                  const isWrong = activity.picked === index && index !== item.a;
+                  const isRight = revealCorrect && isCorrectChoice(item, index);
+                  const isWrong = activity.picked === index && !isCorrectChoice(item, index);
                   return `<button type="button" class="gp-token-btn${isChosen ? " is-on" : ""}${isRight ? " is-right" : ""}${isWrong ? " is-wrong" : ""}" data-gp-opt="${index}">${escapeHtml(word)}</button>`;
                 }).join("")}
               </div>
-              ${activity.feedback ? `<div class="gp-fb${activity.picked === item?.a ? " is-ok" : " is-hint"}">${escapeHtml(activity.feedback)}</div>` : ""}
+              ${activity.feedback ? `<div class="gp-fb${isCorrectChoice(item, activity.picked) ? " is-ok" : " is-hint"}">${escapeHtml(activity.feedback)}</div>` : ""}
               ${canAdvance ? `<button type="button" class="gp-cta gp-cta-plum" data-gp="next">${escapeHtml(activity.i >= (activity.items || []).length - 1 ? "Finish session" : "Next sentence")}</button>` : ""}
             </div>
           </div>
@@ -1733,8 +1755,8 @@ export function createGrammarProgram({
       return `
         <div class="gp-options" aria-label="${escapeHtml(ariaLabel)}">
           ${optionSet.map((option, index) => {
-            const isRight = revealCorrect && index === item.a;
-            const isWrong = activity.picked === index && index !== item.a;
+            const isRight = revealCorrect && isCorrectChoice(item, index);
+            const isWrong = activity.picked === index && !isCorrectChoice(item, index);
             return `
               <button type="button" class="gp-opt${isRight ? " is-right" : ""}${isWrong ? " is-wrong" : ""}" data-gp-opt="${index}">
                 <span>${escapeHtml(option)}</span>
@@ -1762,7 +1784,7 @@ export function createGrammarProgram({
               ${prompt ? `<p class="gp-meta">${escapeHtml(prompt)}</p>` : ""}
               <p class="gp-def">${escapeHtml(item.s || item.q || item.prompt || item.sentence || "")}</p>
               ${buildOptionsMarkup(item, optionSet, actType, `${title} answers`)}
-              ${activity.feedback ? `<div class="gp-fb${activity.picked === item.a ? " is-ok" : " is-hint"}">${escapeHtml(activity.feedback)}</div>` : ""}
+              ${activity.feedback ? `<div class="gp-fb${isCorrectChoice(item, activity.picked) ? " is-ok" : " is-hint"}">${escapeHtml(activity.feedback)}</div>` : ""}
               ${canAdvance ? `<button type="button" class="gp-cta gp-cta-plum" data-gp="next">Next</button>` : ""}
             </div>
           </div>
