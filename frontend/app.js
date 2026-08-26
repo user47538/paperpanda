@@ -661,13 +661,13 @@ const RP_TACK_REWARD_BY_CATEGORY = {
   girth: "girths"
 };
 const RP_STAGES = [
-  ["/property/property-stage1.png", "Before any renovations", "Bare yards, rusted sheds, broken rails. The property is waiting for its first rebuild session."],
-  ["/property/property-stage2.png", "Stage 1 - the arena", "Surface laid, hedging planted, and mirrors installed around the arena."],
-  ["/property/property-stage3.png", "Stage 2 - the stables", "Six tidy stalls, a bright aisle, and the feed room restored."],
-  ["/property/property-stage4.png", "Stage 3 - paddocks & fences", "Pasture seeded, post-and-rail fencing repaired, and the paddocks reopened."],
-  ["/property/property-stage5.png", "Stage 4 - the driveway", "The gravel drive, front gate, and entrance garden are now in place."],
-  ["/property/property-stage5-round-pen.jpeg", "Stage 5 - the round pen", "A round pen has been added for groundwork and warm-up rides."],
-  ["/property/property-stage6-back-trail.jpeg", "Stage 6 - back paddock trail", "A riding trail now loops through the back paddocks and blocks."]
+  ["/property/horse-property-stage1-base.png", "Before any renovations", "The property starts fully unrenovated: muddy yards, rusted sheds, broken rails, and no riding facilities restored yet."],
+  ["/property/horse-property-stage2-arena.jpeg", "Stage 1 - the arena", "The arena surface is in, the hedging is planted, and the first tidy training space has been rebuilt."],
+  ["/property/horse-property-stage3-stables.jpeg", "Stage 2 - the stables", "The stable block is restored with clean stalls, a working aisle, and the yard cleared back."],
+  ["/property/horse-property-stage4-paddocks.jpeg", "Stage 3 - paddocks & fences", "The paddocks are greener, fencing is repaired, and the property is starting to function again."],
+  ["/property/horse-property-stage5-driveway.jpeg", "Stage 4 - the driveway", "The front approach is shaped into a proper drive and the entrance begins to feel established."],
+  ["/property/horse-property-stage6-round-pen.jpeg", "Stage 5 - the round pen", "The entry is finished, the grounds are landscaped, and the round pen is added beside the arena."],
+  ["/property/horse-property-stage7-back-trail.jpeg", "Stage 6 - back paddock trail", "The full property is finished, with the back trail open and riders moving through the far paddocks."]
 ];
 const RP_TACK = [
   { k: "saddle", label: "Saddle", x: 38.8, y: 40.3, w: 21.5, h: 23.5, rotate: -2 },
@@ -9470,7 +9470,7 @@ function buildRewardPropertyMarkup() {
   const devActions = import.meta.env.DEV ? `
     <div class="rp-acts">
       <button class="rp-btn rp-btn-moss" data-rp="session">+ Practice session complete</button>
-      <button class="rp-btn rp-btn-plum" data-rp="renovate">+ Grammar stage complete</button>
+      <button class="rp-btn rp-btn-plum" data-rp="renovate">+ Grammar session complete</button>
       <button class="rp-btn rp-btn-ghost" data-rp="reset">Reset</button>
     </div>
   ` : "";
@@ -9480,7 +9480,7 @@ function buildRewardPropertyMarkup() {
         <div>
           <div class="rp-eyebrow">PaperPanda · shared reward world</div>
           <h2 class="rp-title">Your horse property</h2>
-          <p class="rp-sub">Practice sessions add horses and unlock rewards. Renovation stages rebuild the property. Move between the paddocks, the stables, and the tack room.</p>
+          <p class="rp-sub">Grammar and Practice sessions rebuild the property stage by stage. Practice sessions also add horses and unlock later reward choices. Move between the paddocks, the stables, and the tack room.</p>
         </div>
         ${devActions}
       </header>
@@ -9595,6 +9595,16 @@ const RewardProperty = (function () {
     return Math.max(0, Math.min(RP_STAGES.length - 1, Math.max(0, Number(sessionCount || 0) || 0)));
   }
 
+  function getEffectiveRenovationSessionCount(grammarSessions = S?.grammarSessions || 0, practiceSessions = S?.sessions || 0) {
+    return Math.max(0, Math.max(Number(grammarSessions || 0) || 0, Number(practiceSessions || 0) || 0));
+  }
+
+  function syncVisibleStage() {
+    const nextStage = getDerivedStage(getEffectiveRenovationSessionCount());
+    S.stage = nextStage;
+    return nextStage;
+  }
+
   function getStageSummary(stageIndex = 0) {
     const safeStageIndex = Math.max(0, Math.min(RP_STAGES.length - 1, Number(stageIndex || 0) || 0));
     const stage = RP_STAGES[safeStageIndex] || RP_STAGES[0] || ["", "", ""];
@@ -9609,11 +9619,17 @@ const RewardProperty = (function () {
   }
 
   function getGrammarUpgradeSummary(previousGrammarSessions = 0, nextGrammarSessions = previousGrammarSessions) {
-    const summary = getStageSummary(S?.stage || 0);
+    const practiceSessions = S?.sessions || 0;
+    const previousStageIndex = getDerivedStage(getEffectiveRenovationSessionCount(previousGrammarSessions, practiceSessions));
+    const nextStageIndex = getDerivedStage(getEffectiveRenovationSessionCount(nextGrammarSessions, practiceSessions));
+    const earned = nextStageIndex > previousStageIndex;
+    const summary = getStageSummary(nextStageIndex);
     return {
-      earned: false,
-      heading: "Shared reward ladder",
-      statusNote: "The reward ladder now progresses through completed spelling sessions and later reward choices.",
+      earned,
+      heading: earned ? "Renovation unlocked" : "Property progress synced",
+      statusNote: earned
+        ? `${summary.title} is now visible on the property.`
+        : "This grammar session is complete. The property is already showing the highest unlocked renovation stage.",
       ...summary
     };
   }
@@ -9717,7 +9733,7 @@ const RewardProperty = (function () {
 
   function getMandatoryStageCount() {
     ensureLoaded();
-    return Math.max(0, Math.min(RP_MANDATORY_REWARDS.length, Number(S.sessions || 0) || 0));
+    return Math.max(0, Math.min(RP_MANDATORY_REWARDS.length, getEffectiveRenovationSessionCount()));
   }
 
   function getOptionalRewardAllowance() {
@@ -9789,8 +9805,8 @@ const RewardProperty = (function () {
       const nextStage = RP_MANDATORY_REWARDS[mandatoryCompleted];
       const remaining = RP_MANDATORY_REWARDS.length - mandatoryCompleted;
       return remaining === RP_MANDATORY_REWARDS.length
-        ? `Sessions 1-6 rebuild the property in order. The first completed session unlocks ${nextStage.label.toLowerCase()}.`
-        : `The next completed session unlocks ${nextStage.label.toLowerCase()} as ${nextStage.badge.toLowerCase()}.`;
+        ? `The property starts unrenovated. The first completed grammar or Practice session unlocks ${nextStage.label.toLowerCase()}.`
+        : `The next completed grammar or Practice session unlocks ${nextStage.label.toLowerCase()} as ${nextStage.badge.toLowerCase()}.`;
     }
     const pendingChoices = getPendingRewardChoiceCount();
     if (pendingChoices > 0) {
@@ -9802,7 +9818,7 @@ const RewardProperty = (function () {
     if (!upcomingChoices.length) {
       return "The current reward ladder is fully claimed. Keep completing sessions to build skill and collect horses.";
     }
-    return `The next completed session will offer ${upcomingChoices.map((reward) => reward.label.toLowerCase()).join(", ")}.`;
+    return `The next completed Practice session will offer ${upcomingChoices.map((reward) => reward.label.toLowerCase()).join(", ")}.`;
   }
 
   function getRewardClaimMessage(rewardId = "") {
@@ -10009,9 +10025,10 @@ const RewardProperty = (function () {
       ? [...new Set(base.claimedRewardIds.map((value) => String(value || "")).filter((value) => RP_REWARD_BY_ID[value]))]
       : [];
     const savedSessions = Math.max(0, Number(base.sessions || 0) || 0);
-    const savedStage = Math.max(0, Math.min(RP_STAGES.length - 1, Number(base.stage || 0) || 0));
     S = {
-      stage: shouldResetGrammarProgress || shouldResetRewardProgress ? 0 : Math.max(savedStage, getDerivedStage(savedSessions)),
+      stage: shouldResetGrammarProgress || shouldResetRewardProgress
+        ? 0
+        : getDerivedStage(getEffectiveRenovationSessionCount(grammarSessions, savedSessions)),
       owned: Math.max(2, Math.min(RP_TACK.length, Number(base.owned || 2) || 2)),
       sessions: shouldResetRewardProgress ? 0 : savedSessions,
       claimedRewardIds: shouldResetRewardProgress ? [] : claimedRewardIds,
@@ -10055,9 +10072,11 @@ const RewardProperty = (function () {
     ensureLoaded();
     const nextGrammarSessions = Math.max(0, Number(doneCount || 0) || 0);
     const changed = nextGrammarSessions !== S.grammarSessions;
+    const previousStage = S.stage;
     S.grammarSessions = nextGrammarSessions;
     S.grammarSessionVersion = RP_GRAMMAR_SESSION_VERSION;
-    if (changed) {
+    syncVisibleStage();
+    if (changed || S.stage !== previousStage) {
       save();
       if (root?.isConnected) {
         render();
@@ -10162,7 +10181,7 @@ const RewardProperty = (function () {
       S.sessions = rewardCompletedCount;
       changed = true;
     }
-    const derivedStage = getDerivedStage(rewardCompletedCount);
+    const derivedStage = getDerivedStage(getEffectiveRenovationSessionCount(S.grammarSessions, rewardCompletedCount));
     if (derivedStage !== S.stage) {
       S.stage = derivedStage;
       changed = true;
@@ -10727,6 +10746,7 @@ const RewardProperty = (function () {
       const nextGrammarSessions = Math.max(0, Number(options.grammarSessions || 0) || 0);
       S.grammarSessions = nextGrammarSessions;
       S.grammarSessionVersion = RP_GRAMMAR_SESSION_VERSION;
+      syncVisibleStage();
     }
     bind();
     render();
@@ -10787,7 +10807,7 @@ function buildSpellingRewardLadderMarkup(snapshot) {
     <article class="ss-reward-ladder">
       <div class="ss-reward-ladder__head">
         <p class="eyebrow">Reward ladder</p>
-        <p class="ss-reward-ladder__copy">Sessions 1–6 build the six renovation stages, in order. Nothing else can be added until all six are complete. After that the student is offered three rewards each session — one tack, one property, one arena — and picks one.</p>
+        <p class="ss-reward-ladder__copy">The six renovation stages fill in as grammar or Practice sessions are completed. After the six Practice sessions are done, each new Practice session offers three rewards — one tack, one property, one arena — and the student picks one.</p>
       </div>
       <div class="ss-reward-ladder__list">
         ${snapshot.entries.map((reward, index) => `
@@ -10825,7 +10845,7 @@ function buildSpellingRewardChoiceMarkup(snapshot) {
       <article class="ss-reward-choice">
         <p class="eyebrow">Reward choice</p>
         <h5>${escapeHtml(snapshot.pendingChoiceCount > 1 ? `${snapshot.pendingChoiceCount} choices waiting` : "Choose your next reward")}</h5>
-        <p>Choose one reward from the three offered tracks for this completed session.</p>
+        <p>Choose one reward from the three offered tracks for this completed Practice session.</p>
         <div class="ss-reward-choice__grid">
           ${snapshot.availableChoices.map((reward) => `
             <button type="button" class="ss-reward-choice__card" data-spelling-claim-reward="${escapeHtml(reward.id)}">
@@ -10842,8 +10862,8 @@ function buildSpellingRewardChoiceMarkup(snapshot) {
     return `
       <article class="ss-reward-choice">
         <p class="eyebrow">Next reward set</p>
-        <h5>Another choice unlocks next session</h5>
-        <p>The next completed session will offer one tack, one property, and one arena reward. These are the next three in line.</p>
+        <h5>Another choice unlocks next Practice session</h5>
+        <p>The next completed Practice session will offer one tack, one property, and one arena reward. These are the next three in line.</p>
         <div class="ss-reward-choice__grid">
           ${snapshot.upcomingChoices.map((reward) => `
             <article class="ss-reward-choice__card is-static">

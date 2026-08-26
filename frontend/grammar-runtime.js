@@ -233,7 +233,7 @@ export function createGrammarProgram({
       }
       const remainingActivities = Math.max(0, readyMeta.size - getCompletedActivitiesInSession(readyMeta.sessionNumber));
       if (remainingActivities <= 0) {
-        return "This grammar session is ready to finish. Property rewards now progress through completed spelling sessions.";
+        return "This grammar session is ready to finish. Completing it will unlock the next property renovation.";
       }
       return remainingActivities === 1
         ? "Finish 1 more activity in this session to complete the grammar set."
