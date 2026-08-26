@@ -498,10 +498,7 @@ export function createGrammarProgram({
         audio.prog = 100;
       }
       if (savedCurrent?.activity && cfg.act !== "game") {
-        activity = clonePlainData(savedCurrent.activity);
-        if (cfg.act === "pick" && !Array.isArray(activity?.items)) {
-          activity = initActivity();
-        }
+        activity = normaliseSavedActivity(clonePlainData(savedCurrent.activity));
         audio.done = true;
         audio.prog = 100;
         view = "activity";
@@ -647,6 +644,126 @@ export function createGrammarProgram({
         return { items: getReviewItems(), i: 0, picked: null, attempts: 0, right: 0, feedback: "" };
       }
       return {};
+    }
+
+    function clampIndex(value = 0, max = 0) {
+      if (max <= 0) {
+        return 0;
+      }
+      return Math.max(0, Math.min(max - 1, Number(value || 0) || 0));
+    }
+
+    function normaliseSavedActivity(savedActivity) {
+      const fallback = initActivity();
+      if (!fallback || !savedActivity || typeof savedActivity !== "object" || Array.isArray(savedActivity)) {
+        return fallback;
+      }
+
+      const savedItems = Array.isArray(savedActivity.items) && savedActivity.items.length
+        ? savedActivity.items
+        : Array.isArray(fallback.items) && fallback.items.length
+          ? fallback.items
+          : [];
+      const itemCount = savedItems.length || 1;
+
+      if (["mc", "tense", "pick", "comp", "binary", "join", "mixed"].includes(sessionConfig?.act)) {
+        const nextIndex = clampIndex(savedActivity.i, itemCount);
+        const currentItem = savedItems[nextIndex] || null;
+        const optionCount = Array.isArray(currentItem?.opts) ? currentItem.opts.length : 0;
+        return {
+          ...fallback,
+          items: savedItems,
+          i: nextIndex,
+          picked: Number.isInteger(savedActivity.picked) && savedActivity.picked >= 0 && savedActivity.picked < optionCount
+            ? savedActivity.picked
+            : null,
+          attempts: Math.max(0, Number(savedActivity.attempts || 0) || 0),
+          right: Math.max(0, Number(savedActivity.right || 0) || 0),
+          feedback: String(savedActivity.feedback || ""),
+          replayIndex: sessionConfig?.act === "comp" ? Math.max(-1, Number(savedActivity.replayIndex ?? -1) || -1) : -1,
+          reading: sessionConfig?.act === "comp" ? Math.max(-1, Number(savedActivity.reading ?? -1) || -1) : undefined,
+          playing: false
+        };
+      }
+
+      if (sessionConfig?.act === "fix") {
+        const filled = savedActivity.filled && typeof savedActivity.filled === "object" && !Array.isArray(savedActivity.filled)
+          ? Object.fromEntries(
+              Object.entries(savedActivity.filled)
+                .map(([slotKey, value]) => [String(slotKey || ""), String(value || "")])
+                .filter(([slotKey]) => slotKey)
+            )
+          : {};
+        return {
+          ...fallback,
+          items: savedItems,
+          i: clampIndex(savedActivity.i, itemCount),
+          filled,
+          chip: String(savedActivity.chip || ""),
+          right: Math.max(0, Number(savedActivity.right || 0) || 0),
+          feedback: String(savedActivity.feedback || "")
+        };
+      }
+
+      if (sessionConfig?.act === "write") {
+        return {
+          ...fallback,
+          text: String(savedActivity.text || ""),
+          submitted: Boolean(savedActivity.submitted)
+        };
+      }
+
+      if (sessionConfig?.act === "rewrite") {
+        return {
+          ...fallback,
+          items: savedItems,
+          i: clampIndex(savedActivity.i, itemCount),
+          text: String(savedActivity.text || ""),
+          attempts: Math.max(0, Number(savedActivity.attempts || 0) || 0),
+          right: Math.max(0, Number(savedActivity.right || 0) || 0),
+          feedback: String(savedActivity.feedback || ""),
+          checked: Boolean(savedActivity.checked)
+        };
+      }
+
+      if (sessionConfig?.act === "select") {
+        const nextIndex = clampIndex(savedActivity.i, itemCount);
+        const currentItem = savedItems[nextIndex] || {};
+        const wordCount = Array.isArray(currentItem.words) ? currentItem.words.length : 0;
+        const normaliseTokenIndex = (value) => Number.isInteger(value) && value >= 0 && value < wordCount ? value : null;
+        return {
+          ...fallback,
+          items: savedItems,
+          i: nextIndex,
+          subjectPick: normaliseTokenIndex(savedActivity.subjectPick),
+          verbPick: normaliseTokenIndex(savedActivity.verbPick),
+          attempts: Math.max(0, Number(savedActivity.attempts || 0) || 0),
+          right: Math.max(0, Number(savedActivity.right || 0) || 0),
+          feedback: String(savedActivity.feedback || ""),
+          checked: Boolean(savedActivity.checked)
+        };
+      }
+
+      if (sessionConfig?.act === "build") {
+        const choices = savedActivity.choices && typeof savedActivity.choices === "object" && !Array.isArray(savedActivity.choices)
+          ? Object.fromEntries(
+              Object.entries(savedActivity.choices)
+                .map(([groupIndex, optionIndex]) => [String(groupIndex || ""), Math.max(0, Number(optionIndex || 0) || 0)])
+                .filter(([groupIndex]) => groupIndex)
+            )
+          : {};
+        return {
+          ...fallback,
+          items: savedItems,
+          i: clampIndex(savedActivity.i, itemCount),
+          choices,
+          right: Math.max(0, Number(savedActivity.right || 0) || 0),
+          feedback: String(savedActivity.feedback || ""),
+          checked: Boolean(savedActivity.checked)
+        };
+      }
+
+      return fallback;
     }
 
     function startActivity() {

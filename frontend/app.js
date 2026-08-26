@@ -6475,6 +6475,19 @@ function normaliseGrammarState(grammar, subjectId = "") {
   const pendingResult = Math.max(0, Number(next.pendingResult || 0) || 0);
   const normaliseResultDetails = (details) => {
     const source = details && typeof details === "object" && !Array.isArray(details) ? details : {};
+    const propertyUpgrade = source.propertyUpgrade && typeof source.propertyUpgrade === "object" && !Array.isArray(source.propertyUpgrade)
+      ? {
+          earned: Boolean(source.propertyUpgrade.earned),
+          heading: String(source.propertyUpgrade.heading || ""),
+          statusNote: String(source.propertyUpgrade.statusNote || ""),
+          stageIndex: Math.max(0, Number(source.propertyUpgrade.stageIndex || 0) || 0),
+          stageNumber: Math.max(0, Number(source.propertyUpgrade.stageNumber || 0) || 0),
+          image: String(source.propertyUpgrade.image || ""),
+          title: String(source.propertyUpgrade.title || ""),
+          label: String(source.propertyUpgrade.label || ""),
+          description: String(source.propertyUpgrade.description || "")
+        }
+      : null;
     return {
       roundScores: Array.isArray(source.roundScores)
         ? source.roundScores.map((score) => Math.max(0, Number(score || 0) || 0))
@@ -6482,7 +6495,8 @@ function normaliseGrammarState(grammar, subjectId = "") {
       missed: Array.isArray(source.missed)
         ? [...new Set(source.missed.map((value) => String(value || "").trim()).filter(Boolean))]
         : [],
-      replayEvidence: String(source.replayEvidence || "")
+      replayEvidence: String(source.replayEvidence || ""),
+      propertyUpgrade
     };
   };
   return {
