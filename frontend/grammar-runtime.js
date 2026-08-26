@@ -477,6 +477,7 @@ export function createGrammarProgram({
     }
 
     function openSession(index) {
+      refreshState();
       const cfg = getSessionConfig(index);
       if (!cfg) {
         return;
@@ -515,6 +516,7 @@ export function createGrammarProgram({
     }
 
     function openReadySession() {
+      refreshState();
       const readyIndex = getReadySessionIndex();
       if (readyIndex >= 0) {
         openSession(readyIndex);
@@ -669,7 +671,11 @@ export function createGrammarProgram({
       if (["mc", "tense", "pick", "comp", "binary", "join", "mixed"].includes(sessionConfig?.act)) {
         const nextIndex = clampIndex(savedActivity.i, itemCount);
         const currentItem = savedItems[nextIndex] || null;
-        const optionCount = Array.isArray(currentItem?.opts) ? currentItem.opts.length : 0;
+        const optionCount = sessionConfig?.act === "pick"
+          ? Array.isArray(currentItem?.words) ? currentItem.words.length : 0
+          : sessionConfig?.act === "tense"
+            ? 3
+            : Array.isArray(currentItem?.opts) ? currentItem.opts.length : 0;
         return {
           ...fallback,
           items: savedItems,
@@ -2292,6 +2298,7 @@ export function createGrammarProgram({
     }
 
     function goToSessionSurface({ clearPendingResult = false, autoOpenReady = !clearPendingResult } = {}) {
+      refreshState();
       stopAll();
       tab = "hub";
       if (clearPendingResult && G.pendingResult) {
