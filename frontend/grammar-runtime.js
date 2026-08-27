@@ -2524,14 +2524,22 @@ export function createGrammarProgram({
       return true;
     }
 
+    function clearPendingResultState() {
+      if (!G.pendingResult) {
+        return false;
+      }
+      recentCompletedResultNumber = G.pendingResult;
+      G.pendingResult = null;
+      saveState({ skipRemoteSync: true });
+      return true;
+    }
+
     function goToSessionSurface({ clearPendingResult = false, autoOpenReady = !clearPendingResult } = {}) {
       refreshState();
       stopAll();
       tab = "hub";
-      if (clearPendingResult && G.pendingResult) {
-        recentCompletedResultNumber = G.pendingResult;
-        G.pendingResult = null;
-        saveState({ skipRemoteSync: true });
+      if (clearPendingResult) {
+        clearPendingResultState();
       }
       if (!clearPendingResult && G.pendingResult && openPendingResult(G.pendingResult)) {
         return;
@@ -2664,6 +2672,9 @@ export function createGrammarProgram({
         if (target.dataset.gpTab) {
           if (sessionConfig && view !== "results" && sessionConfig.n > G.done) {
             persistCurrentProgress();
+          }
+          if (view === "results" && target.dataset.gpTab !== "hub") {
+            clearPendingResultState();
           }
           if (target.dataset.gpTab === "hub") {
             const leavingResults = view === "results";
