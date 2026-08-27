@@ -6046,21 +6046,23 @@ function createQuotaFallbackDocument(documentRecord) {
   };
 }
 
-function createPersistableGrammarState(grammar, subjectId = "") {
+function createPersistableGrammarState(grammar, subjectId = "", { includeCurrent = true } = {}) {
   const normalized = normaliseGrammarState(grammar, subjectId);
   return {
     ...normalized,
+    current: includeCurrent ? normalized.current : null,
     pendingResult: null
   };
 }
 
-function createPersistableSubjects(subjects) {
+function createPersistableSubjects(subjects, { compactDocuments = false, includeGrammarCurrent = true } = {}) {
+  const documentMapper = compactDocuments ? createQuotaFallbackDocument : createPersistableDocument;
   return subjects.map((subject) => ({
     ...subject,
     documents: Array.isArray(subject.documents)
-      ? subject.documents.map(createPersistableDocument)
+      ? subject.documents.map(documentMapper)
       : [],
-    grammar: createPersistableGrammarState(subject.grammar, subject.id)
+    grammar: createPersistableGrammarState(subject.grammar, subject.id, { includeCurrent: includeGrammarCurrent })
   }));
 }
 
@@ -6072,6 +6074,20 @@ function createQuotaFallbackSubjects(subjects) {
       ? subject.documents.map(createQuotaFallbackDocument)
       : [],
     grammar: createPersistableGrammarState(subject.grammar, subject.id)
+  }));
+}
+
+function createRemoteSyncSubjects(subjects) {
+  return createPersistableSubjects(subjects, { includeGrammarCurrent: false });
+}
+
+function createRemoteSyncFallbackSubjects(subjects) {
+  return createPersistableSubjects(subjects, {
+    compactDocuments: true,
+    includeGrammarCurrent: false
+  }).map((subject) => ({
+    ...subject,
+    askHistory: Array.isArray(subject.askHistory) ? subject.askHistory.slice(-5) : []
   }));
 }
 
@@ -11851,6 +11867,13 @@ function createRemoteSubjectsSyncError(error) {
   return new Error("PaperPanda could not sync these documents to the shared account just now.");
 }
 
+function isRemoteSubjectsPayloadTooLarge(error) {
+  return Boolean(
+    error instanceof Error &&
+    (error.status === 413 || /too large|payload|entity too large|request entity/i.test(error.message || ""))
+  );
+}
+
 function updateRemoteSubjectsSaveWaiters() {
   const hasPendingSync = remoteSubjectsSaveInFlight || Boolean(remoteSubjectsSaveQueuedSnapshot);
   remoteSubjectsSaveWaiters = remoteSubjectsSaveWaiters.filter((waiter) => {
@@ -11883,7 +11906,7 @@ function waitForRemoteSubjectsPersist(sequence = remoteSubjectsSaveSequence) {
   });
 }
 
-function queueRemoteSubjectsPersist(subjectsSnapshot) {
+function queueRemoteSubjectsPersist(subjectsSnapshot, fallbackSubjectsSnapshot = null) {
   if (!state.authToken) {
     return 0;
   }
@@ -11892,7 +11915,8 @@ function queueRemoteSubjectsPersist(subjectsSnapshot) {
   remoteSubjectsSaveSequence = sequence;
   remoteSubjectsSaveQueuedSnapshot = {
     sequence,
-    subjects: subjectsSnapshot
+    subjects: subjectsSnapshot,
+    fallbackSubjects: fallbackSubjectsSnapshot
   };
   if (remoteSubjectsSaveInFlight) {
     return sequence;
@@ -11919,12 +11943,46 @@ function queueRemoteSubjectsPersist(subjectsSnapshot) {
         if (remoteSubjectsCommittedSequence >= remoteSubjectsFailedSequence) {
           remoteSubjectsLastError = null;
         }
+        if (elements?.uploadStatus && elements.uploadStatus.textContent === "PaperPanda saved a lighter shared-account copy so your latest learning progress still syncs across devices.") {
+          elements.uploadStatus.textContent = "";
+        }
       } catch (error) {
-        remoteSubjectsFailedSequence = Math.max(remoteSubjectsFailedSequence, snapshot.sequence);
-        remoteSubjectsLastError = createRemoteSubjectsSyncError(error);
-        console.error("Remote subject sync failed.", remoteSubjectsLastError);
-        if (elements?.uploadStatus) {
-          elements.uploadStatus.textContent = remoteSubjectsLastError.message;
+        if (isRemoteSubjectsPayloadTooLarge(error) && Array.isArray(snapshot.fallbackSubjects)) {
+          try {
+            await requestApi(
+              "/api/account/subjects",
+              { subjects: snapshot.fallbackSubjects },
+              false,
+              {
+                headers: {
+                  ...buildAuthHeaders()
+                },
+                method: "PUT"
+              }
+            );
+            remoteSubjectsCommittedSequence = Math.max(remoteSubjectsCommittedSequence, snapshot.sequence);
+            if (remoteSubjectsCommittedSequence >= remoteSubjectsFailedSequence) {
+              remoteSubjectsLastError = null;
+            }
+            if (elements?.uploadStatus) {
+              elements.uploadStatus.textContent =
+                "PaperPanda saved a lighter shared-account copy so your latest learning progress still syncs across devices.";
+            }
+          } catch (fallbackError) {
+            remoteSubjectsFailedSequence = Math.max(remoteSubjectsFailedSequence, snapshot.sequence);
+            remoteSubjectsLastError = createRemoteSubjectsSyncError(fallbackError);
+            console.error("Remote subject sync failed.", remoteSubjectsLastError);
+            if (elements?.uploadStatus) {
+              elements.uploadStatus.textContent = remoteSubjectsLastError.message;
+            }
+          }
+        } else {
+          remoteSubjectsFailedSequence = Math.max(remoteSubjectsFailedSequence, snapshot.sequence);
+          remoteSubjectsLastError = createRemoteSubjectsSyncError(error);
+          console.error("Remote subject sync failed.", remoteSubjectsLastError);
+          if (elements?.uploadStatus) {
+            elements.uploadStatus.textContent = remoteSubjectsLastError.message;
+          }
         }
       }
       updateRemoteSubjectsSaveWaiters();
@@ -11945,6 +12003,8 @@ function persistSubjects({ skipRemoteSync = false } = {}) {
   const accountKey = normaliseAccountKey(state.currentUserEmail);
   const storedSubjectsMap = loadStoredSubjectsMap();
   const persistableSubjects = createPersistableSubjects(state.subjects);
+  const remoteSyncSubjects = createRemoteSyncSubjects(state.subjects);
+  const remoteFallbackSubjects = createRemoteSyncFallbackSubjects(state.subjects);
   queueIndexedDbSubjectsPersist(accountKey, persistableSubjects);
   const persistResult = saveStoredSubjectsMapForAccount(storedSubjectsMap, accountKey, state.subjects);
   if (persistResult === "fallback" && elements?.uploadStatus) {
@@ -11959,7 +12019,7 @@ function persistSubjects({ skipRemoteSync = false } = {}) {
   }
 
   if (!skipRemoteSync) {
-    const sequence = queueRemoteSubjectsPersist(persistableSubjects);
+    const sequence = queueRemoteSubjectsPersist(remoteSyncSubjects, remoteFallbackSubjects);
     syncPreviewPersistence();
     return sequence;
   }
