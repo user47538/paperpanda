@@ -6347,6 +6347,88 @@ function mergeSavedRevisionTestsForSubject(preferredSubject, fallbackSubject) {
   );
 }
 
+function mergeGrammarSkills(primarySkills, secondarySkills) {
+  const merged = {};
+  const keys = new Set([
+    ...Object.keys(primarySkills && typeof primarySkills === "object" ? primarySkills : {}),
+    ...Object.keys(secondarySkills && typeof secondarySkills === "object" ? secondarySkills : {})
+  ]);
+  keys.forEach((skillKey) => {
+    const primary = primarySkills?.[skillKey] || {};
+    const secondary = secondarySkills?.[skillKey] || {};
+    merged[skillKey] = {
+      right: Math.max(0, Number(primary.right || 0) || 0, Number(secondary.right || 0) || 0),
+      wrong: Math.max(0, Number(primary.wrong || 0) || 0, Number(secondary.wrong || 0) || 0),
+      lastSession: Math.max(0, Number(primary.lastSession || 0) || 0, Number(secondary.lastSession || 0) || 0)
+    };
+  });
+  return merged;
+}
+
+function mergeGrammarResults(primaryResults, secondaryResults) {
+  const merged = new Map();
+  [...(Array.isArray(primaryResults) ? primaryResults : []), ...(Array.isArray(secondaryResults) ? secondaryResults : [])].forEach((entry) => {
+    const activityNumber = Math.max(1, Number(entry?.n || 0) || 1);
+    const current = merged.get(activityNumber);
+    if (!current) {
+      merged.set(activityNumber, entry);
+      return;
+    }
+    const currentTime = new Date(String(current?.at || "")).getTime() || 0;
+    const nextTime = new Date(String(entry?.at || "")).getTime() || 0;
+    if (nextTime >= currentTime) {
+      merged.set(activityNumber, entry);
+    }
+  });
+  return [...merged.values()].sort((left, right) => Number(left?.n || 0) - Number(right?.n || 0));
+}
+
+function chooseMergedGrammarCurrent(primaryGrammar, secondaryGrammar, mergedDone) {
+  const candidates = [primaryGrammar, secondaryGrammar]
+    .map((grammar) => {
+      const current = grammar?.current && typeof grammar.current === "object" && !Array.isArray(grammar.current)
+        ? grammar.current
+        : null;
+      if (!current) {
+        return null;
+      }
+      const activityNumber = Math.max(0, Number(current.n || 0) || 0);
+      if (!activityNumber || activityNumber <= mergedDone) {
+        return null;
+      }
+      const updatedAt = new Date(String(current.updatedAt || "")).getTime() || 0;
+      return { current, activityNumber, updatedAt };
+    })
+    .filter(Boolean)
+    .sort((left, right) => right.activityNumber - left.activityNumber || right.updatedAt - left.updatedAt);
+
+  return candidates[0]?.current || null;
+}
+
+function mergeGrammarStates(primaryGrammar, secondaryGrammar, subjectId = "") {
+  const primary = normaliseGrammarState(primaryGrammar, subjectId);
+  const secondary = normaliseGrammarState(secondaryGrammar, subjectId);
+  const mergedDone = Math.max(primary.done, secondary.done);
+  const mergedCurrent = chooseMergedGrammarCurrent(primary, secondary, mergedDone);
+  const mergedPendingResult = Math.max(
+    0,
+    Number(primary.pendingResult || 0) || 0,
+    Number(secondary.pendingResult || 0) || 0
+  );
+
+  return normaliseGrammarState({
+    ...secondary,
+    ...primary,
+    enabled: primary.enabled || secondary.enabled,
+    done: mergedDone,
+    audioHeard: [...new Set([...(secondary.audioHeard || []), ...(primary.audioHeard || [])])],
+    skills: mergeGrammarSkills(primary.skills, secondary.skills),
+    results: mergeGrammarResults(primary.results, secondary.results),
+    pendingResult: mergedPendingResult > 0 ? Math.min(mergedDone, mergedPendingResult) : null,
+    current: mergedCurrent
+  }, subjectId);
+}
+
 function mergeStoredSubjectSnapshots(primarySubject, secondarySubject, index) {
   if (!primarySubject) {
     return hydrateStoredSubject(secondarySubject, index);
@@ -6367,7 +6449,8 @@ function mergeStoredSubjectSnapshots(primarySubject, secondarySubject, index) {
     assessments: mergeAssessmentsForSubject(preferredSubject, fallbackSubject),
     watch: mergeWatchItemsForSubject(preferredSubject, fallbackSubject),
     savedRevisionTests: mergeSavedRevisionTestsForSubject(preferredSubject, fallbackSubject),
-    hiddenWatchUrls: [...new Set([...(fallbackSubject.hiddenWatchUrls || []), ...(preferredSubject.hiddenWatchUrls || [])])]
+    hiddenWatchUrls: [...new Set([...(fallbackSubject.hiddenWatchUrls || []), ...(preferredSubject.hiddenWatchUrls || [])])],
+    grammar: mergeGrammarStates(preferredSubject?.grammar, fallbackSubject?.grammar, preferredSubject?.id || fallbackSubject?.id || "")
   }, index);
 }
 
