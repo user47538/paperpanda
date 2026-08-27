@@ -12,6 +12,7 @@ import {
   GP_SELECT,
   GP_SESSIONS,
   GP_SKILLS,
+  GP_SORT,
   GP_TENSE,
   GP_TERMS
 } from "./grammar-content.js";
@@ -25,6 +26,7 @@ export function createGrammarProgram({
   RewardProperty
 }) {
   return (function () {
+    const GRAMMAR_CURRENT_SNAPSHOT_VERSION = 1;
     const GAME_SPAWN_MS = [1250, 1050, 900];
     const GAME_DURATION_MS = [7200, 5800, 4600];
     let root = null;
@@ -282,6 +284,7 @@ export function createGrammarProgram({
         return;
       }
       const nextCurrent = {
+        version: GRAMMAR_CURRENT_SNAPSHOT_VERSION,
         n: sessionConfig.n,
         title: sessionConfig.title,
         act: sessionConfig.act,
@@ -639,6 +642,9 @@ export function createGrammarProgram({
       if (sessionConfig.act === "select") {
         return { items: GP_SELECT[sessionConfig.content] || [], i: 0, subjectPick: null, verbPick: null, attempts: 0, right: 0, feedback: "", checked: false };
       }
+      if (sessionConfig.act === "sort") {
+        return { items: GP_SORT[sessionConfig.content] || [], i: 0, placements: {}, selectedToken: null, attempts: 0, right: 0, feedback: "", checked: false };
+      }
       if (sessionConfig.act === "build") {
         return { items: GP_BUILD[sessionConfig.content] || [], i: 0, choices: {}, right: 0, feedback: "", checked: false };
       }
@@ -661,7 +667,7 @@ export function createGrammarProgram({
         return fallback;
       }
 
-      const shouldPreferCanonicalItems = ["pick", "fix", "rewrite", "select", "build"].includes(sessionConfig?.act);
+      const shouldPreferCanonicalItems = ["pick", "fix", "rewrite", "select", "sort", "build"].includes(sessionConfig?.act);
       const savedItems = shouldPreferCanonicalItems
         ? (Array.isArray(fallback.items) && fallback.items.length ? fallback.items : [])
         : Array.isArray(savedActivity.items) && savedActivity.items.length
@@ -746,6 +752,32 @@ export function createGrammarProgram({
           i: nextIndex,
           subjectPick: normaliseTokenIndex(savedActivity.subjectPick),
           verbPick: normaliseTokenIndex(savedActivity.verbPick),
+          attempts: Math.max(0, Number(savedActivity.attempts || 0) || 0),
+          right: Math.max(0, Number(savedActivity.right || 0) || 0),
+          feedback: String(savedActivity.feedback || ""),
+          checked: Boolean(savedActivity.checked)
+        };
+      }
+
+      if (sessionConfig?.act === "sort") {
+        const nextIndex = clampIndex(savedActivity.i, itemCount);
+        const currentItem = savedItems[nextIndex] || {};
+        const tokenCount = Array.isArray(currentItem.tokens) ? currentItem.tokens.length : 0;
+        const validColumns = new Set((currentItem.columns || []).map((column) => String(column?.key || "")).filter(Boolean));
+        const placements = savedActivity.placements && typeof savedActivity.placements === "object" && !Array.isArray(savedActivity.placements)
+          ? Object.fromEntries(
+              Object.entries(savedActivity.placements)
+                .map(([tokenIndex, columnKey]) => [Number(tokenIndex), String(columnKey || "")])
+                .filter(([tokenIndex, columnKey]) => Number.isInteger(tokenIndex) && tokenIndex >= 0 && tokenIndex < tokenCount && validColumns.has(columnKey))
+            )
+          : {};
+        const selectedToken = Number(savedActivity.selectedToken);
+        return {
+          ...fallback,
+          items: savedItems,
+          i: nextIndex,
+          placements,
+          selectedToken: Number.isInteger(selectedToken) && selectedToken >= 0 && selectedToken < tokenCount ? selectedToken : null,
           attempts: Math.max(0, Number(savedActivity.attempts || 0) || 0),
           right: Math.max(0, Number(savedActivity.right || 0) || 0),
           feedback: String(savedActivity.feedback || ""),
@@ -1197,6 +1229,8 @@ export function createGrammarProgram({
       activity.text = "";
       activity.subjectPick = null;
       activity.verbPick = null;
+      activity.placements = {};
+      activity.selectedToken = null;
       activity.choices = {};
       persistCurrentProgress();
       paint();
@@ -1375,6 +1409,87 @@ export function createGrammarProgram({
         activity.feedback = activity.attempts === 1
           ? "The subject is who or what the sentence is about. The verb is the action or state."
           : item.why;
+      }
+      persistCurrentProgress();
+      paint();
+    }
+
+    function selectSortToken(index) {
+      if (!activity || activity.checked) {
+        return;
+      }
+      activity.selectedToken = activity.selectedToken === index ? null : index;
+      activity.feedback = "";
+      persistCurrentProgress();
+      paint();
+    }
+
+    function placeSortToken(columnKey = "", tokenIndex = activity?.selectedToken) {
+      if (!activity || activity.checked) {
+        return;
+      }
+      const item = getCurrentActivityItem();
+      const validColumns = new Set((item?.columns || []).map((column) => String(column?.key || "")).filter(Boolean));
+      if (!validColumns.has(columnKey)) {
+        return;
+      }
+      if (!Number.isInteger(tokenIndex) || tokenIndex < 0 || tokenIndex >= (item?.tokens || []).length) {
+        activity.feedback = "Choose a word first.";
+        paint();
+        return;
+      }
+      activity.placements = { ...activity.placements, [tokenIndex]: columnKey };
+      activity.selectedToken = null;
+      activity.feedback = "";
+      persistCurrentProgress();
+      paint();
+    }
+
+    function removeSortPlacement(tokenIndex) {
+      if (!activity || activity.checked) {
+        return;
+      }
+      if (!Object.prototype.hasOwnProperty.call(activity.placements || {}, tokenIndex)) {
+        return;
+      }
+      const nextPlacements = { ...activity.placements };
+      delete nextPlacements[tokenIndex];
+      activity.placements = nextPlacements;
+      activity.selectedToken = tokenIndex;
+      activity.feedback = "";
+      persistCurrentProgress();
+      paint();
+    }
+
+    function submitSort() {
+      if (!activity) {
+        return;
+      }
+      if (activity.checked || activity.attempts > 0) {
+        nextItem();
+        return;
+      }
+      const item = getCurrentActivityItem();
+      const tokens = item?.tokens || [];
+      const allPlaced = tokens.every((token, tokenIndex) => String(activity.placements?.[tokenIndex] || ""));
+      if (!allPlaced) {
+        activity.feedback = "Place each highlighted word into a column first.";
+        paint();
+        return;
+      }
+      const isRight = tokens.every((token, tokenIndex) => String(activity.placements?.[tokenIndex] || "") === String(token.target || ""));
+      (item?.skills || []).forEach((skillKey) => tallySkill(skillKey, isRight));
+      if (isRight) {
+        activity.right += 1;
+        activity.checked = true;
+        activity.feedback = item.why || "That is right.";
+      } else {
+        activity.attempts += 1;
+        activity.placements = Object.fromEntries(
+          tokens.map((token, tokenIndex) => [tokenIndex, String(token.target || "")])
+        );
+        activity.selectedToken = null;
+        activity.feedback = item.why || "Check which word is naming, which word is doing, and which word is describing.";
       }
       persistCurrentProgress();
       paint();
@@ -1998,6 +2113,96 @@ export function createGrammarProgram({
       `;
     }
 
+    function buildSortView() {
+      const item = getCurrentActivityItem();
+      const placements = activity.placements || {};
+      const reveal = activity.checked || activity.attempts > 0;
+      const usedTokenIndices = new Set(
+        Object.keys(placements)
+          .map((value) => Number(value))
+          .filter((value) => Number.isInteger(value))
+      );
+      const tokenSentenceIndexes = new Map();
+      (item?.tokens || []).forEach((token, tokenIndex) => {
+        const wordIndex = (item?.sentence || []).findIndex((word, index) => word === token.word && !tokenSentenceIndexes.has(index));
+        if (wordIndex >= 0) {
+          tokenSentenceIndexes.set(wordIndex, tokenIndex);
+        }
+      });
+
+      return `
+        <div class="gp-view" data-gp-view="activity">
+          <header class="gp-chrome">
+            <div>
+              <div class="gp-eyebrow-soft">English</div>
+              <div class="gp-h2">${escapeHtml(sessionConfig.title)}</div>
+            </div>
+            <span class="gp-pill gp-pill-plum gp-session-pill">Sentence ${escapeHtml(String(activity.i + 1))}</span>
+          </header>
+          <div class="gp-chips">${buildProgressChips()}</div>
+          <div class="gp-stage">
+            <div class="gp-card">
+              <p class="gp-meta">Drag the highlighted words into the right columns, or tap a word and then tap a column.</p>
+              <div class="gp-sort-sentence" aria-label="Sentence to sort">
+                ${(item?.sentence || []).map((word, wordIndex) => {
+                  const tokenIndex = tokenSentenceIndexes.get(wordIndex);
+                  if (!Number.isInteger(tokenIndex)) {
+                    return `<span class="gp-sort-word">${escapeHtml(word)}</span>`;
+                  }
+                  const token = item.tokens[tokenIndex];
+                  const isPlaced = usedTokenIndices.has(tokenIndex);
+                  if (isPlaced) {
+                    return `<span class="gp-sort-word is-used">${escapeHtml(token.word)}</span>`;
+                  }
+                  return `
+                    <button
+                      type="button"
+                      class="gp-sort-token${activity.selectedToken === tokenIndex ? " is-on" : ""}"
+                      data-gp-sort-token="${tokenIndex}"
+                      draggable="true"
+                    >
+                      ${escapeHtml(token.word)}
+                    </button>
+                  `;
+                }).join("")}
+              </div>
+              <div class="gp-sort-columns">
+                ${(item?.columns || []).map((column) => {
+                  const placedTokens = (item?.tokens || [])
+                    .map((token, tokenIndex) => ({ token, tokenIndex }))
+                    .filter(({ tokenIndex }) => placements[tokenIndex] === column.key);
+                  return `
+                    <div class="gp-sort-column">
+                      <div class="gp-strong">${escapeHtml(column.label)}</div>
+                      <button type="button" class="gp-sort-slot" data-gp-sort-slot="${escapeHtml(column.key)}">
+                        ${placedTokens.length
+                          ? placedTokens.map(({ token, tokenIndex }) => {
+                              const isRight = reveal && token.target === column.key;
+                              const isWrong = reveal && token.target !== column.key;
+                              return `
+                                <span
+                                  class="gp-sort-chip${isRight ? " is-right" : ""}${isWrong ? " is-wrong" : ""}"
+                                  data-gp-sort-chip="${tokenIndex}"
+                                  draggable="true"
+                                >
+                                  ${escapeHtml(token.word)}
+                                </span>
+                              `;
+                            }).join("")
+                          : `<span class="gp-sort-placeholder">${escapeHtml(activity.selectedToken !== null ? "Place selected word here" : "Drop a word here")}</span>`}
+                      </button>
+                    </div>
+                  `;
+                }).join("")}
+              </div>
+              ${activity.feedback ? `<div class="gp-fb${activity.checked ? " is-ok" : " is-hint"}">${escapeHtml(activity.feedback)}</div>` : ""}
+              <button type="button" class="gp-cta gp-cta-plum" data-gp="submit-sort">${activity.checked || activity.attempts > 0 ? "Next" : "Check my sorting"}</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
     function buildBuildView() {
       const item = getCurrentActivityItem();
       const preview = buildSentencePreview(item, activity.choices);
@@ -2431,6 +2636,10 @@ export function createGrammarProgram({
         root.innerHTML = buildShell(buildSelectView());
         return;
       }
+      if (sessionConfig.act === "sort") {
+        root.innerHTML = buildShell(buildSortView());
+        return;
+      }
       if (sessionConfig.act === "build") {
         root.innerHTML = buildShell(buildBuildView());
         return;
@@ -2448,7 +2657,7 @@ export function createGrammarProgram({
       }
       root.dataset.grammarBound = "true";
       root.addEventListener("click", (event) => {
-        const target = event.target.closest("[data-gp-tab],[data-gp-open-session],[data-gp],[data-gp-opt],[data-gp-slot],[data-gp-chip],[data-gp-word],[data-gp-select-token],[data-gp-build-option]");
+        const target = event.target.closest("[data-gp-tab],[data-gp-open-session],[data-gp],[data-gp-opt],[data-gp-slot],[data-gp-chip],[data-gp-word],[data-gp-select-token],[data-gp-sort-token],[data-gp-sort-slot],[data-gp-sort-chip],[data-gp-build-option]");
         if (!target || !root.contains(target)) {
           return;
         }
@@ -2488,6 +2697,18 @@ export function createGrammarProgram({
         }
         if (target.dataset.gpSelectToken) {
           pickSelectToken(Number(target.dataset.gpSelectToken));
+          return;
+        }
+        if (target.dataset.gpSortToken) {
+          selectSortToken(Number(target.dataset.gpSortToken));
+          return;
+        }
+        if (target.dataset.gpSortSlot) {
+          placeSortToken(target.dataset.gpSortSlot);
+          return;
+        }
+        if (target.dataset.gpSortChip) {
+          removeSortPlacement(Number(target.dataset.gpSortChip));
           return;
         }
         if (target.dataset.gpBuildOption) {
@@ -2547,6 +2768,9 @@ export function createGrammarProgram({
           case "submit-select":
             submitSelect();
             return;
+          case "submit-sort":
+            submitSort();
+            return;
           case "submit-build":
             submitBuild();
             return;
@@ -2593,6 +2817,36 @@ export function createGrammarProgram({
           persistCurrentProgress();
         }
       });
+
+      root.addEventListener("dragstart", (event) => {
+        const target = event.target.closest("[data-gp-sort-token],[data-gp-sort-chip]");
+        if (!target || !activity || sessionConfig?.act !== "sort") {
+          return;
+        }
+        const tokenIndex = target.dataset.gpSortToken || target.dataset.gpSortChip;
+        if (!tokenIndex) {
+          return;
+        }
+        event.dataTransfer?.setData("text/plain", String(tokenIndex));
+      });
+
+      root.addEventListener("dragover", (event) => {
+        const slot = event.target.closest("[data-gp-sort-slot]");
+        if (!slot || sessionConfig?.act !== "sort") {
+          return;
+        }
+        event.preventDefault();
+      });
+
+      root.addEventListener("drop", (event) => {
+        const slot = event.target.closest("[data-gp-sort-slot]");
+        if (!slot || sessionConfig?.act !== "sort") {
+          return;
+        }
+        event.preventDefault();
+        const tokenIndex = Number(event.dataTransfer?.getData("text/plain"));
+        placeSortToken(slot.dataset.gpSortSlot, tokenIndex);
+      });
     }
 
     function mount(element, options = {}) {
@@ -2603,7 +2857,11 @@ export function createGrammarProgram({
         RewardProperty.setGrammarSessions(getCompletedSessionCount());
       }
       bind();
-      if (tab === "hub" && (!sessionConfig || view === "hub")) {
+      if (tab === "property" || tab === "progress") {
+        paint();
+        return;
+      }
+      if (root) {
         goToSessionSurface();
         return;
       }

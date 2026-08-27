@@ -9,6 +9,7 @@ const settingsStorageKey = "studylift-settings";
 const uiVersionStorageKey = "paperpanda-ui-version";
 const currentUiVersion = "2026-08-18-grammar-reset-and-signout";
 const grammarResetVersion = 3;
+const grammarCurrentSnapshotVersion = 1;
 const previewDatabaseName = "paperpanda-assets";
 const previewStoreName = "document-previews";
 const settingsAssetStoreName = "settings-assets";
@@ -6555,6 +6556,7 @@ function normaliseGrammarState(grammar, subjectId = "") {
   }
   const skills = next.skills && typeof next.skills === "object" && !Array.isArray(next.skills) ? next.skills : {};
   const current = next.current && typeof next.current === "object" && !Array.isArray(next.current) ? next.current : null;
+  const currentVersion = Math.max(0, Number(current?.version || 0) || 0);
   const pendingResult = Math.max(0, Number(next.pendingResult || 0) || 0);
   const normaliseResultDetails = (details) => {
     const source = details && typeof details === "object" && !Array.isArray(details) ? details : {};
@@ -6615,8 +6617,9 @@ function normaliseGrammarState(grammar, subjectId = "") {
     pendingResult: pendingResult > 0
       ? Math.max(1, Math.min(GP_SESSIONS.length, pendingResult))
       : null,
-    current: current && Number.isFinite(Number(current.n))
+    current: current && currentVersion === grammarCurrentSnapshotVersion && Number.isFinite(Number(current.n))
       ? {
+          version: grammarCurrentSnapshotVersion,
           n: Math.max(1, Math.min(GP_SESSIONS.length, Number(current.n || 0) || 1)),
           title: String(current.title || ""),
           act: String(current.act || ""),

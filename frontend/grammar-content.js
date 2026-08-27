@@ -3,7 +3,7 @@ export const GP_ACTIVITIES_PER_SESSION = 3;
 export const GP_SESSIONS = [
   { n: 1, title: "Fix the Paragraph", meta: "Punctuation · drag-and-drop", act: "fix", content: "para1" },
   { n: 2, title: "Find the Nouns", meta: "Nouns · 5 sentence selection", act: "pick", content: "noun" },
-  { n: 3, title: "What's Wrong?", meta: "Punctuation · sentence correction", act: "fix", content: "correct1" },
+  { n: 3, title: "Sort the Sentence", meta: "Noun + verb + adjective · drag-and-drop", act: "sort", content: "parts1" },
   { n: 4, title: "Comprehension 1", meta: "Short story · 6 questions", act: "comp", content: "passage1" },
   { n: 5, title: "Find the Verbs", meta: "Verbs · 5 sentence selection", act: "pick", content: "verb" },
   { n: 6, title: "When Did It Happen?", meta: "Tense · selector", act: "tense", content: "tense1" },
@@ -28,6 +28,16 @@ export const GP_SESSIONS = [
 ];
 
 export const GP_LESSON_INTROS = {
+  parts1: {
+    term: "Parts of speech",
+    definition: "A noun names, a verb shows action or state, and an adjective describes a noun.",
+    examples: [
+      "The calm rider opened the gate.",
+      "Pony is a noun, trotted is a verb, and muddy is an adjective.",
+      "Good readers look at the whole sentence before sorting words."
+    ],
+    audioText: "In this activity you will sort words from a sentence into three groups. Nouns name people, places, things, or ideas. Verbs show actions or states. Adjectives describe nouns. Read the whole sentence first, then drag each target word into the correct column."
+  },
   compare: {
     term: "Compare and contrast",
     definition: "To compare and contrast is to notice how two things are the same and how they are different.",
@@ -87,8 +97,8 @@ export const GP_TERMS = {
     instruction: "Select the adjective in each sentence.",
     items: [
       { words: ["The", "grey", "pony", "waited", "by", "the", "gate."], a: 1, skill: "adjectives", why: "Grey describes the pony." },
-      { words: ["She", "held", "the", "heavy", "saddle", "steady."], a: [3, 5], skill: "adjectives", why: "Heavy and steady both describe the saddle here." },
-      { words: ["A", "nervous", "horse", "needs", "a", "calm", "rider."], a: [1, 5], skill: "adjectives", why: "Nervous describes the horse, and calm describes the rider." },
+      { words: ["She", "held", "the", "heavy", "saddle", "carefully."], a: 3, skill: "adjectives", why: "Heavy describes the saddle." },
+      { words: ["A", "nervous", "horse", "waited", "by", "the", "rail."], a: 1, skill: "adjectives", why: "Nervous describes the horse." },
       { words: ["The", "wooden", "fence", "shook", "in", "the", "wind."], a: 1, skill: "adjectives", why: "Wooden describes the fence." },
       { words: ["Her", "striped", "scarf", "slid", "off", "the", "bench."], a: 1, skill: "adjectives", why: "Striped describes the scarf." }
     ]
@@ -448,6 +458,86 @@ export const GP_SELECT = {
     { words: ["The", "ponies", "trotted", "across", "the", "yard."], subject: 1, verb: 2, why: "Ponies is the subject, and trotted is the action." },
     { words: ["Maya", "opened", "the", "stable", "door."], subject: 0, verb: 1, why: "Maya is the subject and opened is the verb." },
     { words: ["The", "halter", "hung", "behind", "the", "post."], subject: 1, verb: 2, why: "Halter is the thing in the sentence, and hung tells what it did." }
+  ]
+};
+
+export const GP_SORT = {
+  parts1: [
+    {
+      sentence: ["The", "calm", "rider", "opened", "the", "gate."],
+      tokens: [
+        { word: "calm", target: "adjective" },
+        { word: "rider", target: "noun" },
+        { word: "opened", target: "verb" }
+      ],
+      columns: [
+        { key: "noun", label: "Noun" },
+        { key: "verb", label: "Verb" },
+        { key: "adjective", label: "Adjective" }
+      ],
+      skills: ["nouns", "verbs", "adjectives"],
+      why: "Rider names who the sentence is about, opened is the action, and calm describes the rider."
+    },
+    {
+      sentence: ["A", "muddy", "pony", "trotted", "past", "the", "shed."],
+      tokens: [
+        { word: "muddy", target: "adjective" },
+        { word: "pony", target: "noun" },
+        { word: "trotted", target: "verb" }
+      ],
+      columns: [
+        { key: "noun", label: "Noun" },
+        { key: "verb", label: "Verb" },
+        { key: "adjective", label: "Adjective" }
+      ],
+      skills: ["nouns", "verbs", "adjectives"],
+      why: "Pony is the noun, trotted is the verb, and muddy describes the pony."
+    },
+    {
+      sentence: ["The", "stable", "helper", "carried", "a", "heavy", "bucket."],
+      tokens: [
+        { word: "helper", target: "noun" },
+        { word: "carried", target: "verb" },
+        { word: "heavy", target: "adjective" }
+      ],
+      columns: [
+        { key: "noun", label: "Noun" },
+        { key: "verb", label: "Verb" },
+        { key: "adjective", label: "Adjective" }
+      ],
+      skills: ["nouns", "verbs", "adjectives"],
+      why: "Helper names the person, carried is the action, and heavy describes the bucket."
+    },
+    {
+      sentence: ["Our", "brave", "friend", "guided", "the", "horse", "home."],
+      tokens: [
+        { word: "brave", target: "adjective" },
+        { word: "friend", target: "noun" },
+        { word: "guided", target: "verb" }
+      ],
+      columns: [
+        { key: "noun", label: "Noun" },
+        { key: "verb", label: "Verb" },
+        { key: "adjective", label: "Adjective" }
+      ],
+      skills: ["nouns", "verbs", "adjectives"],
+      why: "Friend is the noun, guided is the verb, and brave describes the friend."
+    },
+    {
+      sentence: ["That", "gentle", "mare", "waited", "near", "the", "fence."],
+      tokens: [
+        { word: "gentle", target: "adjective" },
+        { word: "mare", target: "noun" },
+        { word: "waited", target: "verb" }
+      ],
+      columns: [
+        { key: "noun", label: "Noun" },
+        { key: "verb", label: "Verb" },
+        { key: "adjective", label: "Adjective" }
+      ],
+      skills: ["nouns", "verbs", "adjectives"],
+      why: "Mare names the animal, waited is the verb, and gentle describes the mare."
+    }
   ]
 };
 
