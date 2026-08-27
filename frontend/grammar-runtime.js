@@ -2666,7 +2666,8 @@ export function createGrammarProgram({
             persistCurrentProgress();
           }
           if (target.dataset.gpTab === "hub") {
-            goToSessionSurface();
+            const leavingResults = view === "results";
+            goToSessionSurface({ clearPendingResult: leavingResults, autoOpenReady: leavingResults });
             return;
           }
           stopAll();
@@ -2781,7 +2782,10 @@ export function createGrammarProgram({
             if (sessionConfig && view !== "results" && sessionConfig.n > G.done) {
               persistCurrentProgress();
             }
-            goToSessionSurface({ clearPendingResult: view === "results" });
+            {
+              const leavingResults = view === "results";
+              goToSessionSurface({ clearPendingResult: leavingResults, autoOpenReady: leavingResults });
+            }
             return;
           case "begin-another-session":
             goToSessionSurface({ clearPendingResult: true, autoOpenReady: true });
