@@ -1858,7 +1858,7 @@ export function createGrammarProgram({
                 }).join("")}
               </div>
               ${activity.feedback ? `<div class="gp-fb${isCorrectChoice(item, activity.picked) ? " is-ok" : " is-hint"}">${escapeHtml(activity.feedback)}</div>` : ""}
-              ${canAdvance ? `<button type="button" class="gp-cta gp-cta-plum" data-gp="next">${escapeHtml(activity.i >= (activity.items || []).length - 1 ? "Finish session" : "Next sentence")}</button>` : ""}
+              ${canAdvance ? `<button type="button" class="gp-cta gp-cta-plum" data-gp="next">${escapeHtml(activity.i >= (activity.items || []).length - 1 ? "Complete activity" : "Next sentence")}</button>` : ""}
             </div>
           </div>
         </div>
@@ -1960,7 +1960,7 @@ export function createGrammarProgram({
                 ${data.chips.map((chip) => `<button type="button" class="gp-chip-btn${activity.chip === chip.k ? " is-on" : ""}" data-gp-chip="${escapeHtml(chip.k)}">${escapeHtml(chip.label)}</button>`).join("")}
               </div>
               ${activity.feedback ? `<div class="gp-fb${activity.feedback === "That is right." ? " is-ok" : " is-hint"}">${escapeHtml(activity.feedback)}</div>` : ""}
-              <button type="button" class="gp-cta gp-cta-plum" data-gp="finish-fix" ${isComplete ? "" : "disabled"}>${escapeHtml(activity.i >= totalSentences - 1 ? "Finish session" : "Next sentence")}</button>
+              <button type="button" class="gp-cta gp-cta-plum" data-gp="finish-fix" ${isComplete ? "" : "disabled"}>${escapeHtml(activity.i >= totalSentences - 1 ? "Complete activity" : "Next sentence")}</button>
             </div>
           </div>
         </div>
@@ -2024,7 +2024,7 @@ export function createGrammarProgram({
               <p class="gp-def">Write one complete sentence with at least 12 words. We are checking grammar, not spelling.</p>
               <textarea class="gp-writer" placeholder="Write your sentence here...">${escapeHtml(activity.text)}</textarea>
               ${activity.submitted ? `<div class="gp-checks">${checks.map((check) => `<div class="gp-check${check.ok ? " is-ok" : " is-warm"}"><span>${check.ok ? "✓" : "✕"}</span><span>${escapeHtml(check.label)}</span></div>`).join("")}</div>` : ""}
-              <button type="button" class="gp-cta gp-cta-plum" data-gp="submit-write">${activity.submitted ? "Finish session" : "Check my sentence"}</button>
+              <button type="button" class="gp-cta gp-cta-plum" data-gp="submit-write">${activity.submitted ? "Complete activity" : "Check my sentence"}</button>
             </div>
           </div>
         </div>
@@ -2397,7 +2397,7 @@ export function createGrammarProgram({
                   ? `<button type="button" class="gp-cta gp-cta-plum" data-gp-tab="property">Visit the stables</button>
                      <button type="button" class="gp-pill-btn" data-gp="begin-another-session">${escapeHtml(hasNextActivity ? "Begin another session" : "Back to grammar")}</button>`
                   : `<button type="button" class="gp-cta gp-cta-plum" data-gp-tab="property">Visit the property</button>
-                     <button type="button" class="gp-pill-btn" data-gp="back">${escapeHtml(hasNextActivity ? "Back to session" : "Back to grammar")}</button>`}
+                     <button type="button" class="gp-pill-btn" data-gp="back">${escapeHtml(hasNextActivity ? "Open next activity" : "Back to grammar")}</button>`}
               </div>
             </div>
           </div>
