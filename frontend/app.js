@@ -6046,12 +6046,21 @@ function createQuotaFallbackDocument(documentRecord) {
   };
 }
 
+function createPersistableGrammarState(grammar, subjectId = "") {
+  const normalized = normaliseGrammarState(grammar, subjectId);
+  return {
+    ...normalized,
+    pendingResult: null
+  };
+}
+
 function createPersistableSubjects(subjects) {
   return subjects.map((subject) => ({
     ...subject,
     documents: Array.isArray(subject.documents)
       ? subject.documents.map(createPersistableDocument)
-      : []
+      : [],
+    grammar: createPersistableGrammarState(subject.grammar, subject.id)
   }));
 }
 
@@ -6061,7 +6070,8 @@ function createQuotaFallbackSubjects(subjects) {
     askHistory: Array.isArray(subject.askHistory) ? subject.askHistory.slice(-5) : [],
     documents: Array.isArray(subject.documents)
       ? subject.documents.map(createQuotaFallbackDocument)
-      : []
+      : [],
+    grammar: createPersistableGrammarState(subject.grammar, subject.id)
   }));
 }
 
@@ -6411,11 +6421,6 @@ function mergeGrammarStates(primaryGrammar, secondaryGrammar, subjectId = "") {
   const secondary = normaliseGrammarState(secondaryGrammar, subjectId);
   const mergedDone = Math.max(primary.done, secondary.done);
   const mergedCurrent = chooseMergedGrammarCurrent(primary, secondary, mergedDone);
-  const mergedPendingResult = Math.max(
-    0,
-    Number(primary.pendingResult || 0) || 0,
-    Number(secondary.pendingResult || 0) || 0
-  );
 
   return normaliseGrammarState({
     ...secondary,
@@ -6425,7 +6430,7 @@ function mergeGrammarStates(primaryGrammar, secondaryGrammar, subjectId = "") {
     audioHeard: [...new Set([...(secondary.audioHeard || []), ...(primary.audioHeard || [])])],
     skills: mergeGrammarSkills(primary.skills, secondary.skills),
     results: mergeGrammarResults(primary.results, secondary.results),
-    pendingResult: mergedPendingResult > 0 ? Math.min(mergedDone, mergedPendingResult) : null,
+    pendingResult: null,
     current: mergedCurrent
   }, subjectId);
 }
