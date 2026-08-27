@@ -752,8 +752,8 @@ const RP_JUMP_SHEET = {
   ]
 };
 const RP_TACK_VARIANT_KEYS = ["pad", "bridle", "girth"];
-const RP_GRAMMAR_PROGRESS_RESET_VERSION = 2;
-const RP_REWARD_PROGRESS_RESET_VERSION = 2;
+const RP_GRAMMAR_PROGRESS_RESET_VERSION = 3;
+const RP_REWARD_PROGRESS_RESET_VERSION = 3;
 const SPELLING_TENSE_PROMPTS = {
   believe: {
     past: "They believed the strongest explanation straight away.",
