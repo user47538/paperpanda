@@ -8,7 +8,7 @@ const subjectsStorageKey = "paperpanda-subjects-by-account";
 const settingsStorageKey = "studylift-settings";
 const uiVersionStorageKey = "paperpanda-ui-version";
 const currentUiVersion = "2026-08-18-grammar-reset-and-signout";
-const grammarResetVersion = 2;
+const grammarResetVersion = 3;
 const previewDatabaseName = "paperpanda-assets";
 const previewStoreName = "document-previews";
 const settingsAssetStoreName = "settings-assets";
@@ -752,8 +752,8 @@ const RP_JUMP_SHEET = {
   ]
 };
 const RP_TACK_VARIANT_KEYS = ["pad", "bridle", "girth"];
-const RP_GRAMMAR_PROGRESS_RESET_VERSION = 1;
-const RP_REWARD_PROGRESS_RESET_VERSION = 1;
+const RP_GRAMMAR_PROGRESS_RESET_VERSION = 2;
+const RP_REWARD_PROGRESS_RESET_VERSION = 2;
 const SPELLING_TENSE_PROMPTS = {
   believe: {
     past: "They believed the strongest explanation straight away.",
