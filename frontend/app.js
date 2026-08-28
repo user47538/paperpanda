@@ -6055,6 +6055,23 @@ function createPersistableGrammarState(grammar, subjectId = "", { includeCurrent
   };
 }
 
+function createCompletedRemoteGrammarState(grammar, subjectId = "") {
+  const normalized = normaliseGrammarState(grammar, subjectId);
+  return {
+    ...createDefaultGrammarState(subjectId),
+    resetVersion: grammarResetVersion,
+    enabled: subjectId === "spelling",
+    done: normalized.done,
+    results: normalized.results,
+    current: null,
+    pendingResult: null,
+    localRevision: normalized.completedRevision,
+    completedRevision: normalized.completedRevision,
+    updatedAt: normalized.completedAt || normalized.updatedAt || "",
+    completedAt: normalized.completedAt || normalized.updatedAt || ""
+  };
+}
+
 function createPersistableSubjects(subjects, { compactDocuments = false, includeGrammarCurrent = true } = {}) {
   const documentMapper = compactDocuments ? createQuotaFallbackDocument : createPersistableDocument;
   return subjects.map((subject) => ({
@@ -6078,15 +6095,22 @@ function createQuotaFallbackSubjects(subjects) {
 }
 
 function createRemoteSyncSubjects(subjects) {
-  return createPersistableSubjects(subjects, { includeGrammarCurrent: false });
+  return subjects.map((subject) => ({
+    ...subject,
+    documents: Array.isArray(subject.documents)
+      ? subject.documents.map(createPersistableDocument)
+      : [],
+    grammar: createCompletedRemoteGrammarState(subject.grammar, subject.id)
+  }));
 }
 
 function createRemoteSyncFallbackSubjects(subjects) {
-  return createPersistableSubjects(subjects, {
-    compactDocuments: true,
-    includeGrammarCurrent: false
-  }).map((subject) => ({
+  return subjects.map((subject) => ({
     ...subject,
+    documents: Array.isArray(subject.documents)
+      ? subject.documents.map(createQuotaFallbackDocument)
+      : [],
+    grammar: createCompletedRemoteGrammarState(subject.grammar, subject.id),
     askHistory: Array.isArray(subject.askHistory) ? subject.askHistory.slice(-5) : []
   }));
 }
@@ -6410,8 +6434,59 @@ function mergeGrammarResults(primaryResults, secondaryResults) {
   return [...merged.values()].sort((left, right) => Number(left?.n || 0) - Number(right?.n || 0));
 }
 
-function chooseMergedGrammarCurrent(primaryGrammar, secondaryGrammar, mergedDone) {
-  const candidates = [primaryGrammar, secondaryGrammar]
+function getLatestGrammarResultTimestamp(results = []) {
+  return (Array.isArray(results) ? results : []).reduce((latest, entry) => {
+    const candidate = new Date(String(entry?.at || "")).getTime() || 0;
+    return Math.max(latest, candidate);
+  }, 0);
+}
+
+function getLatestGrammarTimestamp(...values) {
+  return values.reduce((latest, value) => {
+    const candidate = String(value || "");
+    if (!candidate) {
+      return latest;
+    }
+    return (new Date(candidate).getTime() || 0) >= (new Date(latest).getTime() || 0) ? candidate : latest;
+  }, "");
+}
+
+function getGrammarCompletionPriority(grammar) {
+  return {
+    completedRevision: Math.max(0, Number(grammar?.completedRevision || 0) || 0),
+    completedAt: new Date(String(grammar?.completedAt || "")).getTime() || 0,
+    done: Math.max(0, Number(grammar?.done || 0) || 0),
+    latestResultAt: getLatestGrammarResultTimestamp(grammar?.results),
+    resultCount: Array.isArray(grammar?.results) ? grammar.results.length : 0
+  };
+}
+
+function compareGrammarCompletionPriority(leftGrammar, rightGrammar) {
+  const left = getGrammarCompletionPriority(leftGrammar);
+  const right = getGrammarCompletionPriority(rightGrammar);
+  const shouldUseRevision = left.completedRevision > 0 || right.completedRevision > 0;
+  const fields = shouldUseRevision
+    ? ["completedRevision", "completedAt", "done", "latestResultAt", "resultCount"]
+    : ["done", "latestResultAt", "resultCount"];
+  for (const field of fields) {
+    if (left[field] !== right[field]) {
+      return left[field] - right[field];
+    }
+  }
+  return 0;
+}
+
+function isGrammarLocalStateCompatible(grammar, completedGrammar) {
+  const grammarRevision = Math.max(0, Number(grammar?.completedRevision || 0) || 0);
+  const completedRevision = Math.max(0, Number(completedGrammar?.completedRevision || 0) || 0);
+  if (grammarRevision > 0 || completedRevision > 0) {
+    return grammarRevision === completedRevision && Number(grammar?.done || 0) === Number(completedGrammar?.done || 0);
+  }
+  return Number(grammar?.done || 0) === Number(completedGrammar?.done || 0);
+}
+
+function chooseMergedGrammarCurrent(grammarCandidates, mergedDone) {
+  const candidates = (Array.isArray(grammarCandidates) ? grammarCandidates : [])
     .map((grammar) => {
       const current = grammar?.current && typeof grammar.current === "object" && !Array.isArray(grammar.current)
         ? grammar.current
@@ -6423,11 +6498,12 @@ function chooseMergedGrammarCurrent(primaryGrammar, secondaryGrammar, mergedDone
       if (!activityNumber || activityNumber <= mergedDone) {
         return null;
       }
-      const updatedAt = new Date(String(current.updatedAt || "")).getTime() || 0;
-      return { current, activityNumber, updatedAt };
+      const localRevision = Math.max(0, Number(grammar?.localRevision || 0) || 0);
+      const updatedAt = new Date(String(current.updatedAt || grammar?.updatedAt || "")).getTime() || 0;
+      return { current, activityNumber, updatedAt, localRevision };
     })
     .filter(Boolean)
-    .sort((left, right) => right.activityNumber - left.activityNumber || right.updatedAt - left.updatedAt);
+    .sort((left, right) => right.localRevision - left.localRevision || right.updatedAt - left.updatedAt || right.activityNumber - left.activityNumber);
 
   return candidates[0]?.current || null;
 }
@@ -6435,19 +6511,42 @@ function chooseMergedGrammarCurrent(primaryGrammar, secondaryGrammar, mergedDone
 function mergeGrammarStates(primaryGrammar, secondaryGrammar, subjectId = "") {
   const primary = normaliseGrammarState(primaryGrammar, subjectId);
   const secondary = normaliseGrammarState(secondaryGrammar, subjectId);
-  const mergedDone = Math.max(primary.done, secondary.done);
-  const mergedCurrent = chooseMergedGrammarCurrent(primary, secondary, mergedDone);
+  const completedSource = compareGrammarCompletionPriority(primary, secondary) >= 0 ? primary : secondary;
+  const compatibleLocalSources = [primary, secondary].filter((grammar) => isGrammarLocalStateCompatible(grammar, completedSource));
+  const mergedCurrent = chooseMergedGrammarCurrent(compatibleLocalSources, completedSource.done);
+  const mergedAudioHeard = [...new Set(
+    compatibleLocalSources.flatMap((grammar) => Array.isArray(grammar?.audioHeard) ? grammar.audioHeard : [])
+  )];
+  const mergedSkills = compatibleLocalSources.reduce(
+    (acc, grammar) => mergeGrammarSkills(acc, grammar?.skills),
+    {}
+  );
+  const mergedPendingResult = compatibleLocalSources.reduce((max, grammar) => {
+    const pending = Math.max(0, Number(grammar?.pendingResult || 0) || 0);
+    return pending > max ? pending : max;
+  }, 0);
+  const mergedLocalRevision = compatibleLocalSources.reduce((max, grammar) => {
+    return Math.max(max, Math.max(0, Number(grammar?.localRevision || 0) || 0));
+  }, 0);
+  const mergedUpdatedAt = getLatestGrammarTimestamp(
+    ...compatibleLocalSources.map((grammar) => grammar?.updatedAt),
+    mergedCurrent?.updatedAt,
+    completedSource.completedAt
+  );
 
   return normaliseGrammarState({
-    ...secondary,
-    ...primary,
+    ...completedSource,
     enabled: primary.enabled || secondary.enabled,
-    done: mergedDone,
-    audioHeard: [...new Set([...(secondary.audioHeard || []), ...(primary.audioHeard || [])])],
-    skills: mergeGrammarSkills(primary.skills, secondary.skills),
-    results: mergeGrammarResults(primary.results, secondary.results),
-    pendingResult: null,
-    current: mergedCurrent
+    done: completedSource.done,
+    audioHeard: mergedAudioHeard,
+    skills: mergedSkills,
+    results: completedSource.results,
+    pendingResult: mergedPendingResult > 0 ? Math.min(completedSource.done, mergedPendingResult) : null,
+    current: mergedCurrent,
+    localRevision: Math.max(mergedLocalRevision, Number(completedSource.localRevision || 0) || 0),
+    completedRevision: Math.max(0, Number(completedSource.completedRevision || 0) || 0),
+    updatedAt: mergedUpdatedAt,
+    completedAt: String(completedSource.completedAt || "")
   }, subjectId);
 }
 
@@ -6564,7 +6663,11 @@ function createDefaultGrammarState(subjectId = "") {
     skills: {},
     results: [],
     current: null,
-    pendingResult: null
+    pendingResult: null,
+    localRevision: 0,
+    completedRevision: 0,
+    updatedAt: "",
+    completedAt: ""
   };
 }
 
@@ -6579,6 +6682,8 @@ function normaliseGrammarState(grammar, subjectId = "") {
   const current = next.current && typeof next.current === "object" && !Array.isArray(next.current) ? next.current : null;
   const currentVersion = Math.max(0, Number(current?.version || 0) || 0);
   const pendingResult = Math.max(0, Number(next.pendingResult || 0) || 0);
+  const localRevision = Math.max(0, Number(next.localRevision || 0) || 0);
+  const completedRevision = Math.max(0, Number(next.completedRevision || 0) || 0);
   const normaliseResultDetails = (details) => {
     const source = details && typeof details === "object" && !Array.isArray(details) ? details : {};
     const propertyUpgrade = source.propertyUpgrade && typeof source.propertyUpgrade === "object" && !Array.isArray(source.propertyUpgrade)
@@ -6605,53 +6710,87 @@ function normaliseGrammarState(grammar, subjectId = "") {
       propertyUpgrade
     };
   };
+  const normalisedSkills = Object.fromEntries(
+    Object.entries(skills).map(([skillKey, tally]) => [
+      String(skillKey || ""),
+      {
+        right: Math.max(0, Number(tally?.right || 0) || 0),
+        wrong: Math.max(0, Number(tally?.wrong || 0) || 0),
+        lastSession: Math.max(0, Number(tally?.lastSession || 0) || 0)
+      }
+    ]).filter(([skillKey]) => skillKey)
+  );
+  const normalisedResults = Array.isArray(next.results)
+    ? next.results
+        .map((entry) => ({
+          n: Math.max(1, Math.min(GP_SESSIONS.length, Number(entry?.n || 0) || 1)),
+          score: Math.max(0, Number(entry?.score || 0) || 0),
+          total: Math.max(0, Number(entry?.total || 0) || 0),
+          at: String(entry?.at || ""),
+          details: normaliseResultDetails(entry?.details)
+        }))
+        .filter((entry) => entry.n && entry.total >= 0)
+    : [];
+  const latestCompletedResult = normalisedResults.reduce((max, entry) => Math.max(max, Number(entry?.n || 0) || 0), 0);
+  const normalisedDone = Math.max(0, Math.min(
+    GP_SESSIONS.length,
+    Math.max(Number(next.done || 0) || 0, latestCompletedResult)
+  ));
+  const normalisedCurrent = current && currentVersion === grammarCurrentSnapshotVersion && Number.isFinite(Number(current.n))
+    ? {
+        version: grammarCurrentSnapshotVersion,
+        n: Math.max(1, Math.min(GP_SESSIONS.length, Number(current.n || 0) || 1)),
+        title: String(current.title || ""),
+        act: String(current.act || ""),
+        content: String(current.content || ""),
+        view: ["intro", "activity"].includes(String(current.view || "")) ? String(current.view) : "activity",
+        lessonKey: String(current.lessonKey || ""),
+        updatedAt: String(current.updatedAt || ""),
+        activity: current.activity && typeof current.activity === "object" ? current.activity : null,
+        game: current.game && typeof current.game === "object" ? current.game : null
+      }
+    : null;
+  const derivedCompletedAt = String(
+    next.completedAt ||
+    normalisedResults.reduce((latest, entry) => {
+      const candidate = String(entry?.at || "");
+      return (new Date(candidate).getTime() || 0) >= (new Date(latest).getTime() || 0) ? candidate : latest;
+    }, "")
+  );
+  const derivedUpdatedAt = String(next.updatedAt || normalisedCurrent?.updatedAt || derivedCompletedAt || "");
+  const derivedCompletedRevision = completedRevision > 0
+    ? completedRevision
+    : normalisedDone > 0 || normalisedResults.length
+      ? Math.max(1, normalisedDone)
+      : 0;
+  const hasLocalGrammarState = Boolean(
+    normalisedCurrent ||
+    Object.keys(normalisedSkills).length ||
+    (Array.isArray(next.audioHeard) && next.audioHeard.length) ||
+    pendingResult > 0
+  );
+  const derivedLocalRevision = localRevision > 0
+    ? localRevision
+    : Math.max(derivedCompletedRevision, hasLocalGrammarState ? derivedCompletedRevision + 1 : derivedCompletedRevision);
   return {
     ...base,
     ...next,
     resetVersion: grammarResetVersion,
     enabled: subjectId === "spelling",
-    done: Math.max(0, Math.min(GP_SESSIONS.length, Number(next.done || 0) || 0)),
+    done: normalisedDone,
     audioHeard: Array.isArray(next.audioHeard)
       ? [...new Set(next.audioHeard.map((value) => String(value || "")).filter(Boolean))]
       : [],
-    skills: Object.fromEntries(
-      Object.entries(skills).map(([skillKey, tally]) => [
-        String(skillKey || ""),
-        {
-          right: Math.max(0, Number(tally?.right || 0) || 0),
-          wrong: Math.max(0, Number(tally?.wrong || 0) || 0),
-          lastSession: Math.max(0, Number(tally?.lastSession || 0) || 0)
-        }
-      ]).filter(([skillKey]) => skillKey)
-    ),
-    results: Array.isArray(next.results)
-      ? next.results
-          .map((entry) => ({
-            n: Math.max(1, Math.min(GP_SESSIONS.length, Number(entry?.n || 0) || 1)),
-            score: Math.max(0, Number(entry?.score || 0) || 0),
-            total: Math.max(0, Number(entry?.total || 0) || 0),
-            at: String(entry?.at || ""),
-            details: normaliseResultDetails(entry?.details)
-          }))
-          .filter((entry) => entry.n && entry.total >= 0)
-      : [],
+    skills: normalisedSkills,
+    results: normalisedResults,
     pendingResult: pendingResult > 0
-      ? Math.max(1, Math.min(GP_SESSIONS.length, pendingResult))
+      ? Math.max(1, Math.min(normalisedDone || GP_SESSIONS.length, pendingResult))
       : null,
-    current: current && currentVersion === grammarCurrentSnapshotVersion && Number.isFinite(Number(current.n))
-      ? {
-          version: grammarCurrentSnapshotVersion,
-          n: Math.max(1, Math.min(GP_SESSIONS.length, Number(current.n || 0) || 1)),
-          title: String(current.title || ""),
-          act: String(current.act || ""),
-          content: String(current.content || ""),
-          view: ["intro", "activity"].includes(String(current.view || "")) ? String(current.view) : "activity",
-          lessonKey: String(current.lessonKey || ""),
-          updatedAt: String(current.updatedAt || ""),
-          activity: current.activity && typeof current.activity === "object" ? current.activity : null,
-          game: current.game && typeof current.game === "object" ? current.game : null
-        }
-      : null
+    current: normalisedCurrent && normalisedCurrent.n > normalisedDone ? normalisedCurrent : null,
+    localRevision: derivedLocalRevision,
+    completedRevision: derivedCompletedRevision,
+    updatedAt: derivedUpdatedAt,
+    completedAt: derivedCompletedAt
   };
 }
 

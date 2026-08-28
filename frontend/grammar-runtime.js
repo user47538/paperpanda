@@ -54,10 +54,26 @@ export function createGrammarProgram({
       return G;
     }
 
+    function touchGrammarState({ completed = false } = {}) {
+      if (!G) {
+        return;
+      }
+      const now = new Date().toISOString();
+      G.localRevision = Math.max(0, Number(G.localRevision || 0) || 0) + 1;
+      G.updatedAt = now;
+      if (completed) {
+        G.completedRevision = Math.max(0, Number(G.completedRevision || 0) || 0) + 1;
+        G.completedAt = now;
+      } else if (!G.completedAt && Array.isArray(G.results) && G.results.length) {
+        G.completedAt = String(G.results[G.results.length - 1]?.at || "");
+      }
+    }
+
     function saveState(options = {}) {
       if (!subject) {
         return;
       }
+      touchGrammarState({ completed: Boolean(options.completed) });
       subject.grammar = G;
       persistSubjects(options.skipRemoteSync ? { skipRemoteSync: true } : undefined);
       if (RewardProperty.setGrammarSessions) {
@@ -338,7 +354,7 @@ export function createGrammarProgram({
       lessonKey = "";
       activity = null;
       view = "hub";
-      saveState();
+      saveState({ completed: true });
       paint();
     }
 
@@ -848,7 +864,7 @@ export function createGrammarProgram({
       ].sort((a, b) => a.n - b.n);
       view = "results";
       stopAll();
-      saveState();
+      saveState({ completed: true });
       paint();
     }
 
