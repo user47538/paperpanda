@@ -63,6 +63,7 @@ let indexedDbSubjectsFailedSequence = 0;
 let indexedDbSubjectsLastError = null;
 let indexedDbSubjectsSaveWaiters = [];
 let latestIndexedDbSubjectsPersistSequence = 0;
+let subjectLocalStorageWriteModeByAccount = {};
 let currentListenSessionId = 0;
 let currentAudioContext = "";
 let currentSpeechRecognition = null;
@@ -6102,6 +6103,17 @@ function createQuotaFallbackSubjects(subjects) {
   }));
 }
 
+function createMinimalStoredSubjects(subjects) {
+  return subjects
+    .map((subject) => ({
+      id: String(subject?.id || "").trim(),
+      name: String(subject?.name || "").trim(),
+      hiddenWatchUrls: Array.isArray(subject?.hiddenWatchUrls) ? subject.hiddenWatchUrls.filter(Boolean).slice(0, 50) : [],
+      grammar: createCompletedRemoteGrammarState(subject?.grammar, subject?.id || "")
+    }))
+    .filter((subject) => subject.id || subject.name);
+}
+
 function createRemoteSyncSubjects(subjects) {
   return subjects.map((subject) => ({
     ...subject,
@@ -6220,27 +6232,42 @@ function saveStoredSubjectsMapForAccount(storedSubjectsMap, accountKey, subjects
   const nextMap = storedSubjectsMap && typeof storedSubjectsMap === "object" ? { ...storedSubjectsMap } : {};
   const fullSubjects = createPersistableSubjects(subjects);
   const fallbackSubjects = createQuotaFallbackSubjects(subjects);
-  try {
-    nextMap[accountKey] = fullSubjects;
-    saveStoredSubjectsMap(nextMap);
-    return "full";
-  } catch (primaryError) {
+  const minimalSubjects = createMinimalStoredSubjects(subjects);
+  const modeOrder = ["full", "fallback", "minimal", "pruned-fallback", "pruned-minimal"];
+  const preferredMode = subjectLocalStorageWriteModeByAccount[accountKey];
+  const preferredModeIndex = modeOrder.indexOf(preferredMode);
+  const attemptModes = preferredModeIndex > 0 ? modeOrder.slice(preferredModeIndex) : modeOrder;
+  let lastError = null;
+
+  for (const mode of attemptModes) {
     try {
-      nextMap[accountKey] = fallbackSubjects;
-      saveStoredSubjectsMap(nextMap);
-      return "fallback";
-    } catch (fallbackError) {
-      try {
+      if (mode === "full") {
+        nextMap[accountKey] = fullSubjects;
+        saveStoredSubjectsMap(nextMap);
+      } else if (mode === "fallback") {
+        nextMap[accountKey] = fallbackSubjects;
+        saveStoredSubjectsMap(nextMap);
+      } else if (mode === "minimal") {
+        nextMap[accountKey] = minimalSubjects;
+        saveStoredSubjectsMap(nextMap);
+      } else if (mode === "pruned-fallback") {
         saveStoredSubjectsMap({
           [accountKey]: fallbackSubjects
         });
-        return "pruned-fallback";
-      } catch (prunedFallbackError) {
-        console.error("Subject store quota fallback failed.", prunedFallbackError);
-        return "failed";
+      } else if (mode === "pruned-minimal") {
+        saveStoredSubjectsMap({
+          [accountKey]: minimalSubjects
+        });
       }
+      subjectLocalStorageWriteModeByAccount[accountKey] = mode;
+      return mode;
+    } catch (error) {
+      lastError = error;
     }
   }
+
+  console.error("Subject store quota fallback failed.", lastError);
+  return "failed";
 }
 
 function hydrateStoredSubject(subject, index) {
@@ -12369,9 +12396,15 @@ function persistSubjects({ skipRemoteSync = false } = {}) {
   if (persistResult === "fallback" && elements?.uploadStatus) {
     elements.uploadStatus.textContent =
       "PaperPanda kept a lighter browser backup, but the full document copy is still saved on this device.";
+  } else if (persistResult === "minimal" && elements?.uploadStatus) {
+    elements.uploadStatus.textContent =
+      "Browser storage is tight, so PaperPanda switched to a progress-only browser backup. The full on-device copy is still saved in the document cache.";
   } else if (persistResult === "pruned-fallback" && elements?.uploadStatus) {
     elements.uploadStatus.textContent =
       "This device cleared older browser backups to free space. Your current account still has a full on-device copy.";
+  } else if (persistResult === "pruned-minimal" && elements?.uploadStatus) {
+    elements.uploadStatus.textContent =
+      "This device cleared older browser backups and kept only a progress-only backup for this account. The full on-device copy is still saved in the document cache.";
   } else if (persistResult === "failed" && elements?.uploadStatus) {
     elements.uploadStatus.textContent =
       "Browser storage is full. PaperPanda could not refresh the lightweight browser backup, but the on-device document cache was still updated.";
