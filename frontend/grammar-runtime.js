@@ -369,6 +369,9 @@ export function createGrammarProgram({
       G.results = [];
       G.current = null;
       G.pendingResult = null;
+      if (RewardProperty.reset) {
+        RewardProperty.reset({ preservePracticeBaseline: true });
+      }
       tab = "hub";
       sessionIndex = -1;
       sessionConfig = null;
@@ -3045,7 +3048,7 @@ export function createGrammarProgram({
             return;
           case "clear-sessions":
             if (G.done || G.current || G.results.length || Object.keys(G.skills).length || G.pendingResult) {
-              const confirmed = window.confirm("Clear all grammar sessions and start again from session 1?");
+              const confirmed = window.confirm("Clear all grammar sessions and reset the grammar reward property so it starts again from session 1?");
               if (!confirmed) {
                 return;
               }

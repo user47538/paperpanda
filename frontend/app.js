@@ -10057,6 +10057,7 @@ const RewardProperty = (function () {
   const START_SPOTS = [[80, 60], [86, 68], [90, 58], [78, 72], [20, 62], [32, 66], [55, 50], [64, 52]];
   let root = null;
   let S = null;
+  let currentPracticeSubject = null;
   let view = "property";
   let sel = null;
   let activeTackCategory = "saddle";
@@ -10626,6 +10627,7 @@ const RewardProperty = (function () {
     if (!subject) {
       return;
     }
+    currentPracticeSubject = subject;
     const spelling = getSubjectSpellingState(subject);
     const completedAttempts = Array.isArray(spelling.completedAttempts) ? spelling.completedAttempts.length : 0;
     const ownedHorseMeta = getSpellingOwnedHorseMeta(spelling);
@@ -10690,8 +10692,12 @@ const RewardProperty = (function () {
     render();
   }
 
-  function reset() {
-    S = defaultState();
+  function reset(options = {}) {
+    const preservePracticeBaseline = options.preservePracticeBaseline !== false;
+    S = {
+      ...defaultState(),
+      rewardProgressNeedsBaseline: preservePracticeBaseline
+    };
     sel = null;
     view = "property";
     activeTackCategory = "saddle";
@@ -10699,7 +10705,11 @@ const RewardProperty = (function () {
     zoom = 1;
     px = 0;
     py = 0;
-    save();
+    if (preservePracticeBaseline && currentPracticeSubject) {
+      syncPracticeState(currentPracticeSubject);
+    } else {
+      save();
+    }
     render();
   }
 
