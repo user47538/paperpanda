@@ -12219,7 +12219,7 @@ async function restoreSessionUser() {
         timeoutMessage: "Session restore took too long. Sign in again."
       });
       state.authToken = savedToken;
-      const mergedSubjects = getFastMergedStoredSubjectsForAccount(session.account, session.subjects);
+      const mergedSubjects = await getMergedStoredSubjectsForAccount(session.account, session.subjects);
       applyAuthenticatedAccount(session.account, {
         token: savedToken,
         subjects: mergedSubjects,
@@ -12246,21 +12246,21 @@ async function restoreSessionUser() {
     return;
   }
 
+  try {
+    const durableLegacySubjects = await getMergedStoredSubjectsForAccount(account, getStoredSubjectsForAccount(account));
+    let payload;
     try {
-      const durableLegacySubjects = getFastMergedStoredSubjectsForAccount(account, getStoredSubjectsForAccount(account));
-      let payload;
-      try {
-        payload = await registerCloudAccountWithFallback({
-          name: account.name,
-          email: account.email,
-          password: account.password,
-          grade: normaliseGrade(account.grade),
-          subjects: durableLegacySubjects || getStoredSubjectsForAccount(account),
-          settings: buildCloudAccountSettingsPayload()
-        });
-      } catch (registerError) {
-        if (!(registerError instanceof Error) || registerError.status !== 409) {
-          throw registerError;
+      payload = await registerCloudAccountWithFallback({
+        name: account.name,
+        email: account.email,
+        password: account.password,
+        grade: normaliseGrade(account.grade),
+        subjects: durableLegacySubjects || getStoredSubjectsForAccount(account),
+        settings: buildCloudAccountSettingsPayload()
+      });
+    } catch (registerError) {
+      if (!(registerError instanceof Error) || registerError.status !== 409) {
+        throw registerError;
       }
       payload = await requestApi("/api/auth/signin", {
         email: account.email,
@@ -21904,7 +21904,7 @@ async function handleDashboardOpen() {
         });
         elements.signInStatus.textContent = "Loading your study space...";
         state.authToken = payload.token || "";
-        const mergedSubjects = getFastMergedStoredSubjectsForAccount(payload.account, payload.subjects);
+        const mergedSubjects = await getMergedStoredSubjectsForAccount(payload.account, payload.subjects);
         applyAuthenticatedAccount(payload.account, {
           token: payload.token || "",
           subjects: mergedSubjects,
@@ -21922,7 +21922,7 @@ async function handleDashboardOpen() {
         ) {
           try {
             elements.signInStatus.textContent = "Restoring your saved account...";
-            const legacySubjects = getFastMergedStoredSubjectsForAccount(
+            const legacySubjects = await getMergedStoredSubjectsForAccount(
               existingLegacyAccount,
               getStoredSubjectsForAccount(existingLegacyAccount)
             );
@@ -21957,7 +21957,7 @@ async function handleDashboardOpen() {
     }
 
     const desiredSubjects = existingLegacyAccount
-      ? getFastMergedStoredSubjectsForAccount(existingLegacyAccount, getStoredSubjectsForAccount(existingLegacyAccount))
+      ? await getMergedStoredSubjectsForAccount(existingLegacyAccount, getStoredSubjectsForAccount(existingLegacyAccount))
       : createInitialSubjectsForAccount({
           email: studentEmail,
           grade: studentGrade,
