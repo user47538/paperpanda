@@ -450,12 +450,22 @@ export function createGrammarProgram({
       return cfg?.act === "pick" || introTopic === "compare" || introTopic === "purpose";
     }
 
+    function getSessionIntroDefinitionKey(cfg = sessionConfig) {
+      if (!cfg) {
+        return "";
+      }
+      if (cfg.act === "pick") {
+        return String(cfg.content || "");
+      }
+      return getSessionIntroTopic(cfg);
+    }
+
     function getSessionIntroKey(cfg = sessionConfig) {
       if (!cfg) {
         return "";
       }
       if (usesWrittenOnlyIntro(cfg)) {
-        return cfg.content;
+        return getSessionIntroDefinitionKey(cfg);
       }
       if (cfg.act === "game" && !hasHeard(cfg.content)) {
         return cfg.content;
