@@ -277,7 +277,7 @@ export function createGrammarProgram({
     }
 
     function getReadySessionIndex() {
-      const currentNumber = Number(G.current?.n || 0);
+      const currentNumber = Number(getCompatibleSavedCurrent()?.n || 0);
       if (currentNumber > G.done) {
         const currentIndex = GP_SESSIONS.findIndex((cfg) => cfg.n === currentNumber);
         if (currentIndex >= 0) {
@@ -293,6 +293,14 @@ export function createGrammarProgram({
     function getReadySessionConfig() {
       const index = getReadySessionIndex();
       return index >= 0 ? GP_SESSIONS[index] || null : null;
+    }
+
+    function getSessionConfigByNumber(activityNumber = 0) {
+      const safeActivityNumber = Math.max(0, Number(activityNumber || 0) || 0);
+      if (!safeActivityNumber) {
+        return null;
+      }
+      return GP_SESSIONS.find((cfg) => Number(cfg?.n || 0) === safeActivityNumber) || null;
     }
 
     function clonePlainData(value) {
@@ -464,6 +472,35 @@ export function createGrammarProgram({
       return GP_TERMS[String(contentKey || "")] || null;
     }
 
+    function getCompatibleSavedCurrent(savedCurrent = G.current, cfg = null) {
+      const candidate = savedCurrent && typeof savedCurrent === "object" && !Array.isArray(savedCurrent)
+        ? savedCurrent
+        : null;
+      const resolvedCfg = cfg || getSessionConfigByNumber(candidate?.n);
+      if (!candidate || !resolvedCfg) {
+        return null;
+      }
+      return isSavedCurrentCompatible(candidate, resolvedCfg) ? candidate : null;
+    }
+
+    function clearIncompatibleSavedCurrent(savedCurrent = G.current, cfg = null) {
+      const candidate = savedCurrent && typeof savedCurrent === "object" && !Array.isArray(savedCurrent)
+        ? savedCurrent
+        : null;
+      if (!candidate) {
+        return null;
+      }
+      const compatibleCurrent = getCompatibleSavedCurrent(candidate, cfg);
+      if (compatibleCurrent) {
+        return compatibleCurrent;
+      }
+      if (candidate === G.current) {
+        G.current = null;
+        saveState({ skipRemoteSync: true });
+      }
+      return null;
+    }
+
     function isSavedCurrentCompatible(savedCurrent, cfg = sessionConfig) {
       if (!savedCurrent || !cfg) {
         return false;
@@ -558,10 +595,7 @@ export function createGrammarProgram({
       recentCompletedResultNumber = 0;
       persistenceState = { saving: false, error: "" };
       const rawSavedCurrent = G.current && Number(G.current.n || 0) === cfg.n ? G.current : null;
-      const savedCurrent = isSavedCurrentCompatible(rawSavedCurrent, cfg) ? rawSavedCurrent : null;
-      if (rawSavedCurrent && !savedCurrent) {
-        clearCurrentProgress();
-      }
+      const savedCurrent = clearIncompatibleSavedCurrent(rawSavedCurrent, cfg);
       stopAll();
       sessionIndex = index;
       sessionConfig = cfg;
@@ -595,6 +629,7 @@ export function createGrammarProgram({
 
     function openReadySession() {
       refreshState();
+       clearIncompatibleSavedCurrent();
       const readyIndex = getReadySessionIndex();
       if (readyIndex >= 0) {
         openSession(readyIndex);
@@ -1815,10 +1850,12 @@ export function createGrammarProgram({
     }
 
     function buildHubView() {
-      const hasReadySession = Number(G.current?.n || 0) > G.done || G.done < GP_SESSIONS.length;
+      const compatibleCurrent = getCompatibleSavedCurrent();
+      const currentActivityNumber = Number(compatibleCurrent?.n || 0);
+      const hasReadySession = currentActivityNumber > G.done || G.done < GP_SESSIONS.length;
       const readySession = getReadySessionConfig();
       const readyMeta = readySession ? getSessionMeta(readySession.n) : null;
-      const hasCurrentActivity = Number(G.current?.n || 0) > G.done && readySession?.n === Number(G.current?.n || 0);
+      const hasCurrentActivity = currentActivityNumber > G.done && readySession?.n === currentActivityNumber;
       const recentCompletedMeta = recentCompletedResultNumber ? getSessionMeta(recentCompletedResultNumber) : null;
       const showRecentCompletion = Boolean(
         recentCompletedMeta &&
@@ -2729,6 +2766,7 @@ export function createGrammarProgram({
 
     function goToSessionSurface({ clearPendingResult = false, autoOpenReady = !clearPendingResult } = {}) {
       refreshState();
+      clearIncompatibleSavedCurrent();
       stopAll();
       persistenceState = { saving: false, error: "" };
       tab = "hub";
@@ -2742,7 +2780,7 @@ export function createGrammarProgram({
       sessionConfig = null;
       lessonKey = "";
       activity = null;
-      const hasReadySession = Number(G.current?.n || 0) > G.done || G.done < GP_SESSIONS.length;
+      const hasReadySession = Number(getCompatibleSavedCurrent()?.n || 0) > G.done || G.done < GP_SESSIONS.length;
       if (hasReadySession && autoOpenReady) {
         openReadySession();
         return;
@@ -3062,6 +3100,7 @@ export function createGrammarProgram({
       root = element;
       subject = options.subject || subject;
       refreshState();
+      clearIncompatibleSavedCurrent();
       persistenceState = { saving: false, error: "" };
       if (RewardProperty.setGrammarSessions) {
         RewardProperty.setGrammarSessions(getCompletedSessionCount());
