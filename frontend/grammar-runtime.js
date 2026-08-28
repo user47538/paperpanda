@@ -20,6 +20,7 @@ import {
 export function createGrammarProgram({
   escapeHtml,
   persistSubjects,
+  persistSubjectsDurably,
   getSubjectGrammarState,
   buildRewardPropertyMarkup,
   mountRewardProperty,
@@ -48,6 +49,7 @@ export function createGrammarProgram({
     let gameFrame = 0;
     let gameFlashTimer = null;
     let recentCompletedResultNumber = 0;
+    let persistenceState = { saving: false, error: "" };
 
     function refreshState() {
       G = getSubjectGrammarState(subject);
@@ -69,15 +71,26 @@ export function createGrammarProgram({
       }
     }
 
-    function saveState(options = {}) {
+    function commitStatePersistence(options = {}) {
       if (!subject) {
-        return;
+        return 0;
       }
       touchGrammarState({ completed: Boolean(options.completed) });
       subject.grammar = G;
-      persistSubjects(options.skipRemoteSync ? { skipRemoteSync: true } : undefined);
       if (RewardProperty.setGrammarSessions) {
         RewardProperty.setGrammarSessions(getCompletedSessionCount());
+      }
+      return persistSubjects(options.skipRemoteSync ? { skipRemoteSync: true } : undefined);
+    }
+
+    function saveState(options = {}) {
+      commitStatePersistence(options);
+    }
+
+    async function saveStateDurably(options = {}) {
+      commitStatePersistence(options);
+      if (typeof persistSubjectsDurably === "function") {
+        await persistSubjectsDurably(options.skipRemoteSync ? { skipRemoteSync: true } : undefined);
       }
     }
 
@@ -354,8 +367,18 @@ export function createGrammarProgram({
       lessonKey = "";
       activity = null;
       view = "hub";
-      saveState({ completed: true });
+      persistenceState = { saving: true, error: "" };
       paint();
+      void saveStateDurably({ completed: true }).then(() => {
+        persistenceState = { saving: false, error: "" };
+        paint();
+      }).catch((error) => {
+        persistenceState = {
+          saving: false,
+          error: error instanceof Error ? error.message : "Grammar progress could not be saved locally."
+        };
+        paint();
+      });
     }
 
     function getSkillAttempts(skillKey = "") {
@@ -507,6 +530,7 @@ export function createGrammarProgram({
         return;
       }
       recentCompletedResultNumber = 0;
+      persistenceState = { saving: false, error: "" };
       const savedCurrent = G.current && Number(G.current.n || 0) === cfg.n ? G.current : null;
       stopAll();
       sessionIndex = index;
@@ -864,8 +888,18 @@ export function createGrammarProgram({
       ].sort((a, b) => a.n - b.n);
       view = "results";
       stopAll();
-      saveState({ completed: true });
       paint();
+      persistenceState = { saving: true, error: "" };
+      void saveStateDurably({ completed: true }).then(() => {
+        persistenceState = { saving: false, error: "" };
+        paint();
+      }).catch((error) => {
+        persistenceState = {
+          saving: false,
+          error: error instanceof Error ? error.message : "Grammar completion could not be saved."
+        };
+        paint();
+      });
     }
 
     function beginGame(roundIndex = 0) {
@@ -2421,6 +2455,8 @@ export function createGrammarProgram({
             <div class="gp-card">
               <div class="gp-term">${escapeHtml(String(score))}<span class="gp-term__meta"> / ${escapeHtml(String(total))}</span></div>
               <p class="gp-def">${escapeHtml(summaryCopy)}</p>
+              ${persistenceState.saving ? '<div class="gp-fb is-hint">Saving grammar progress...</div>' : ""}
+              ${persistenceState.error ? `<div class="gp-fb is-hint">${escapeHtml(persistenceState.error)}</div>` : ""}
               ${groupedSessionComplete && propertyUpgrade
                 ? `<article class="gp-upgrade-card">
                     <div class="gp-upgrade-card__image">
@@ -2448,10 +2484,10 @@ export function createGrammarProgram({
               ${sessionReviewMarkup}
               <div class="gp-results-actions">
                 ${groupedSessionComplete
-                  ? `<button type="button" class="gp-cta gp-cta-plum" data-gp-tab="property">Visit the stables</button>
-                     <button type="button" class="gp-pill-btn" data-gp="begin-another-session">${escapeHtml(hasNextActivity ? "Begin another session" : "Back to grammar")}</button>`
-                  : `<button type="button" class="gp-cta gp-cta-plum" data-gp-tab="property">Visit the property</button>
-                     <button type="button" class="gp-pill-btn" data-gp="back">${escapeHtml(hasNextActivity ? "Open next activity" : "Back to grammar")}</button>`}
+                  ? `<button type="button" class="gp-cta gp-cta-plum" data-gp-tab="property" ${persistenceState.saving ? "disabled" : ""}>Visit the stables</button>
+                     <button type="button" class="gp-pill-btn" data-gp="begin-another-session" ${persistenceState.saving ? "disabled" : ""}>${escapeHtml(hasNextActivity ? "Begin another session" : "Back to grammar")}</button>`
+                  : `<button type="button" class="gp-cta gp-cta-plum" data-gp-tab="property" ${persistenceState.saving ? "disabled" : ""}>Visit the property</button>
+                     <button type="button" class="gp-pill-btn" data-gp="back" ${persistenceState.saving ? "disabled" : ""}>${escapeHtml(hasNextActivity ? "Open next activity" : "Back to grammar")}</button>`}
               </div>
             </div>
           </div>
@@ -2591,6 +2627,7 @@ export function createGrammarProgram({
     function goToSessionSurface({ clearPendingResult = false, autoOpenReady = !clearPendingResult } = {}) {
       refreshState();
       stopAll();
+      persistenceState = { saving: false, error: "" };
       tab = "hub";
       if (clearPendingResult) {
         clearPendingResultState();
@@ -2922,6 +2959,7 @@ export function createGrammarProgram({
       root = element;
       subject = options.subject || subject;
       refreshState();
+      persistenceState = { saving: false, error: "" };
       if (RewardProperty.setGrammarSessions) {
         RewardProperty.setGrammarSessions(getCompletedSessionCount());
       }

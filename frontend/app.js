@@ -10,6 +10,8 @@ const uiVersionStorageKey = "paperpanda-ui-version";
 const currentUiVersion = "2026-08-18-grammar-reset-and-signout";
 const grammarResetVersion = 3;
 const grammarCurrentSnapshotVersion = 1;
+const grammarStateMigrationVersion = 1;
+const grammarDebugStorageKey = "paperpanda-debug-grammar";
 const previewDatabaseName = "paperpanda-assets";
 const previewStoreName = "document-previews";
 const settingsAssetStoreName = "settings-assets";
@@ -55,6 +57,12 @@ let aiSpeechPlaybackPrimed = false;
 let previewDatabasePromise = null;
 let indexedDbSubjectsSaveQueuedSnapshot = null;
 let indexedDbSubjectsSaveInFlight = false;
+let indexedDbSubjectsSaveSequence = 0;
+let indexedDbSubjectsCommittedSequence = 0;
+let indexedDbSubjectsFailedSequence = 0;
+let indexedDbSubjectsLastError = null;
+let indexedDbSubjectsSaveWaiters = [];
+let latestIndexedDbSubjectsPersistSequence = 0;
 let currentListenSessionId = 0;
 let currentAudioContext = "";
 let currentSpeechRecognition = null;
@@ -6117,15 +6125,18 @@ function createRemoteSyncFallbackSubjects(subjects) {
 
 function queueIndexedDbSubjectsPersist(accountKey, subjectsSnapshot) {
   if (!accountKey || !Array.isArray(subjectsSnapshot)) {
-    return;
+    return 0;
   }
 
+  const sequence = indexedDbSubjectsSaveSequence + 1;
+  indexedDbSubjectsSaveSequence = sequence;
   indexedDbSubjectsSaveQueuedSnapshot = {
+    sequence,
     accountKey,
     subjects: subjectsSnapshot
   };
   if (indexedDbSubjectsSaveInFlight) {
-    return;
+    return sequence;
   }
 
   indexedDbSubjectsSaveInFlight = true;
@@ -6135,13 +6146,55 @@ function queueIndexedDbSubjectsPersist(accountKey, subjectsSnapshot) {
       indexedDbSubjectsSaveQueuedSnapshot = null;
       try {
         await putSubjectsSnapshotRecord(snapshot.accountKey, snapshot.subjects);
+        indexedDbSubjectsCommittedSequence = Math.max(indexedDbSubjectsCommittedSequence, snapshot.sequence);
+        if (indexedDbSubjectsCommittedSequence >= indexedDbSubjectsFailedSequence) {
+          indexedDbSubjectsLastError = null;
+        }
       } catch (error) {
+        indexedDbSubjectsFailedSequence = Math.max(indexedDbSubjectsFailedSequence, snapshot.sequence);
+        indexedDbSubjectsLastError = error instanceof Error ? error : new Error("IndexedDB subject snapshot sync failed.");
         console.error("IndexedDB subject snapshot sync failed.", error);
       }
+      updateIndexedDbSubjectsSaveWaiters();
     }
 
     indexedDbSubjectsSaveInFlight = false;
+    updateIndexedDbSubjectsSaveWaiters();
   })();
+
+  return sequence;
+}
+
+function updateIndexedDbSubjectsSaveWaiters() {
+  const hasPendingSync = indexedDbSubjectsSaveInFlight || Boolean(indexedDbSubjectsSaveQueuedSnapshot);
+  indexedDbSubjectsSaveWaiters = indexedDbSubjectsSaveWaiters.filter((waiter) => {
+    if (waiter.sequence <= indexedDbSubjectsCommittedSequence) {
+      waiter.resolve();
+      return false;
+    }
+
+    if (!hasPendingSync && waiter.sequence <= indexedDbSubjectsFailedSequence) {
+      waiter.reject(indexedDbSubjectsLastError || new Error("Subject snapshot could not be saved locally."));
+      return false;
+    }
+
+    return true;
+  });
+}
+
+function waitForIndexedDbSubjectsPersist(sequence = indexedDbSubjectsSaveSequence) {
+  if (!sequence || sequence <= indexedDbSubjectsCommittedSequence) {
+    return Promise.resolve();
+  }
+
+  const hasPendingSync = indexedDbSubjectsSaveInFlight || Boolean(indexedDbSubjectsSaveQueuedSnapshot);
+  if (!hasPendingSync && sequence <= indexedDbSubjectsFailedSequence) {
+    return Promise.reject(indexedDbSubjectsLastError || new Error("Subject snapshot could not be saved locally."));
+  }
+
+  return new Promise((resolve, reject) => {
+    indexedDbSubjectsSaveWaiters.push({ sequence, resolve, reject });
+  });
 }
 
 function loadStoredSubjectsMap() {
@@ -6533,8 +6586,7 @@ function mergeGrammarStates(primaryGrammar, secondaryGrammar, subjectId = "") {
     mergedCurrent?.updatedAt,
     completedSource.completedAt
   );
-
-  return normaliseGrammarState({
+  const mergedState = normaliseGrammarState({
     ...completedSource,
     enabled: primary.enabled || secondary.enabled,
     done: completedSource.done,
@@ -6548,6 +6600,156 @@ function mergeGrammarStates(primaryGrammar, secondaryGrammar, subjectId = "") {
     updatedAt: mergedUpdatedAt,
     completedAt: String(completedSource.completedAt || "")
   }, subjectId);
+
+  logGrammarDebug("grammar-merge", {
+    subjectId,
+    primary: getGrammarStateSummary(primary, subjectId),
+    secondary: getGrammarStateSummary(secondary, subjectId),
+    merged: getGrammarStateSummary(mergedState, subjectId),
+    completedSource: completedSource === primary ? "primary" : "secondary",
+    compatibleLocalSources: compatibleLocalSources.map((grammar) => grammar === primary ? "primary" : "secondary")
+  });
+
+  return mergedState;
+}
+
+function hasMeaningfulGrammarProgress(grammar) {
+  const normalized = normaliseGrammarState(grammar, "spelling");
+  return Boolean(
+    normalized.done > 0 ||
+    normalized.current ||
+    normalized.pendingResult ||
+    normalized.results.length ||
+    Object.keys(normalized.skills).length ||
+    normalized.audioHeard.length
+  );
+}
+
+function getGrammarStateSummary(grammar, subjectId = "spelling") {
+  const normalized = normaliseGrammarState(grammar, subjectId);
+  return {
+    done: normalized.done,
+    current: Number(normalized.current?.n || 0) || 0,
+    pendingResult: Number(normalized.pendingResult || 0) || 0,
+    results: normalized.results.length,
+    skills: Object.keys(normalized.skills).length,
+    audioHeard: normalized.audioHeard.length,
+    localRevision: normalized.localRevision,
+    completedRevision: normalized.completedRevision,
+    updatedAt: normalized.updatedAt,
+    completedAt: normalized.completedAt
+  };
+}
+
+function isGrammarDebugEnabled() {
+  try {
+    return window.localStorage.getItem(grammarDebugStorageKey) === "1" || window.__PAPERPANDA_DEBUG_GRAMMAR__ === true;
+  } catch (error) {
+    return Boolean(window.__PAPERPANDA_DEBUG_GRAMMAR__);
+  }
+}
+
+function logGrammarDebug(event, payload = {}) {
+  if (!isGrammarDebugEnabled()) {
+    return;
+  }
+  const entry = {
+    at: new Date().toISOString(),
+    event,
+    payload
+  };
+  try {
+    const history = Array.isArray(window.__PAPERPANDA_GRAMMAR_DEBUG_LOG__)
+      ? window.__PAPERPANDA_GRAMMAR_DEBUG_LOG__
+      : [];
+    window.__PAPERPANDA_GRAMMAR_DEBUG_LOG__ = [...history.slice(-199), entry];
+  } catch (error) {
+    // Ignore debug history failures.
+  }
+  console.info("[grammar-debug]", entry);
+}
+
+function isGrammarRecoveryCandidateBetter(candidateGrammar, baselineGrammar) {
+  const completionCompare = compareGrammarCompletionPriority(candidateGrammar, baselineGrammar);
+  if (completionCompare !== 0) {
+    return completionCompare > 0;
+  }
+  const candidateCurrent = Math.max(0, Number(candidateGrammar?.current?.n || 0) || 0);
+  const baselineCurrent = Math.max(0, Number(baselineGrammar?.current?.n || 0) || 0);
+  if (candidateCurrent !== baselineCurrent) {
+    return candidateCurrent > baselineCurrent;
+  }
+  const candidateLocalRevision = Math.max(0, Number(candidateGrammar?.localRevision || 0) || 0);
+  const baselineLocalRevision = Math.max(0, Number(baselineGrammar?.localRevision || 0) || 0);
+  if (candidateLocalRevision !== baselineLocalRevision) {
+    return candidateLocalRevision > baselineLocalRevision;
+  }
+  const candidateSkillCount = Object.keys(candidateGrammar?.skills || {}).length;
+  const baselineSkillCount = Object.keys(baselineGrammar?.skills || {}).length;
+  if (candidateSkillCount !== baselineSkillCount) {
+    return candidateSkillCount > baselineSkillCount;
+  }
+  const candidateAudioCount = Array.isArray(candidateGrammar?.audioHeard) ? candidateGrammar.audioHeard.length : 0;
+  const baselineAudioCount = Array.isArray(baselineGrammar?.audioHeard) ? baselineGrammar.audioHeard.length : 0;
+  if (candidateAudioCount !== baselineAudioCount) {
+    return candidateAudioCount > baselineAudioCount;
+  }
+  const candidateUpdatedAt = new Date(String(candidateGrammar?.updatedAt || "")).getTime() || 0;
+  const baselineUpdatedAt = new Date(String(baselineGrammar?.updatedAt || "")).getTime() || 0;
+  return candidateUpdatedAt > baselineUpdatedAt;
+}
+
+function recoverResolvedSubjectsForGrammar(subjects = []) {
+  if (!Array.isArray(subjects) || !subjects.length) {
+    return subjects;
+  }
+
+  const practiceSubject = subjects.find((subject) => isSpellingSubjectRecord(subject?.id, subject?.name));
+  if (!practiceSubject) {
+    return subjects;
+  }
+
+  const rawMigrationVersion = Math.max(0, Number(practiceSubject?.grammar?.migrationVersion || 0) || 0);
+  const baseGrammar = normaliseGrammarState(practiceSubject.grammar, practiceSubject.id);
+  let recoveredGrammar = baseGrammar;
+  const legacyCandidates = subjects.filter((subject) =>
+    subject &&
+    subject !== practiceSubject &&
+    hasMeaningfulGrammarProgress(subject.grammar)
+  );
+
+  if (rawMigrationVersion < grammarStateMigrationVersion) {
+    legacyCandidates.forEach((legacySubject) => {
+      const mergedCandidate = mergeGrammarStates(
+        recoveredGrammar,
+        normaliseGrammarState(legacySubject.grammar, practiceSubject.id),
+        practiceSubject.id
+      );
+      if (isGrammarRecoveryCandidateBetter(mergedCandidate, recoveredGrammar)) {
+        recoveredGrammar = mergedCandidate;
+      }
+    });
+  }
+
+  const finalGrammar = normaliseGrammarState({
+    ...recoveredGrammar,
+    migrationVersion: grammarStateMigrationVersion
+  }, practiceSubject.id);
+
+  if (
+    rawMigrationVersion < grammarStateMigrationVersion ||
+    isGrammarRecoveryCandidateBetter(finalGrammar, baseGrammar)
+  ) {
+    practiceSubject.grammar = finalGrammar;
+    logGrammarDebug("grammar-recovery-applied", {
+      subjectId: practiceSubject.id,
+      from: getGrammarStateSummary(baseGrammar, practiceSubject.id),
+      to: getGrammarStateSummary(finalGrammar, practiceSubject.id),
+      mergedLegacySubjects: legacyCandidates.map((subject) => subject.id)
+    });
+  }
+
+  return subjects;
 }
 
 function mergeStoredSubjectSnapshots(primarySubject, secondarySubject, index) {
@@ -6657,6 +6859,7 @@ function createDefaultGrammarState(subjectId = "") {
   const enabled = subjectId === "spelling";
   return {
     resetVersion: grammarResetVersion,
+    migrationVersion: grammarStateMigrationVersion,
     enabled,
     done: 0,
     audioHeard: [],
@@ -6682,6 +6885,7 @@ function normaliseGrammarState(grammar, subjectId = "") {
   const current = next.current && typeof next.current === "object" && !Array.isArray(next.current) ? next.current : null;
   const currentVersion = Math.max(0, Number(current?.version || 0) || 0);
   const pendingResult = Math.max(0, Number(next.pendingResult || 0) || 0);
+  const migrationVersion = Math.max(0, Number(next.migrationVersion || 0) || 0);
   const localRevision = Math.max(0, Number(next.localRevision || 0) || 0);
   const completedRevision = Math.max(0, Number(next.completedRevision || 0) || 0);
   const normaliseResultDetails = (details) => {
@@ -6776,6 +6980,7 @@ function normaliseGrammarState(grammar, subjectId = "") {
     ...base,
     ...next,
     resetVersion: grammarResetVersion,
+    migrationVersion: Math.max(grammarStateMigrationVersion, migrationVersion),
     enabled: subjectId === "spelling",
     done: normalisedDone,
     audioHeard: Array.isArray(next.audioHeard)
@@ -7246,25 +7451,9 @@ function getSubjectGrammarState(subject) {
     return createDefaultGrammarState("");
   }
   subject.grammar = normaliseGrammarState(subject.grammar, subject.id);
-  if (
-    subject.id === "spelling" &&
-    subject.grammar.done === 0 &&
-    !subject.grammar.audioHeard.length &&
-    !Object.keys(subject.grammar.skills).length &&
-    !subject.grammar.results.length
-  ) {
-    const legacyEnglish = state.subjects.find((item) => item.id === "english");
-    if (legacyEnglish?.grammar) {
-      const migrated = normaliseGrammarState(legacyEnglish.grammar, "spelling");
-      if (
-        migrated.done > 0 ||
-        migrated.audioHeard.length ||
-        Object.keys(migrated.skills).length ||
-        migrated.results.length
-      ) {
-        subject.grammar = migrated;
-      }
-    }
+  if (subject.id === "spelling" && Array.isArray(state.subjects) && state.subjects.length) {
+    recoverResolvedSubjectsForGrammar(state.subjects);
+    subject.grammar = normaliseGrammarState(subject.grammar, subject.id);
   }
   return subject.grammar;
 }
@@ -11053,6 +11242,7 @@ function mountRewardProperty(subject, host) {
 const GrammarProgram = createGrammarProgram({
   escapeHtml,
   persistSubjects,
+  persistSubjectsDurably,
   getSubjectGrammarState,
   buildRewardPropertyMarkup,
   mountRewardProperty,
@@ -11836,14 +12026,16 @@ function buildResolvedSubjectsFromStore(account, storedSubjects) {
       storedSubjectsById.get(seededSubject.id) || hydrateStoredSubject({ id: seededSubject.id }, index)
     );
 
-    return mergeLegacyGroupedDocuments(
-      removeLegacySeededDocuments(
-        removeLegacySeededAssessments([...resolvedSubjects, ...extraSubjects])
+    return recoverResolvedSubjectsForGrammar(
+      mergeLegacyGroupedDocuments(
+        removeLegacySeededDocuments(
+          removeLegacySeededAssessments([...resolvedSubjects, ...extraSubjects])
+        )
       )
     );
   }
 
-  return createInitialSubjectsForAccount(account);
+  return recoverResolvedSubjectsForGrammar(createInitialSubjectsForAccount(account));
 }
 
 function getStoredSubjectsForAccount(account) {
@@ -11880,10 +12072,35 @@ async function getMergedStoredSubjectsForAccount(account, primarySubjects = null
 
   if (indexedDbSubjects === subjectSnapshotTimeout) {
     console.warn("IndexedDB subject snapshot restore timed out. Falling back to local storage and server subjects.");
-    return mergeAvailableSubjectSources(null, storedSubjectsMap[accountKey], primarySubjects);
+    const mergedSubjects = mergeAvailableSubjectSources(null, storedSubjectsMap[accountKey], primarySubjects);
+    logGrammarDebug("grammar-restore-sources", {
+      accountKey,
+      mode: "timeout-local-storage-plus-primary",
+      indexedDbTimedOut: true,
+      primary: Array.isArray(primarySubjects),
+      localStorage: Array.isArray(storedSubjectsMap[accountKey]),
+      grammar: getGrammarStateSummary(
+        (mergedSubjects || []).find((subject) => isSpellingSubjectRecord(subject?.id, subject?.name))?.grammar,
+        "spelling"
+      )
+    });
+    return mergedSubjects;
   }
 
-  return mergeAvailableSubjectSources(indexedDbSubjects, storedSubjectsMap[accountKey], primarySubjects);
+  const mergedSubjects = mergeAvailableSubjectSources(indexedDbSubjects, storedSubjectsMap[accountKey], primarySubjects);
+  logGrammarDebug("grammar-restore-sources", {
+    accountKey,
+    mode: "indexeddb-local-storage-primary",
+    indexedDbTimedOut: false,
+    indexedDb: Array.isArray(indexedDbSubjects),
+    primary: Array.isArray(primarySubjects),
+    localStorage: Array.isArray(storedSubjectsMap[accountKey]),
+    grammar: getGrammarStateSummary(
+      (mergedSubjects || []).find((subject) => isSpellingSubjectRecord(subject?.id, subject?.name))?.grammar,
+      "spelling"
+    )
+  });
+  return mergedSubjects;
 }
 
 function buildCloudAccountSettingsPayload() {
@@ -12146,7 +12363,8 @@ function persistSubjects({ skipRemoteSync = false } = {}) {
   const persistableSubjects = createPersistableSubjects(state.subjects);
   const remoteSyncSubjects = createRemoteSyncSubjects(state.subjects);
   const remoteFallbackSubjects = createRemoteSyncFallbackSubjects(state.subjects);
-  queueIndexedDbSubjectsPersist(accountKey, persistableSubjects);
+  const indexedDbSequence = queueIndexedDbSubjectsPersist(accountKey, persistableSubjects);
+  latestIndexedDbSubjectsPersistSequence = indexedDbSequence;
   const persistResult = saveStoredSubjectsMapForAccount(storedSubjectsMap, accountKey, state.subjects);
   if (persistResult === "fallback" && elements?.uploadStatus) {
     elements.uploadStatus.textContent =
@@ -12167,6 +12385,15 @@ function persistSubjects({ skipRemoteSync = false } = {}) {
 
   syncPreviewPersistence();
   return 0;
+}
+
+async function persistSubjectsDurably({ skipRemoteSync = false } = {}) {
+  const remoteSequence = persistSubjects({ skipRemoteSync });
+  const indexedDbSequence = latestIndexedDbSubjectsPersistSequence;
+  await waitForIndexedDbSubjectsPersist(indexedDbSequence);
+  if (!skipRemoteSync) {
+    await waitForRemoteSubjectsPersist(remoteSequence);
+  }
 }
 
 function persistSettings({ skipRemoteSync = false } = {}) {
@@ -12359,6 +12586,13 @@ async function restoreSessionUser() {
       });
       state.authToken = savedToken;
       const mergedSubjects = await getMergedStoredSubjectsForAccount(session.account, session.subjects);
+      logGrammarDebug("grammar-session-restore", {
+        accountKey: normaliseAccountKey(session.account?.email),
+        grammar: getGrammarStateSummary(
+          (mergedSubjects || []).find((subject) => isSpellingSubjectRecord(subject?.id, subject?.name))?.grammar,
+          "spelling"
+        )
+      });
       applyAuthenticatedAccount(session.account, {
         token: savedToken,
         subjects: mergedSubjects,
