@@ -23,7 +23,9 @@ export function createGrammarProgram({
   getSubjectGrammarState,
   buildRewardPropertyMarkup,
   mountRewardProperty,
-  RewardProperty
+  RewardProperty,
+  playGrammarPassageAudio,
+  stopSharedAudioPlayback
 }) {
   return (function () {
     const GRAMMAR_CURRENT_SNAPSHOT_VERSION = 1;
@@ -80,6 +82,9 @@ export function createGrammarProgram({
       audioFallbackTimer = null;
       audio.playing = false;
       stopSpeech();
+      if (typeof stopSharedAudioPlayback === "function") {
+        stopSharedAudioPlayback();
+      }
     }
 
     function stopGame() {
@@ -628,7 +633,7 @@ export function createGrammarProgram({
         return { text: "", submitted: false };
       }
       if (sessionConfig.act === "comp") {
-        return { items: getPassageQuestions(), i: 0, picked: null, attempts: 0, right: 0, reading: -1, playing: false, feedback: "", replayIndex: -1 };
+        return { items: getPassageQuestions(), i: 0, picked: null, attempts: 0, right: 0, reading: -1, playing: false, audioStatus: "", feedback: "", replayIndex: -1 };
       }
       if (sessionConfig.act === "binary") {
         return { items: GP_BINARY[sessionConfig.content] || [], i: 0, picked: null, attempts: 0, right: 0, feedback: "" };
@@ -696,7 +701,8 @@ export function createGrammarProgram({
           right: Math.max(0, Number(savedActivity.right || 0) || 0),
           feedback: String(savedActivity.feedback || ""),
           replayIndex: sessionConfig?.act === "comp" ? Math.max(-1, Number(savedActivity.replayIndex ?? -1) || -1) : -1,
-          reading: sessionConfig?.act === "comp" ? Math.max(-1, Number(savedActivity.reading ?? -1) || -1) : undefined,
+          reading: sessionConfig?.act === "comp" ? -1 : undefined,
+          audioStatus: sessionConfig?.act === "comp" ? "" : undefined,
           playing: false
         };
       }
@@ -1554,9 +1560,10 @@ export function createGrammarProgram({
         return;
       }
       if (activity.playing) {
-        stopSpeech();
+        stopAudio();
         activity.playing = false;
         activity.reading = -1;
+        activity.audioStatus = "";
         paint();
         return;
       }
@@ -1566,33 +1573,63 @@ export function createGrammarProgram({
       if (!queue.length) {
         return;
       }
+      if (typeof playGrammarPassageAudio !== "function") {
+        activity.playing = false;
+        activity.reading = -1;
+        activity.audioStatus = "Audio playback is not available right now.";
+        paint();
+        return;
+      }
+      const paragraphIndexes = [...queue];
+      const selectedParagraphs = paragraphIndexes.map((index) => passage.paragraphs[index]).filter(Boolean);
       activity.playing = true;
       activity.reading = queue[0];
+      activity.audioStatus = "Preparing audio...";
       paint();
-      try {
-        stopSpeech();
-        queue.forEach((paragraphIndex, queueIndex) => {
-          const paragraph = passage.paragraphs[paragraphIndex];
-          const utterance = new SpeechSynthesisUtterance(paragraph);
-          utterance.rate = 0.85;
-          utterance.onstart = () => {
-            activity.reading = paragraphIndex;
-            renderPassageHighlight();
-          };
-          utterance.onend = () => {
-            if (queueIndex === queue.length - 1) {
-              activity.playing = false;
-              activity.reading = -1;
-              renderPassageHighlight();
-            }
-          };
-          window.speechSynthesis.speak(utterance);
-        });
-      } catch (error) {
+      void playGrammarPassageAudio(selectedParagraphs, {
+        context: `grammar:passage:${sessionConfig.content}:${sessionConfig.n}:${activity.i}:${paragraphIndexes.join("-")}`,
+        onParagraphStart: (paragraphQueueIndex) => {
+          if (!activity || sessionConfig?.act !== "comp") {
+            return;
+          }
+          activity.playing = true;
+          activity.reading = paragraphIndexes[paragraphQueueIndex] ?? -1;
+          activity.audioStatus = "Reading passage...";
+          paint();
+        },
+        onStatusChange: (_status, message) => {
+          if (!activity || sessionConfig?.act !== "comp") {
+            return;
+          }
+          activity.audioStatus = String(message || "");
+          paint();
+        },
+        onFinished: () => {
+          if (!activity || sessionConfig?.act !== "comp") {
+            return;
+          }
+          activity.playing = false;
+          activity.reading = -1;
+          activity.audioStatus = "";
+          paint();
+        },
+        onError: (error) => {
+          if (!activity || sessionConfig?.act !== "comp") {
+            return;
+          }
+          activity.playing = false;
+          activity.reading = -1;
+          activity.audioStatus = error instanceof Error ? error.message : "AI voice playback failed for this passage.";
+          paint();
+        }
+      }).catch(() => {
+        if (!activity || sessionConfig?.act !== "comp") {
+          return;
+        }
         activity.playing = false;
         activity.reading = -1;
         paint();
-      }
+      });
     }
 
     function readPassage() {
@@ -1992,6 +2029,7 @@ export function createGrammarProgram({
                 </div>
                 <button type="button" class="gp-pill-btn gp-pill-btn--mini" data-gp="read-passage">${activity.playing ? "Stop" : "Listen"}</button>
               </div>
+              <div class="gp-meta">${escapeHtml(activity.audioStatus || "Listen to the passage in the same AI voice as Ask Panda, then answer the questions.")}</div>
               <div class="gp-passage">
                 ${passage.paragraphs.map((paragraph, index) => `<p${index === activity.reading ? ' class="is-reading"' : ""}>${escapeHtml(paragraph)}</p>`).join("")}
               </div>

@@ -10917,7 +10917,9 @@ const GrammarProgram = createGrammarProgram({
   getSubjectGrammarState,
   buildRewardPropertyMarkup,
   mountRewardProperty,
-  RewardProperty
+  RewardProperty,
+  playGrammarPassageAudio,
+  stopSharedAudioPlayback: stopListening
 });
 
 function buildSpellingRewardLadderMarkup(snapshot) {
@@ -15444,6 +15446,37 @@ function speakDocument(document) {
     elements.askResponse.textContent =
       error instanceof Error ? `Listen failed: ${error.message}` : "Listen failed.";
     renderDocuments();
+  });
+}
+
+function playGrammarPassageAudio(paragraphs = [], { context = "grammar:passage", onParagraphStart = null, onFinished = null, onError = null, onStatusChange = null } = {}) {
+  const cleanedParagraphs = (Array.isArray(paragraphs) ? paragraphs : [])
+    .map((paragraph) => normaliseSpeechText(paragraph))
+    .filter(Boolean);
+  if (!cleanedParagraphs.length) {
+    return Promise.reject(new Error("There is no readable text available for this passage yet."));
+  }
+
+  return speakTextWithOpenAi(cleanedParagraphs.join("\n\n"), {
+    context,
+    statusMessages: {
+      preparing: "Preparing passage audio...",
+      playing: "Reading passage...",
+      error: "AI voice playback failed for this passage."
+    },
+    chunksOverride: cleanedParagraphs,
+    onChunkStart: (_chunk, chunkIndex) => {
+      if (typeof onParagraphStart === "function") {
+        onParagraphStart(chunkIndex);
+      }
+    },
+    onFinished,
+    onStatusChange
+  }).catch((error) => {
+    if (typeof onError === "function") {
+      onError(error);
+    }
+    throw error;
   });
 }
 
