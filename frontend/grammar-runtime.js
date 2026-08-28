@@ -460,6 +460,32 @@ export function createGrammarProgram({
       return GP_TERMS[key] || GP_LESSON_INTROS[key] || null;
     }
 
+    function getTermDefinition(contentKey = sessionConfig?.content) {
+      return GP_TERMS[String(contentKey || "")] || null;
+    }
+
+    function isSavedCurrentCompatible(savedCurrent, cfg = sessionConfig) {
+      if (!savedCurrent || !cfg) {
+        return false;
+      }
+      if (Number(savedCurrent.n || 0) !== Number(cfg.n || 0)) {
+        return false;
+      }
+      if (String(savedCurrent.act || "") !== String(cfg.act || "")) {
+        return false;
+      }
+      if (String(savedCurrent.content || "") !== String(cfg.content || "")) {
+        return false;
+      }
+      if (savedCurrent.lessonKey && !getLessonDefinition(savedCurrent.lessonKey)) {
+        return false;
+      }
+      if ((cfg.act === "pick" || cfg.act === "game") && !getTermDefinition(cfg.content)) {
+        return false;
+      }
+      return true;
+    }
+
     function getMcItems(cfg = sessionConfig) {
       if (!cfg) {
         return [];
@@ -531,7 +557,11 @@ export function createGrammarProgram({
       }
       recentCompletedResultNumber = 0;
       persistenceState = { saving: false, error: "" };
-      const savedCurrent = G.current && Number(G.current.n || 0) === cfg.n ? G.current : null;
+      const rawSavedCurrent = G.current && Number(G.current.n || 0) === cfg.n ? G.current : null;
+      const savedCurrent = isSavedCurrentCompatible(rawSavedCurrent, cfg) ? rawSavedCurrent : null;
+      if (rawSavedCurrent && !savedCurrent) {
+        clearCurrentProgress();
+      }
       stopAll();
       sessionIndex = index;
       sessionConfig = cfg;
@@ -1116,13 +1146,21 @@ export function createGrammarProgram({
       if (!game) {
         return;
       }
+      const term = getTermDefinition(sessionConfig?.content);
+      if (!term?.rounds) {
+        finishSession(game.score, Math.max(1, game.roundScores.reduce((sum, score) => sum + score, 0)), {
+          roundScores: [...game.roundScores],
+          missed: [...new Set(game.missed)]
+        });
+        return;
+      }
       const priorScore = game.roundScores.reduce((total, score) => total + score, 0);
       game.roundScores.push(game.score - priorScore);
       if (game.round < 2) {
         beginGame(game.round + 1);
         return;
       }
-      const totalTargets = GP_TERMS[sessionConfig.content].rounds
+      const totalTargets = term.rounds
         .reduce((sum, round) => sum + round.filter((item) => item[1]).length, 0);
       finishSession(game.score, totalTargets, {
         roundScores: [...game.roundScores],
@@ -1754,11 +1792,15 @@ export function createGrammarProgram({
         wrong.textContent = String(game.wrong);
       }
       if (overlay) {
+        const term = getTermDefinition(sessionConfig?.content);
+        const instructionLabel = term?.instruction
+          ? term.instruction.toLowerCase()
+          : "target words for this activity";
         overlay.hidden = !game.paused;
         overlay.innerHTML = game.paused ? `
           <div class="gp-eyebrow">Missed target</div>
           <div class="gp-miss-word">${escapeHtml(game.missedWord)}</div>
-          <p class="gp-meta">${escapeHtml(`${game.missedWord} was one of the ${GP_TERMS[sessionConfig.content].instruction.toLowerCase()}.`)}</p>
+          <p class="gp-meta">${escapeHtml(`${game.missedWord} was one of the ${instructionLabel}.`)}</p>
           <button type="button" class="gp-cta gp-cta-plum" data-gp="keep-going">Keep going</button>
         ` : "";
       }
@@ -1846,6 +1888,27 @@ export function createGrammarProgram({
       const lesson = getLessonDefinition();
       const sessionMeta = getSessionMeta();
       const writtenOnly = usesWrittenOnlyIntro();
+      if (!lesson) {
+        return `
+          <div class="gp-view" data-gp-view="activity">
+            <header class="gp-chrome">
+              <div>
+                <div class="gp-eyebrow-soft">English</div>
+                <div class="gp-h2">Grammar</div>
+              </div>
+              <span class="gp-pill gp-pill-plum gp-session-pill">Session ${escapeHtml(String(sessionMeta?.sessionNumber || 1))}</span>
+            </header>
+            <div class="gp-chips">${buildProgressChips()}</div>
+            <div class="gp-stage">
+              <div class="gp-card">
+                <div class="gp-strong">This activity needs to restart.</div>
+                <p class="gp-meta">The saved lesson explanation no longer matches this grammar activity. Return to Session and open it again.</p>
+                <button type="button" class="gp-pill-btn" data-gp="back">Back to grammar</button>
+              </div>
+            </div>
+          </div>
+        `;
+      }
       return `
         <div class="gp-view" data-gp-view="activity">
           <header class="gp-chrome">
@@ -1887,7 +1950,27 @@ export function createGrammarProgram({
     }
 
     function buildGameView() {
-      const term = GP_TERMS[sessionConfig.content];
+      const term = getTermDefinition(sessionConfig?.content);
+      if (!term) {
+        return `
+          <div class="gp-view" data-gp-view="activity">
+            <header class="gp-chrome">
+              <div>
+                <div class="gp-eyebrow-soft">English</div>
+                <div class="gp-h2">${escapeHtml(sessionConfig?.title || "Grammar")}</div>
+              </div>
+            </header>
+            <div class="gp-chips">${buildProgressChips()}</div>
+            <div class="gp-stage">
+              <div class="gp-card">
+                <div class="gp-strong">This activity needs to restart.</div>
+                <p class="gp-meta">The saved grammar data for this game is incomplete. Return to Session and open it again.</p>
+                <button type="button" class="gp-pill-btn" data-gp="back">Back to grammar</button>
+              </div>
+            </div>
+          </div>
+        `;
+      }
       return `
         <div class="gp-view" data-gp-view="activity">
           <header class="gp-chrome">
@@ -1916,10 +1999,30 @@ export function createGrammarProgram({
     }
 
     function buildPickView() {
-      const term = GP_TERMS[sessionConfig.content];
+      const term = getTermDefinition(sessionConfig?.content);
       const item = getCurrentActivityItem();
       const canAdvance = canAdvanceChoice("pick", item);
       const revealCorrect = shouldRevealChoiceAnswer("pick", item);
+      if (!term) {
+        return `
+          <div class="gp-view" data-gp-view="activity">
+            <header class="gp-chrome">
+              <div>
+                <div class="gp-eyebrow-soft">English</div>
+                <div class="gp-h2">${escapeHtml(sessionConfig?.title || "Grammar")}</div>
+              </div>
+            </header>
+            <div class="gp-chips">${buildProgressChips()}</div>
+            <div class="gp-stage">
+              <div class="gp-card">
+                <div class="gp-strong">This activity needs to restart.</div>
+                <p class="gp-meta">The saved grammar data for this word selection task is incomplete. Return to Session and open it again.</p>
+                <button type="button" class="gp-pill-btn" data-gp="back">Back to grammar</button>
+              </div>
+            </div>
+          </div>
+        `;
+      }
       return `
         <div class="gp-view" data-gp-view="activity">
           <header class="gp-chrome">
@@ -2834,7 +2937,7 @@ export function createGrammarProgram({
               return;
             }
             if (sessionConfig?.act === "game") {
-              const term = GP_TERMS[sessionConfig.content];
+              const term = getTermDefinition(sessionConfig?.content);
               if (term) {
                 speakInstruction(term.audioText, () => {
                   audio.done = true;
