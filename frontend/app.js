@@ -301,6 +301,40 @@ const subjectSeed = [
     ]
   },
   {
+    id: "geography",
+    name: "Geography",
+    focus: "map skills, places, environments, and explaining change",
+    summary: "Keep fieldwork notes, case studies, and map activities together before each task.",
+    practice: [
+      {
+        title: "Map skills",
+        tag: "Atlas work",
+        description: "Read scale, direction, and coordinates, then explain what the map shows."
+      },
+      {
+        title: "Case study snapshot",
+        tag: "Explanation",
+        description: "Summarise one environment or place and explain one challenge it faces."
+      }
+    ],
+    documents: [
+      {
+        id: "geography-doc-1",
+        title: "Water in the world notes",
+        type: "Class notes",
+        added: "15 May",
+        content:
+          "Use maps, graphs, and place examples to explain how people use water and how environments change over time."
+      }
+    ],
+    assessments: [
+      seededAssessment("1", "Map Skills Test", "Term 1 Week 4", "Term 1 Week 8", "25%"),
+      seededAssessment("2", "Place and Liveability Case Study", "Term 2 Week 2", "Term 2 Week 7", "25%"),
+      seededAssessment("3", "Environmental Change Report", "Term 3 Week 3", "Term 3 Week 8", "25%"),
+      seededAssessment("4", "Yearly Examination", "Term 4 Week 2", "Term 4 Week 5", "25%")
+    ]
+  },
+  {
     id: "music",
     name: "Music",
     focus: "listening, performing, notation, and reflection",
@@ -488,6 +522,7 @@ const subjectAliasMap = {
   spelling: ["Practice", "Spelling", "Spelling Stables"],
   science: ["Science"],
   history: ["History"],
+  geography: ["Geography", "Geo"],
   music: ["Music"],
   pdhpe: ["PDHPE", "PDHPE/PE", "PE", "Personal Development Health and Physical Education"],
   wellbeing: ["Wellbeing", "Well Being"],
@@ -686,10 +721,15 @@ const RP_TACK = [
   { k: "pad", label: "Saddle pad", x: 84.1, y: 38.6, w: 15.2, h: 12.8, rotate: 10 }
 ];
 const RP_ZONES = [
-  { n: "the arena", x1: 11, x2: 42, y1: 52, y2: 71 },
-  { n: "the stable yard", x1: 49, x2: 71, y1: 44, y2: 55 },
-  { n: "the rear paddock", x1: 75, x2: 95, y1: 54, y2: 76 },
-  { n: "the front drive", x1: 33, x2: 68, y1: 80, y2: 92 }
+  { n: "the round pen", x1: 3, x2: 19, y1: 24, y2: 38, minStage: 5 },
+  { n: "the back paddock", x1: 17, x2: 45, y1: 16, y2: 42 },
+  { n: "the arena", x1: 8, x2: 43, y1: 39, y2: 74 },
+  { n: "the laneway", x1: 28, x2: 47, y1: 34, y2: 54 },
+  { n: "the stable yard", x1: 46, x2: 73, y1: 36, y2: 58 },
+  { n: "the back trail paddock", x1: 70, x2: 98, y1: 16, y2: 45, minStage: 6 },
+  { n: "the right paddock", x1: 78, x2: 99, y1: 43, y2: 95 },
+  { n: "the front drive", x1: 33, x2: 67, y1: 56, y2: 98 },
+  { n: "the front lawn", x1: 1, x2: 19, y1: 48, y2: 98 }
 ];
 const RP_HOTSPOTS = [
   { view: "stable", label: "STABLES", x: 57.5, y: 31, color: "rgba(110,90,134,.9)" },
@@ -1551,6 +1591,7 @@ const elements = {
   welcomeHeading: document.getElementById("welcome-heading"),
   navHomeButton: document.getElementById("nav-home-button"),
   navSubjectsButton: document.getElementById("nav-subjects-button"),
+  navCalendarButton: document.getElementById("nav-calendar-button"),
   navSettingsButton: document.getElementById("nav-settings-button"),
   homeView: document.getElementById("home-view"),
   focusHomeNextCard: document.getElementById("focus-home-next-card"),
@@ -1628,6 +1669,8 @@ const elements = {
   revisionSkills: document.getElementById("revision-skills"),
   signoutButton: document.getElementById("signout-button"),
   upcomingAssessmentsButton: document.getElementById("upcoming-assessments-button"),
+  upcomingModalEyebrow: document.getElementById("upcoming-modal-eyebrow"),
+  upcomingModalTitle: document.getElementById("upcoming-modal-title"),
   upcomingAssessmentCount: document.getElementById("upcoming-assessment-count"),
   upcomingAssessmentSummary: document.getElementById("upcoming-assessment-summary"),
   upcomingNextDue: document.getElementById("upcoming-next-due"),
@@ -5524,8 +5567,12 @@ function buildTaskExportName(subjectName, title) {
 }
 
 function openUpcomingModal() {
+  openAssessmentCalendar("upcoming");
+}
+
+function openAssessmentCalendar(mode = "upcoming") {
   state.upcomingModalOpen = true;
-  state.upcomingModalMode = "upcoming";
+  state.upcomingModalMode = mode === "all" ? "all" : "upcoming";
   elements.upcomingModal.classList.remove("hidden");
   elements.upcomingModal.setAttribute("aria-hidden", "false");
   renderUpcomingModal();
@@ -5535,6 +5582,7 @@ function closeUpcomingModal() {
   state.upcomingModalOpen = false;
   elements.upcomingModal.classList.add("hidden");
   elements.upcomingModal.setAttribute("aria-hidden", "true");
+  syncTopbarNavigationState();
 }
 
 function loadAccounts() {
@@ -10131,14 +10179,16 @@ const RewardProperty = (function () {
   }
 
   function clampZone(x, y) {
-    for (const zone of RP_ZONES) {
+    const activeZones = RP_ZONES.filter((zone) => Number(zone.minStage || 0) <= Number(S?.stage || 0));
+    const zones = activeZones.length ? activeZones : RP_ZONES;
+    for (const zone of zones) {
       if (x >= zone.x1 && x <= zone.x2 && y >= zone.y1 && y <= zone.y2) {
         return { x, y, zone: zone.n };
       }
     }
     let best = null;
     let bestDistance = Number.POSITIVE_INFINITY;
-    for (const zone of RP_ZONES) {
+    for (const zone of zones) {
       const cx = Math.max(zone.x1, Math.min(zone.x2, x));
       const cy = Math.max(zone.y1, Math.min(zone.y2, y));
       const distance = ((cx - x) ** 2) + ((cy - y) ** 2);
@@ -10147,7 +10197,7 @@ const RewardProperty = (function () {
         best = { x: cx, y: cy, zone: zone.n };
       }
     }
-    return best || { x: 84, y: 64, zone: "the rear paddock" };
+    return best || { x: 84, y: 64, zone: "the right paddock" };
   }
 
   function getHorseSource(slug = "") {
@@ -13336,8 +13386,13 @@ function renderCurrentView() {
   elements.subjectsView.classList.toggle("hidden", state.currentView !== "subjects");
   elements.taskView.classList.toggle("hidden", state.currentView !== "task");
   elements.revisionView.classList.toggle("hidden", state.currentView !== "revision");
+  syncTopbarNavigationState();
+}
+
+function syncTopbarNavigationState() {
   elements.navHomeButton.classList.toggle("is-active", state.currentView === "home");
   elements.navSubjectsButton.classList.toggle("is-active", state.currentView === "subjects");
+  elements.navCalendarButton?.classList.toggle("is-active", state.upcomingModalOpen && state.upcomingModalMode === "all");
   elements.navSettingsButton.classList.toggle("is-active", state.currentView === "settings");
 }
 
@@ -17969,6 +18024,12 @@ function renderUpcomingModal() {
   const displayEntries = isAllYearMode ? yearEntries : upcomingEntries;
   const fortnightEnd = new Date();
   fortnightEnd.setDate(fortnightEnd.getDate() + 14);
+  if (elements.upcomingModalEyebrow) {
+    elements.upcomingModalEyebrow.textContent = isAllYearMode ? "Full year" : "Next 14 days";
+  }
+  if (elements.upcomingModalTitle) {
+    elements.upcomingModalTitle.textContent = isAllYearMode ? "Assessment calendar" : "Upcoming assessments";
+  }
   elements.upcomingModalSummary.textContent = isAllYearMode
     ? `This is the full year assessment list across all subjects. Completed assessments remain visible here.`
     : upcomingEntries.length
@@ -17977,6 +18038,7 @@ function renderUpcomingModal() {
   elements.toggleUpcomingModeButton.textContent = isAllYearMode
     ? "Back to next fortnight"
     : "View all assessments for the year";
+  syncTopbarNavigationState();
 
   if (!displayEntries.length) {
     elements.upcomingModalList.innerHTML = `<div class="empty-state">${
@@ -22487,6 +22549,9 @@ elements.navSubjectsButton.addEventListener("click", () => {
   state.focusAskOpen = false;
   state.focusArea = null;
   render();
+});
+elements.navCalendarButton?.addEventListener("click", () => {
+  openAssessmentCalendar("all");
 });
 elements.navSettingsButton.addEventListener("click", () => {
   hydrateSettingsView();

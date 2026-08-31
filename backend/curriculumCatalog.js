@@ -176,6 +176,17 @@ const year7SubjectEnhancements = {
       }
     ]
   },
+  geography: {
+    topics: [
+      "map skills and spatial thinking",
+      "places and liveability",
+      "water in the world",
+      "landforms and landscapes",
+      "environmental change",
+      "fieldwork observation and explanation"
+    ],
+    resources: []
+  },
   music: {
     topics: [
       "beat and rhythm notation",
@@ -491,6 +502,28 @@ function juniorEntriesForGrade(grade) {
     }),
     createEntry({
       grade,
+      subjectId: "geography",
+      subjectName: "Geography",
+      curriculumOverview: `${stageLabel} Geography develops map skills, spatial thinking, fieldwork and explanation of how environments and human activity shape places. Students are assessed on how well they interpret data, use case studies and explain geographical change.`,
+      skillsTested: [
+        "map and spatial interpretation",
+        "reading graphs, photographs and data",
+        "fieldwork observation and analysis",
+        "explaining environmental and human processes",
+        "short and extended responses using case studies"
+      ],
+      topics:
+        grade === "7"
+          ? year7SubjectEnhancements.geography.topics
+          : grade === "8"
+            ? ["place and liveability", "landforms and landscapes", "interconnections", "fieldwork skills"]
+            : grade === "9"
+              ? ["biomes and food security", "changing places", "spatial patterns", "geographical inquiry"]
+              : ["environmental change and management", "human wellbeing", "place connections", "data interpretation"],
+      resources: grade === "7" ? year7SubjectEnhancements.geography.resources : []
+    }),
+    createEntry({
+      grade,
       subjectId: "music",
       subjectName: "Music",
       curriculumOverview: `${stageLabel} Music builds listening, performing, composing and reflection. Students learn to describe musical concepts and to justify choices in performance and composition tasks.`,
@@ -730,6 +763,23 @@ function seniorEntriesForGrade(grade) {
           note: "Useful for seeing what stronger senior history work looks like."
         }
       ]
+    }),
+    createEntry({
+      grade,
+      subjectId: "geography",
+      subjectName: "Geography",
+      curriculumOverview: `${gradeLabel} Senior geography revision focuses on spatial interpretation, fieldwork evidence, case studies and extended responses that explain geographical processes, change and management strategies.`,
+      skillsTested: [
+        "map and data interpretation",
+        "fieldwork analysis",
+        "using case studies as evidence",
+        "extended geographical explanation"
+      ],
+      topics:
+        grade === "11"
+          ? ["earth's natural systems", "people, patterns and processes", "investigating places", "fieldwork skills"]
+          : ["ecosystems and global change", "urban places", "people and economic activity", "exam-style case study writing"],
+      resources: hscExamResources
     }),
     createEntry({
       grade,
