@@ -691,6 +691,7 @@ const RP_OPTIONAL_REWARDS = [
   { id: "arena-lights", track: "arena", label: "Arena lights", description: "Four towers — ride after dark" },
   { id: "arena-roof", track: "arena", label: "Arena roof", description: "Covered arena, ride in any weather" }
 ];
+const RP_REPEATABLE_REWARD_IDS = new Set(["saddles", "bridles", "saddle-pads", "girths"]);
 const RP_OPTIONAL_REWARD_TRACKS = {
   tack: ["saddles", "bridles", "saddle-pads", "girths"],
   property: ["riders", "horse-float", "horse-wash-bay"],
@@ -10258,6 +10259,15 @@ const RewardProperty = (function () {
     return new Set(getClaimedRewardIds());
   }
 
+  function isRepeatableReward(rewardId = "") {
+    return RP_REPEATABLE_REWARD_IDS.has(String(rewardId || ""));
+  }
+
+  function getRewardClaimCount(rewardId = "") {
+    const normalizedRewardId = String(rewardId || "");
+    return getClaimedRewardIds().filter((claimedRewardId) => claimedRewardId === normalizedRewardId).length;
+  }
+
   function getMandatoryStageCount() {
     ensureLoaded();
     return Math.max(0, Math.min(RP_MANDATORY_REWARDS.length, getEffectiveRenovationSessionCount()));
@@ -10272,17 +10282,15 @@ const RewardProperty = (function () {
     return Math.max(0, getOptionalRewardAllowance() - getClaimedRewardIds().length);
   }
 
-  function getNextRewardForTrack(track = "") {
-    const claimed = getClaimedRewardSet();
+  function getTrackRewardChoices(track = "") {
     return (RP_OPTIONAL_REWARD_TRACKS[String(track || "")] || [])
       .map((rewardId) => RP_REWARD_BY_ID[rewardId])
-      .find((reward) => reward && !claimed.has(reward.id)) || null;
+      .filter((reward) => reward && (isRepeatableReward(reward.id) || !hasClaimedReward(reward.id)));
   }
 
   function getUpcomingRewardChoices() {
     return ["tack", "property", "arena"]
-      .map((track) => getNextRewardForTrack(track))
-      .filter(Boolean);
+      .flatMap((track) => getTrackRewardChoices(track));
   }
 
   function getAvailableRewardChoices() {
@@ -10294,6 +10302,28 @@ const RewardProperty = (function () {
 
   function hasClaimedReward(rewardId = "") {
     return getClaimedRewardSet().has(String(rewardId || ""));
+  }
+
+  function getTackInventoryCount(category = "") {
+    const rewardId = RP_TACK_REWARD_BY_CATEGORY[String(category || "")];
+    return rewardId ? getRewardClaimCount(rewardId) : 0;
+  }
+
+  function getTackInventorySummary(category = "") {
+    const total = getTackInventoryCount(category);
+    const fitted = S?.horses?.filter((horse) => Boolean(horse?.[category])).length || 0;
+    const spare = Math.max(0, total - fitted);
+    return { total, fitted, spare };
+  }
+
+  function canFitTack(horse, category = "") {
+    if (!horse || !isTackUnlocked(category)) {
+      return false;
+    }
+    if (horse[category]) {
+      return true;
+    }
+    return getTackInventorySummary(category).spare > 0;
   }
 
   function ownedTack() {
@@ -10312,8 +10342,7 @@ const RewardProperty = (function () {
   }
 
   function isTackUnlocked(category = "") {
-    const rewardId = RP_TACK_REWARD_BY_CATEGORY[String(category || "")];
-    return Boolean(rewardId) && hasClaimedReward(rewardId);
+    return getTackInventoryCount(category) > 0;
   }
 
   function isJumpUnlocked(type = "") {
@@ -10338,14 +10367,14 @@ const RewardProperty = (function () {
     const pendingChoices = getPendingRewardChoiceCount();
     if (pendingChoices > 0) {
       return pendingChoices === 1
-        ? "A reward choice is waiting. Pick one tack, property, or arena reward."
-        : `${pendingChoices} reward choices are waiting. Pick one reward each time you complete a session.`;
+        ? "A reward choice is waiting. Pick one reward. Tack items can be chosen again any time to outfit more horses."
+        : `${pendingChoices} reward choices are waiting. Pick one reward each time you complete a session, and keep adding tack as your horse team grows.`;
     }
     const upcomingChoices = getUpcomingRewardChoices();
     if (!upcomingChoices.length) {
       return "The current reward ladder is fully claimed. Keep completing sessions to build skill and collect horses.";
     }
-    return `The next completed Practice session will offer ${upcomingChoices.map((reward) => reward.label.toLowerCase()).join(", ")}.`;
+    return "The next completed Practice session will unlock another reward choice. Tack items can be chosen again, and any unclaimed property or arena upgrades stay available.";
   }
 
   function getRewardClaimMessage(rewardId = "") {
@@ -10354,7 +10383,10 @@ const RewardProperty = (function () {
       return "Reward claimed.";
     }
     if (reward.track === "tack") {
-      return `${reward.label} are now unlocked in the tack room.`;
+      const count = getRewardClaimCount(reward.id);
+      return count === 1
+        ? `${reward.label} are now available in the tack room.`
+        : `${reward.label} have been added again. Collected so far: ${count}.`;
     }
     if (reward.track === "arena") {
       return `${reward.label} have been added to the reward ladder.`;
@@ -10382,8 +10414,10 @@ const RewardProperty = (function () {
       })),
       ...RP_OPTIONAL_REWARDS.map((reward) => ({
         ...reward,
-        locked: !claimed.has(reward.id),
-        statusLabel: claimed.has(reward.id) ? "Unlocked" : "Locked"
+        locked: isRepeatableReward(reward.id) ? getRewardClaimCount(reward.id) <= 0 : !claimed.has(reward.id),
+        statusLabel: isRepeatableReward(reward.id)
+          ? `${getRewardClaimCount(reward.id)} collected`
+          : claimed.has(reward.id) ? "Unlocked" : "Locked"
       }))
     ];
     return {
@@ -10549,7 +10583,7 @@ const RewardProperty = (function () {
         ? rawGrammarSessions
         : getCompletedGrammarRewardSessions(rawGrammarSessions);
     const claimedRewardIds = Array.isArray(base.claimedRewardIds)
-      ? [...new Set(base.claimedRewardIds.map((value) => String(value || "")).filter((value) => RP_REWARD_BY_ID[value]))]
+      ? base.claimedRewardIds.map((value) => String(value || "")).filter((value) => RP_REWARD_BY_ID[value])
       : [];
     const savedSessions = Math.max(0, Number(base.sessions || 0) || 0);
     S = {
@@ -10832,6 +10866,9 @@ const RewardProperty = (function () {
     if (!horse || !isTackUnlocked(category)) {
       return;
     }
+    if (!horse[category] && !canFitTack(horse, category)) {
+      return;
+    }
     if (getVariantSheet(category)) {
       activeTackCategory = category;
       view = "tack";
@@ -10846,6 +10883,9 @@ const RewardProperty = (function () {
   function applyVariant(category = "", variantId = "") {
     const horse = sel ? byId(sel) : null;
     if (!horse || !isTackUnlocked(category)) {
+      return;
+    }
+    if (!horse[category] && !canFitTack(horse, category)) {
       return;
     }
     const variant = getVariantItems(category).find((item) => item.id === variantId);
@@ -10947,14 +10987,16 @@ const RewardProperty = (function () {
     query(".rp-stalls").innerHTML = stallsMarkup;
 
     query(".rp-tackhint").textContent = selectedHorse
-      ? `Fitting tack to ${selectedHorse.name}. Claim tack rewards from the reward ladder, then fit them here.`
+      ? `Fitting tack to ${selectedHorse.name}. Keep collecting tack rewards after the final renovation so every horse can be outfitted.`
       : getRewardMilestoneMessage();
     query(".rp-tackroom").style.backgroundImage = `url('${RP_ASSETS.tackRoom}')`;
     query(".rp-tackroom").innerHTML = RP_TACK.map((item) => {
       const unlocked = isTackUnlocked(item.k);
       const active = selectedHorse ? Boolean(selectedHorse[item.k]) : false;
       const variantLabel = getTackDisplayVariant(item.k, selectedHorse)?.label || "";
+      const inventory = getTackInventorySummary(item.k);
       const lockedLabel = "Choose on reward ladder";
+      const readyLabel = `${inventory.total} collected${inventory.fitted ? ` · ${inventory.fitted} fitted` : ""}${inventory.spare ? ` · ${inventory.spare} spare` : ""}`;
       return `
         <button
           type="button"
@@ -10967,20 +11009,30 @@ const RewardProperty = (function () {
           ${unlocked ? buildRackArtMarkup(item.k, selectedHorse) : ""}
           <span class="rp-rack-meta">
             <strong>${escapeHtml(item.label)}</strong>
-            <span>${escapeHtml(unlocked ? (active && variantLabel ? variantLabel : active ? "Fitted" : variantLabel || "Ready to use") : lockedLabel)}</span>
+            <span>${escapeHtml(unlocked ? (active && variantLabel ? `${variantLabel} · ${readyLabel}` : active ? `Fitted · ${readyLabel}` : readyLabel) : lockedLabel)}</span>
           </span>
         </button>
       `;
     }).join("");
     const tackVariants = getVariantItems(activeTackCategory);
+    const activeTackItemLabel = RP_TACK.find((item) => item.k === activeTackCategory)?.label || "This tack";
+    const activeTackInventory = getTackInventorySummary(activeTackCategory);
+    const noSpareActiveTack = Boolean(
+      selectedHorse
+      && !selectedHorse[activeTackCategory]
+      && isTackUnlocked(activeTackCategory)
+      && !canFitTack(selectedHorse, activeTackCategory)
+    );
     query(".rp-tackchoices").innerHTML = !selectedHorse
         ? `<div class="rp-choice-empty">Select a horse to open the tack tray.</div>`
         : !isTackUnlocked(activeTackCategory)
-          ? `<div class="rp-choice-empty">${escapeHtml(`${RP_TACK.find((item) => item.k === activeTackCategory)?.label || "This tack"} is still locked on the reward ladder.`)}</div>`
+          ? `<div class="rp-choice-empty">${escapeHtml(`${activeTackItemLabel} is still locked on the reward ladder.`)}</div>`
+          : noSpareActiveTack
+            ? `<div class="rp-choice-empty">${escapeHtml(`${activeTackItemLabel} is already fitted to ${activeTackInventory.fitted} horse${activeTackInventory.fitted === 1 ? "" : "s"}. Clear one or choose this reward again to fit ${selectedHorse.name}.`)}</div>`
           : tackVariants.length
         ? `
           <div class="rp-choice-head">
-            <strong>${escapeHtml(RP_TACK.find((item) => item.k === activeTackCategory)?.label || "Tack style")}</strong>
+            <strong>${escapeHtml(activeTackItemLabel)}</strong>
             <span>Choose one style for this horse.</span>
           </div>
           <div class="rp-choice-grid">
@@ -10991,7 +11043,7 @@ const RewardProperty = (function () {
               </button>
             `).join("")}
           </div>
-          <button type="button" class="rp-btn rp-btn-ghost rp-choice-clear" data-rp-variant-clear="${escapeHtml(activeTackCategory)}">Clear ${escapeHtml(RP_TACK.find((item) => item.k === activeTackCategory)?.label || "selection")}</button>
+          <button type="button" class="rp-btn rp-btn-ghost rp-choice-clear" data-rp-variant-clear="${escapeHtml(activeTackCategory)}">Clear ${escapeHtml(activeTackItemLabel)}</button>
         `
         : `<div class="rp-choice-empty">${escapeHtml(activeTackCategory === "saddle" ? "The saddle reward is live. Use the saddle row on the right to fit or remove it from the selected horse." : "Choose a rack to open the tack tray.")}</div>`;
 
@@ -11044,15 +11096,16 @@ const RewardProperty = (function () {
         const unlocked = isTackUnlocked(item.k);
         const active = Boolean(selectedHorse[item.k]);
         const variantLabel = getVariantLabel(item.k, selectedHorse[getHorseChoiceKey(item.k)] || "");
+        const inventory = getTackInventorySummary(item.k);
         const statusLabel = !unlocked
           ? "Locked"
           : active && variantLabel
-            ? variantLabel
+            ? `${variantLabel} · ${inventory.total} collected`
             : active
-              ? "Fitted"
-              : getVariantSheet(item.k)
-                ? "Choose"
-                : "Available";
+              ? `Fitted · ${inventory.total} collected`
+              : inventory.spare
+                ? `${inventory.spare} spare`
+                : "All fitted";
         return `<button class="rp-row${active ? " is-on" : ""}${activeTackCategory === item.k ? " is-focus" : ""}${unlocked ? "" : " is-locked"}" data-k="${escapeHtml(item.k)}"><span>${escapeHtml(item.label)}</span><span class="rp-tag2">${escapeHtml(statusLabel)}</span></button>`;
       }).join("");
       query(".rp-choice-summary").innerHTML = getHorseTackLabels(selectedHorse).length
@@ -11066,7 +11119,7 @@ const RewardProperty = (function () {
       : view === "stable"
         ? "Horses sent back from the property stand in their stall with their plaque below."
         : view === "tack"
-          ? "Claim tack rewards from the ladder, then use the tack room to fit them to a selected horse."
+          ? "Claim tack rewards again as needed, then use the tack room to fit that collected gear to a selected horse."
           : "Arena rewards unlock jump access here. Add unlocked jumps once, then drag them around the arena to build the course.";
   }
 
@@ -11346,7 +11399,7 @@ function buildSpellingRewardLadderMarkup(snapshot) {
     <article class="ss-reward-ladder">
       <div class="ss-reward-ladder__head">
         <p class="eyebrow">Reward ladder</p>
-        <p class="ss-reward-ladder__copy">The six renovation stages fill in as grammar or Practice sessions are completed. After the six Practice sessions are done, each new Practice session offers three rewards — one tack, one property, one arena — and the student picks one.</p>
+        <p class="ss-reward-ladder__copy">The six renovation stages fill in as grammar or Practice sessions are completed. After the property is fully rebuilt, each new Practice session unlocks one reward choice. Tack can be chosen again for more horses, while riders, the horse float, the wash bay, and arena upgrades stay available until claimed.</p>
       </div>
       <div class="ss-reward-ladder__list">
         ${snapshot.entries.map((reward, index) => `
@@ -11384,7 +11437,7 @@ function buildSpellingRewardChoiceMarkup(snapshot) {
       <article class="ss-reward-choice">
         <p class="eyebrow">Reward choice</p>
         <h5>${escapeHtml(snapshot.pendingChoiceCount > 1 ? `${snapshot.pendingChoiceCount} choices waiting` : "Choose your next reward")}</h5>
-        <p>Choose one reward from the three offered tracks for this completed Practice session.</p>
+        <p>Choose one reward from the choices below. Tack items can be chosen again so there is enough gear for more horses.</p>
         <div class="ss-reward-choice__grid">
           ${snapshot.availableChoices.map((reward) => `
             <button type="button" class="ss-reward-choice__card" data-spelling-claim-reward="${escapeHtml(reward.id)}">
@@ -11400,9 +11453,9 @@ function buildSpellingRewardChoiceMarkup(snapshot) {
   if (snapshot.upcomingChoices.length) {
     return `
       <article class="ss-reward-choice">
-        <p class="eyebrow">Next reward set</p>
+        <p class="eyebrow">Next reward choice</p>
         <h5>Another choice unlocks next Practice session</h5>
-        <p>The next completed Practice session will offer one tack, one property, and one arena reward. These are the next three in line.</p>
+        <p>The next completed Practice session will unlock one more choice. Tack items can be chosen again, and any unclaimed property or arena rewards will still be waiting.</p>
         <div class="ss-reward-choice__grid">
           ${snapshot.upcomingChoices.map((reward) => `
             <article class="ss-reward-choice__card is-static">

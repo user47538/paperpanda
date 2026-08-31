@@ -187,21 +187,21 @@ export const GP_MC = {
     { s: "Change to the past tense: I am carrying the saddle.", opts: ["I was carrying the saddle.", "I carry the saddle.", "I will carry the saddle."], a: 0, skill: "tense", why: "Am carrying changes to was carrying in the past." }
   ],
   mixedPool: [
-    { s: "yesterday we clean the stalls.", opts: ["Wrong tense", "Missing comma", "Missing apostrophe"], a: 0, skill: "tense", why: "Yesterday calls for the past tense: cleaned." },
-    { s: "The bridle were on the hook.", opts: ["Missing capital letter", "Subject and verb do not agree", "Missing full stop"], a: 1, skill: "sv-agreement", why: "One bridle needs was." },
-    { s: "after the lesson, Maya washed the saddle.", opts: ["Capital letter missing", "Missing apostrophe", "Sentence fragment"], a: 0, skill: "capitals", why: "The first word should be After." },
-    { s: "Because the rain started.", opts: ["Sentence fragment", "Missing comma", "Wrong pronoun"], a: 0, skill: "fragments", why: "This does not finish a full idea." },
-    { s: "The foals tail was tangled.", opts: ["Missing conjunction", "Missing apostrophe", "Wrong preposition"], a: 1, skill: "apostrophes", why: "The tail belongs to the foal: foal's." },
-    { s: "We packed the feed, but forgot the buckets.", opts: ["Missing subject in the second part", "Missing question mark", "Wrong tense"], a: 0, skill: "construction", why: "The second part needs a subject: but we forgot…" },
-    { s: "He opened the gate then he waved us through.", opts: ["Missing comma after then", "Run-on sentence", "Missing capital letter"], a: 1, skill: "fragments", why: "Two complete ideas are joined too loosely." },
-    { s: "The rider and the pony was ready.", opts: ["Subject and verb do not agree", "Missing apostrophe", "Missing adjective"], a: 0, skill: "sv-agreement", why: "Rider and pony means more than one, so the verb is were." },
-    { s: "I found the gloves under the bench and the crop beside the wall.", opts: ["Wrong pronoun", "Wrong preposition", "Missing comma"], a: 1, skill: "prepositions", why: "Under and beside are the location words in the sentence." },
-    { s: "Her saddle is old but comfortable.", opts: ["Missing conjunction", "Missing adjective", "No error"], a: 2, skill: "conjunctions", why: "But joins two describing ideas correctly, and the sentence is already complete." },
-    { s: "The careful rider spoke softly to the mare.", opts: ["No error", "Missing apostrophe", "Sentence fragment"], a: 0, skill: "adverbs", why: "Softly is an adverb and the sentence is correct." },
-    { s: "Them brushed the pony before dinner.", opts: ["Wrong pronoun", "Wrong tense", "Missing comma"], a: 0, skill: "pronouns", why: "Them should be They here." },
-    { s: "The pony waited patiently by the gate.", opts: ["No error", "Missing conjunction", "Missing apostrophe"], a: 0, skill: "adverbs", why: "Patiently is used correctly and the sentence works." },
-    { s: "The rider wore a blue helmet and a striped scarf.", opts: ["No error", "Wrong preposition", "Sentence fragment"], a: 0, skill: "adjectives", why: "Blue and striped describe the nouns correctly." },
-    { s: "The halter hung behind the stable door.", opts: ["Wrong pronoun", "No error", "Missing capital letter"], a: 1, skill: "prepositions", why: "Behind is a clear preposition and the sentence is correct." }
+    { s: "yesterday we clean the stalls.", opts: ["cleaned", ",", "'s"], a: 0, skill: "tense", why: "Yesterday calls for the past tense: cleaned." },
+    { s: "The bridle were on the hook.", opts: ["was", ".", "They"], a: 0, skill: "sv-agreement", why: "One bridle needs was." },
+    { s: "after the lesson, Maya washed the saddle.", opts: ["After", "'s", "Because"], a: 0, skill: "capitals", why: "The first word should be After." },
+    { s: "Because the rain started.", opts: ["we hurried inside.", ",", "They"], a: 0, skill: "fragments", why: "Because the rain started needs a main idea to finish the thought: Because the rain started, we hurried inside." },
+    { s: "The foals tail was tangled.", opts: ["and", "foal's", "under"], a: 1, skill: "apostrophes", why: "The tail belongs to the foal: foal's." },
+    { s: "We packed the feed, but forgot the buckets.", opts: ["we", "?", "packed"], a: 0, skill: "construction", why: "The second part needs a subject: but we forgot the buckets." },
+    { s: "After the ride we washed the saddle.", opts: [",", ".", "'s"], a: 0, skill: "commas", why: "A comma goes after the opening part: After the ride, we washed the saddle." },
+    { s: "The rider and the pony was ready.", opts: ["were", "'s", "ready"], a: 0, skill: "sv-agreement", why: "Rider and pony means more than one, so the verb is were." },
+    { s: "I found the gloves in the bench and the crop beside the wall.", opts: ["under", "They", ","], a: 0, skill: "prepositions", why: "Under is the correct preposition for the gloves here." },
+    { s: "Her saddle is old but comfortable.", opts: ["and", "old", "No error"], a: 2, skill: "conjunctions", why: "But joins two describing ideas correctly, and the sentence is already complete." },
+    { s: "The careful rider spoke softly to the mare.", opts: ["No error", "'s", "because"], a: 0, skill: "adverbs", why: "Softly is an adverb and the sentence is correct." },
+    { s: "Them brushed the pony before dinner.", opts: ["They", "brush", "will brush"], a: 0, skill: "pronouns", why: "Them should be They here." },
+    { s: "The pony waited patiently by the gate.", opts: ["No error", "and", "'s"], a: 0, skill: "adverbs", why: "Patiently is used correctly and the sentence works." },
+    { s: "The rider wore a blue helmet and a striped scarf.", opts: ["No error", "under", "because"], a: 0, skill: "adjectives", why: "Blue and striped describe the nouns correctly." },
+    { s: "The halter hung behind the stable door.", opts: ["under", "No error", "The"], a: 1, skill: "prepositions", why: "Behind is a clear preposition and the sentence is correct." }
   ]
 };
 
@@ -356,12 +356,10 @@ export const GP_FIX = {
   para2: {
     tokens: [
       { t: "on", slot: "cap1", need: "cap" },
-      { t: "friday" }, { t: "maya" }, { t: "borrowed" }, { t: "her" },
+      { t: "Friday" }, { t: "Maya" }, { t: "borrowed" }, { t: "her" },
       { t: "cousins", slot: "apos1", need: "apos", c: "cousin's" },
-      { t: "saddle" }, { slot: "comma1", need: "comma" },
-      { t: "after" }, { t: "the" }, { t: "lesson" }, { t: "she" }, { t: "cleaned" }, { t: "it" }, { t: "carefully" },
-      { slot: "end1", need: "end" },
-      { t: "the", slot: "cap2", need: "cap" }, { t: "bridles" }, { t: "buckles" }, { t: "were" }, { t: "muddy" },
+      { t: "saddle" }, { slot: "end1", need: "end" },
+      { t: "after", slot: "cap2", need: "cap" }, { t: "the" }, { t: "lesson" }, { slot: "comma1", need: "comma" }, { t: "she" }, { t: "cleaned" }, { t: "it" }, { t: "carefully" },
       { slot: "end2", need: "end" }
     ],
     chips: [

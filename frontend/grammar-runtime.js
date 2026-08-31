@@ -2845,6 +2845,7 @@ export function createGrammarProgram({
           title: sessionConfig.title,
           item,
           optionSet: item.opts,
+          prompt: sessionConfig.content === "mixed1" ? "Choose the word, words, or mark that fixes the sentence." : "",
           actType: "mc",
           canAdvance: canAdvanceChoice("mc", item)
         }));
