@@ -1975,6 +1975,51 @@ function buildScheduleMergedAssessments(parsedAssessments = [], existingAssessme
   return [...uploadedScheduleAssessments, ...customAssessments];
 }
 
+function hasStoredScheduleData(subjects = []) {
+  return (Array.isArray(subjects) ? subjects : []).some((subject) =>
+    (Array.isArray(subject?.assessments) ? subject.assessments : []).some((assessment) => {
+      if (assessment?.source === "schedule-upload" || assessment?.source === "seeded-schedule") {
+        return true;
+      }
+      return legacyAssessmentTemplateKeysBySubject[subject.id]?.has(buildAssessmentTemplateKey(assessment));
+    })
+  );
+}
+
+function buildSeededAssessmentsForSubject(subjectId = "") {
+  const subjectSeedEntry = findSeedSubjectByAlias(subjectId);
+  return structuredClone(subjectSeedEntry?.assessments || []).map((assessment) =>
+    normaliseAssessment({
+      ...assessment,
+      id: assessment.id || createId(),
+      source: assessment.source || "seeded-schedule"
+    })
+  );
+}
+
+function backfillSeededAssessmentsForNewSubjects(subjects = [], hasScheduleData = hasStoredScheduleData(subjects)) {
+  if (!Array.isArray(subjects) || !subjects.length || !hasScheduleData) {
+    return subjects;
+  }
+
+  return subjects.map((subject) => {
+    const existingAssessments = Array.isArray(subject?.assessments) ? subject.assessments : [];
+    if (existingAssessments.length) {
+      return subject;
+    }
+
+    const seededAssessments = buildSeededAssessmentsForSubject(subject.id);
+    if (!seededAssessments.length) {
+      return subject;
+    }
+
+    return {
+      ...subject,
+      assessments: seededAssessments
+    };
+  });
+}
+
 function removeLegacySeededAssessments(subjects) {
   return subjects.map((subject) => ({
     ...subject,
@@ -5557,6 +5602,53 @@ function formatAssessmentDueLabel(value) {
   }
 
   return `${originalValue} · ${formatAssessmentDate(parsedDate)}`;
+}
+
+function getAssessmentTermNumber(value, dateObject = null) {
+  const termMatch = String(value || "").match(/\bTerm\s*(\d)\b/i);
+  if (termMatch) {
+    return Number(termMatch[1]);
+  }
+
+  if (!(dateObject instanceof Date) || Number.isNaN(dateObject.getTime())) {
+    return 0;
+  }
+
+  const datedTermStarts = Object.entries(state.termStarts || {})
+    .map(([termNumber, startDate]) => ({
+      termNumber: Number(termNumber),
+      startDate: startDate ? new Date(`${startDate}T00:00:00`) : null
+    }))
+    .filter((entry) => entry.startDate && !Number.isNaN(entry.startDate.getTime()))
+    .sort((left, right) => left.startDate.getTime() - right.startDate.getTime());
+
+  let resolvedTermNumber = 0;
+  datedTermStarts.forEach((entry) => {
+    if (dateObject >= entry.startDate) {
+      resolvedTermNumber = entry.termNumber;
+    }
+  });
+
+  return resolvedTermNumber;
+}
+
+function groupAssessmentEntriesByTerm(entries = []) {
+  const grouped = new Map();
+
+  entries.forEach((entry) => {
+    const termNumber = getAssessmentTermNumber(entry?.assessment?.dueDate, entry?.dueDateObject);
+    const groupKey = termNumber > 0 ? `term-${termNumber}` : "other";
+    const existingGroup = grouped.get(groupKey) || {
+      key: groupKey,
+      label: termNumber > 0 ? `Term ${termNumber}` : "Other dates",
+      order: termNumber > 0 ? termNumber : Number.POSITIVE_INFINITY,
+      entries: []
+    };
+    existingGroup.entries.push(entry);
+    grouped.set(groupKey, existingGroup);
+  });
+
+  return [...grouped.values()].sort((left, right) => left.order - right.order || left.label.localeCompare(right.label));
 }
 
 function buildTaskExportName(subjectName, title) {
@@ -12156,17 +12248,61 @@ function buildResolvedSubjectsFromStore(account, storedSubjects) {
     const resolvedSubjects = subjectTemplateSeed.map((seededSubject, index) =>
       storedSubjectsById.get(seededSubject.id) || hydrateStoredSubject({ id: seededSubject.id }, index)
     );
+    const resolvedSubjectsWithExtras = [...resolvedSubjects, ...extraSubjects];
+    const shouldBackfillSeededAssessments = hasStoredScheduleData(resolvedSubjectsWithExtras);
 
     return recoverResolvedSubjectsForGrammar(
-      mergeLegacyGroupedDocuments(
-        removeLegacySeededDocuments(
-          removeLegacySeededAssessments([...resolvedSubjects, ...extraSubjects])
+      backfillSeededAssessmentsForNewSubjects(
+        mergeLegacyGroupedDocuments(
+          removeLegacySeededDocuments(
+            removeLegacySeededAssessments(resolvedSubjectsWithExtras)
+          )
         )
-      )
+      , shouldBackfillSeededAssessments)
     );
   }
 
   return recoverResolvedSubjectsForGrammar(createInitialSubjectsForAccount(account));
+}
+
+function getUpcomingAssessmentActionMarkup(subjectId, assessment) {
+  return `
+    <div class="assessment-actions">
+      <button
+        type="button"
+        class="assessment-action"
+        data-upcoming-action="edit"
+        data-upcoming-subject-id="${subjectId}"
+        data-assessment-id="${assessment.id}"
+      >
+        Edit
+      </button>
+      <button
+        type="button"
+        class="assessment-action assessment-action--danger"
+        data-upcoming-action="delete"
+        data-upcoming-subject-id="${subjectId}"
+        data-assessment-id="${assessment.id}"
+      >
+        Delete
+      </button>
+      ${
+        assessment.completed
+          ? '<span class="document-chip">Completed</span>'
+          : `
+            <button
+              type="button"
+              class="assessment-action assessment-complete"
+              data-upcoming-action="complete"
+              data-upcoming-subject-id="${subjectId}"
+              data-assessment-id="${assessment.id}"
+            >
+              Complete
+            </button>
+          `
+      }
+    </div>
+  `;
 }
 
 function getStoredSubjectsForAccount(account) {
@@ -18092,95 +18228,46 @@ function renderUpcomingModal() {
   }
 
   if (isAllYearMode) {
+    const groupedEntries = groupAssessmentEntriesByTerm(displayEntries);
     elements.upcomingModalList.innerHTML = `
-      <div class="assessment-ledger">
-        <div class="assessment-ledger__header">
-          <span>Subject</span>
-          <span>Task</span>
-          <span>Title</span>
-          <span>Distribution</span>
-          <span>Due</span>
-          <span>Weighting</span>
-          <span>Status</span>
-          <span>Actions</span>
-        </div>
-        ${displayEntries
+      <div class="assessment-term-list">
+        ${groupedEntries
           .map(
-            ({ subject, assessment }) => `
-              <article class="assessment-ledger__row${assessment.completed ? " assessment-ledger__row--completed" : ""}">
-                <span class="assessment-ledger__cell">
-                  <span class="assessment-ledger__label">Subject</span>
-                  ${escapeHtml(subject.name)}
-                </span>
-                <span class="assessment-ledger__cell">
-                  <span class="assessment-ledger__label">Task</span>
-                  ${escapeHtml(assessment.taskNumber || "Uploaded")}
-                </span>
-                <span class="assessment-ledger__cell assessment-ledger__cell--title">
-                  <span class="assessment-ledger__label">Title</span>
-                  <button
-                    type="button"
-                    class="assessment-link-button"
-                    data-upcoming-action="open"
-                    data-upcoming-subject-id="${subject.id}"
-                    data-assessment-id="${assessment.id}"
-                  >
-                    ${escapeHtml(assessment.componentTask || assessment.title)}
-                  </button>
-                </span>
-                <span class="assessment-ledger__cell">
-                  <span class="assessment-ledger__label">Distribution</span>
-                  ${escapeHtml(formatAssessmentDueLabel(assessment.distributionDate || "TBC"))}
-                </span>
-                <span class="assessment-ledger__cell">
-                  <span class="assessment-ledger__label">Due</span>
-                  ${escapeHtml(formatAssessmentDueLabel(assessment.dueDate))}
-                </span>
-                <span class="assessment-ledger__cell">
-                  <span class="assessment-ledger__label">Weighting</span>
-                  ${escapeHtml(assessment.weighting || "TBC")}
-                </span>
-                <span class="assessment-ledger__cell">
-                  <span class="assessment-ledger__label">Status</span>
-                  ${assessment.completed ? "Completed" : "Active"}
-                </span>
-                <div class="assessment-ledger__cell assessment-ledger__actions">
-                  <span class="assessment-ledger__label">Actions</span>
-                  <button
-                    type="button"
-                    class="assessment-action"
-                    data-upcoming-action="edit"
-                    data-upcoming-subject-id="${subject.id}"
-                    data-assessment-id="${assessment.id}"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    class="assessment-action assessment-action--danger"
-                    data-upcoming-action="delete"
-                    data-upcoming-subject-id="${subject.id}"
-                    data-assessment-id="${assessment.id}"
-                  >
-                    Delete
-                  </button>
-                  ${
-                    assessment.completed
-                      ? '<span class="document-chip">Completed</span>'
-                      : `
-                        <button
-                          type="button"
-                          class="assessment-action assessment-complete"
-                          data-upcoming-action="complete"
-                          data-upcoming-subject-id="${subject.id}"
-                          data-assessment-id="${assessment.id}"
-                        >
-                          Complete
-                        </button>
-                      `
-                  }
+            (group) => `
+              <section class="assessment-term-group">
+                <div class="assessment-term-group__header">
+                  <h4 class="assessment-term-group__title">${escapeHtml(group.label)}</h4>
+                  <span class="document-chip">${group.entries.length} ${group.entries.length === 1 ? "assessment" : "assessments"}</span>
                 </div>
-              </article>
+                <div class="assessment-term-group__items">
+                  ${group.entries
+                    .map(
+                      ({ subject, assessment }) => `
+                        <article class="assessment-term-row${assessment.completed ? " assessment-term-row--completed" : ""}">
+                          <div class="assessment-term-row__main">
+                            <span class="assessment-term-row__subject">${escapeHtml(subject.name)}</span>
+                            <h4>
+                              <button
+                                type="button"
+                                class="assessment-link-button"
+                                data-upcoming-action="open"
+                                data-upcoming-subject-id="${subject.id}"
+                                data-assessment-id="${assessment.id}"
+                              >
+                                ${escapeHtml(assessment.componentTask || assessment.title)}
+                              </button>
+                            </h4>
+                          </div>
+                          <div class="assessment-term-row__side">
+                            <span class="assessment-date">Due ${escapeHtml(formatAssessmentDueLabel(assessment.dueDate))}</span>
+                            ${getUpcomingAssessmentActionMarkup(subject.id, assessment)}
+                          </div>
+                        </article>
+                      `
+                    )
+                    .join("")}
+                </div>
+              </section>
             `
           )
           .join("")}
