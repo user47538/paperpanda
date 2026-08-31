@@ -739,11 +739,17 @@ const RP_HOTSPOTS = [
 ];
 const RP_ASSETS = {
   tackRoom: "/property/tack-room-empty.jpeg",
-  saddle: "/property/saddle-reward.jpeg",
+  saddle: "/property/saddle-reward-cutout.png",
   arena: "/property/arena-empty.jpeg",
-  horseFloat: "/property/horse-float.jpeg",
-  horseWashBay: "/property/horse-wash-bay.jpeg"
+  horseFloat: "/property/horse-float-cutout.png",
+  horseWashBay: "/property/horse-wash-bay-cutout.png"
 };
+const RP_ASSET_DISPLAY_PROFILES = {
+  [RP_ASSETS.horseFloat]: "checker-cutout",
+  [RP_ASSETS.horseWashBay]: "checker-cutout"
+};
+const RP_ASSET_DISPLAY_CACHE = new Map();
+const RP_ASSET_DISPLAY_PENDING = new Set();
 const RP_VARIANT_SHEETS = {
   rider: {
     src: "/property/riders-sheet.jpeg",
@@ -10489,10 +10495,10 @@ const RewardProperty = (function () {
       return "The rider team is now waiting beside the paddock.";
     }
     if (reward.id === "horse-float") {
-      return "The horse float is now parked beside the shed.";
+      return "The horse float is now parked in front of the tack room.";
     }
     if (reward.id === "horse-wash-bay") {
-      return "The horse wash bay is now built beside the stables.";
+      return "The horse wash bay is now built beside the tack room.";
     }
     return `${reward.label} has been added to the property reward ladder.`;
   }
@@ -10552,10 +10558,11 @@ const RewardProperty = (function () {
         kind: "image",
         src: RP_ASSETS.horseWashBay,
         label: "Horse wash bay",
-        x: 84.2,
-        y: 61.8,
-        width: 15.8,
-        tilt: -1.5
+        x: 91.8,
+        y: 71.1,
+        width: 12.8,
+        tilt: 1.5,
+        className: "rp-world-prop--wash-bay"
       });
     }
     if (hasClaimedReward("horse-float")) {
@@ -10564,10 +10571,11 @@ const RewardProperty = (function () {
         kind: "image",
         src: RP_ASSETS.horseFloat,
         label: "Horse float",
-        x: 90.5,
-        y: 76.4,
-        width: 17.2,
-        tilt: -1.5
+        x: 82.1,
+        y: 80.8,
+        width: 20.2,
+        tilt: -2.25,
+        className: "rp-world-prop--horse-float"
       });
     }
     if (hasClaimedReward("riders")) {
@@ -10601,7 +10609,7 @@ const RewardProperty = (function () {
 
   function buildRackArtMarkup(category = "", horse = null) {
     if (category === "saddle") {
-      return `<span class="rp-rack-art rp-rack-art--image"><img src="${escapeHtml(RP_ASSETS.saddle)}" alt="Saddle reward" loading="lazy" /></span>`;
+      return `<span class="rp-rack-art rp-rack-art--image rp-rack-art--saddle"><img src="${escapeHtml(getProcessedPropertyAssetSrc(RP_ASSETS.saddle))}" alt="Saddle reward" loading="lazy" /></span>`;
     }
     const variant = getTackDisplayVariant(category, horse);
     const sheet = getVariantSheet(category);
@@ -10904,6 +10912,169 @@ const RewardProperty = (function () {
     `;
   }
 
+  function getProcessedPropertyAssetSrc(src = "") {
+    const profile = RP_ASSET_DISPLAY_PROFILES[src] || "";
+    if (!src || !profile || typeof document === "undefined") {
+      return src;
+    }
+    const cacheKey = `${profile}::${src}`;
+    if (RP_ASSET_DISPLAY_CACHE.has(cacheKey)) {
+      return RP_ASSET_DISPLAY_CACHE.get(cacheKey) || src;
+    }
+    if (!RP_ASSET_DISPLAY_PENDING.has(cacheKey)) {
+      RP_ASSET_DISPLAY_PENDING.add(cacheKey);
+      createProcessedPropertyAsset(src, profile)
+        .then((processedSrc) => {
+          RP_ASSET_DISPLAY_CACHE.set(cacheKey, processedSrc || src);
+        })
+        .catch(() => {
+          RP_ASSET_DISPLAY_CACHE.set(cacheKey, src);
+        })
+        .finally(() => {
+          RP_ASSET_DISPLAY_PENDING.delete(cacheKey);
+          if (root?.isConnected) {
+            requestAnimationFrame(() => render());
+          }
+        });
+    }
+    return src;
+  }
+
+  function createProcessedPropertyAsset(src = "", profile = "") {
+    if (profile !== "checker-cutout") {
+      return Promise.resolve(src);
+    }
+    return new Promise((resolve) => {
+      const image = new Image();
+      image.decoding = "async";
+      image.onload = () => {
+        const width = image.naturalWidth || image.width;
+        const height = image.naturalHeight || image.height;
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext("2d");
+        if (!context || !width || !height) {
+          resolve(src);
+          return;
+        }
+        context.drawImage(image, 0, 0, width, height);
+        const imageData = context.getImageData(0, 0, width, height);
+        knockOutConnectedBackground(imageData);
+        context.putImageData(imageData, 0, 0);
+        resolve(canvas.toDataURL("image/png"));
+      };
+      image.onerror = () => resolve(src);
+      image.src = src;
+    });
+  }
+
+  function knockOutConnectedBackground(imageData) {
+    const { data, width, height } = imageData;
+    const palette = collectBackgroundPalette(data, width, height);
+    if (!palette.length) {
+      return;
+    }
+    const maxDistance = 34;
+    const featherDistance = 16;
+    const visited = new Uint8Array(width * height);
+    const queue = [];
+
+    function enqueue(x, y) {
+      if (x < 0 || y < 0 || x >= width || y >= height) {
+        return;
+      }
+      const pixelIndex = y * width + x;
+      if (visited[pixelIndex]) {
+        return;
+      }
+      visited[pixelIndex] = 1;
+      queue.push(pixelIndex);
+    }
+
+    for (let x = 0; x < width; x += 1) {
+      enqueue(x, 0);
+      enqueue(x, height - 1);
+    }
+    for (let y = 1; y < height - 1; y += 1) {
+      enqueue(0, y);
+      enqueue(width - 1, y);
+    }
+
+    while (queue.length) {
+      const pixelIndex = queue.pop();
+      const offset = pixelIndex * 4;
+      if (data[offset + 3] === 0) {
+        continue;
+      }
+      const distance = getClosestPaletteDistance(
+        [data[offset], data[offset + 1], data[offset + 2]],
+        palette
+      );
+      if (distance > maxDistance + featherDistance) {
+        continue;
+      }
+      if (distance <= maxDistance) {
+        data[offset + 3] = 0;
+      } else {
+        const nextAlpha = Math.round(((distance - maxDistance) / featherDistance) * 255);
+        data[offset + 3] = Math.min(data[offset + 3], nextAlpha);
+      }
+      const x = pixelIndex % width;
+      const y = Math.floor(pixelIndex / width);
+      enqueue(x + 1, y);
+      enqueue(x - 1, y);
+      enqueue(x, y + 1);
+      enqueue(x, y - 1);
+    }
+  }
+
+  function collectBackgroundPalette(data, width, height) {
+    const samplePoints = [
+      [2, 2],
+      [Math.round(width * 0.2), 2],
+      [Math.round(width * 0.5), 2],
+      [Math.max(2, width - 3), 2],
+      [2, Math.round(height * 0.2)],
+      [2, Math.round(height * 0.5)],
+      [Math.max(2, width - 3), Math.round(height * 0.5)],
+      [2, Math.max(2, height - 3)],
+      [Math.round(width * 0.5), Math.max(2, height - 3)],
+      [Math.max(2, width - 3), Math.max(2, height - 3)]
+    ];
+    const swatches = [];
+    samplePoints.forEach(([rawX, rawY]) => {
+      const x = Math.max(0, Math.min(width - 1, rawX));
+      const y = Math.max(0, Math.min(height - 1, rawY));
+      const offset = (y * width + x) * 4;
+      if (data[offset + 3] === 0) {
+        return;
+      }
+      const rgb = [data[offset], data[offset + 1], data[offset + 2]];
+      const existing = swatches.find((entry) => getColorDistance(entry.rgb, rgb) <= 10);
+      if (existing) {
+        existing.count += 1;
+        return;
+      }
+      swatches.push({ rgb, count: 1 });
+    });
+    return swatches
+      .sort((left, right) => right.count - left.count)
+      .slice(0, 4)
+      .map((entry) => entry.rgb);
+  }
+
+  function getClosestPaletteDistance(rgb, palette) {
+    return palette.reduce((closest, swatch) => Math.min(closest, getColorDistance(rgb, swatch)), Number.POSITIVE_INFINITY);
+  }
+
+  function getColorDistance(left, right) {
+    const dr = left[0] - right[0];
+    const dg = left[1] - right[1];
+    const db = left[2] - right[2];
+    return Math.sqrt((dr * dr) + (dg * dg) + (db * db));
+  }
+
   function addArenaJump(type = "") {
     const jumpMeta = getJumpMeta(type);
     if (!jumpMeta || !isJumpUnlocked(type)) {
@@ -11031,12 +11202,12 @@ const RewardProperty = (function () {
     const occluder = query(".rp-occluder");
     getWorldRewardProps().forEach((prop) => {
       const propElement = document.createElement("div");
-      propElement.className = `rp-world-prop rp-world-prop--${prop.kind}`;
+      propElement.className = `rp-world-prop rp-world-prop--${prop.kind}${prop.className ? ` ${prop.className}` : ""}`;
       propElement.style.cssText = `left:${prop.x}%;top:${prop.y}%;width:${prop.width}%;z-index:${8 + Math.round(prop.y)};--prop-tilt:${prop.tilt || 0}deg;`;
       propElement.setAttribute("aria-hidden", "true");
       propElement.innerHTML = prop.kind === "sprite"
         ? buildSpriteCropMarkup(prop.sheet, prop.item, prop.label, "rp-sprite-crop rp-sprite-crop--world")
-        : `<img src="${escapeHtml(prop.src)}" alt="${escapeHtml(prop.label || "")}" loading="lazy" />`;
+        : `<img src="${escapeHtml(getProcessedPropertyAssetSrc(prop.src))}" alt="${escapeHtml(prop.label || "")}" loading="lazy" />`;
       world.insertBefore(propElement, occluder);
     });
     S.horses.filter((horse) => !horse.stabled).forEach((horse) => {
