@@ -50,6 +50,13 @@ export function createGrammarProgram({
     let gameFlashTimer = null;
     let recentCompletedResultNumber = 0;
     let persistenceState = { saving: false, error: "" };
+    const GRAMMAR_ACTIVITY_TEMPLATE_COUNT = GP_SESSIONS.length;
+    const GRAMMAR_WRITE_PROMPTS = [
+      "Write one complete sentence with at least 12 words about a horse, rider, or stable job. We are checking grammar, not spelling.",
+      "Write one complete sentence with at least 12 words that tells what happened before or after a riding lesson. We are checking grammar, not spelling.",
+      "Write one complete sentence with at least 12 words that includes a clear subject, verb, and detail about the property. We are checking grammar, not spelling.",
+      "Write one complete sentence with at least 12 words about something happening at the arena or in the paddock. We are checking grammar, not spelling."
+    ];
 
     function refreshState() {
       G = getSubjectGrammarState(subject);
@@ -132,7 +139,16 @@ export function createGrammarProgram({
     }
 
     function getSessionConfig(index = sessionIndex) {
-      return GP_SESSIONS[index] || null;
+      return getSessionConfigByNumber(Number(index) + 1);
+    }
+
+    function getSessionTemplateByNumber(activityNumber = 0) {
+      if (!GRAMMAR_ACTIVITY_TEMPLATE_COUNT) {
+        return null;
+      }
+      const safeActivityNumber = Math.max(1, Number(activityNumber || 0) || 1);
+      const templateIndex = (safeActivityNumber - 1) % GRAMMAR_ACTIVITY_TEMPLATE_COUNT;
+      return GP_SESSIONS[templateIndex] || null;
     }
 
     function hasHeard(termKey = "") {
@@ -190,39 +206,50 @@ export function createGrammarProgram({
     }
 
     function getSessionGroupCount() {
-      return Math.ceil(GP_SESSIONS.length / GP_ACTIVITIES_PER_SESSION);
+      return Math.ceil(GRAMMAR_ACTIVITY_TEMPLATE_COUNT / GP_ACTIVITIES_PER_SESSION);
     }
 
     function getCompletedSessionCount(doneCount = G?.done || 0) {
-      const safeDoneCount = Math.max(0, Math.min(GP_SESSIONS.length, Number(doneCount || 0) || 0));
+      const safeDoneCount = Math.max(0, Number(doneCount || 0) || 0);
       return Math.floor(safeDoneCount / GP_ACTIVITIES_PER_SESSION);
     }
 
     function getSessionNumberForActivity(activityNumber = 1) {
-      const safeActivity = Math.max(1, Math.min(GP_SESSIONS.length, Number(activityNumber || 1) || 1));
+      const safeActivity = Math.max(1, Number(activityNumber || 1) || 1);
       return Math.floor((safeActivity - 1) / GP_ACTIVITIES_PER_SESSION) + 1;
     }
 
     function getSessionSize(sessionNumber = 1) {
-      const safeSession = Math.max(1, Math.min(getSessionGroupCount(), Number(sessionNumber || 1) || 1));
-      const startActivity = ((safeSession - 1) * GP_ACTIVITIES_PER_SESSION) + 1;
-      return Math.max(0, Math.min(GP_ACTIVITIES_PER_SESSION, GP_SESSIONS.length - startActivity + 1));
+      if (!GRAMMAR_ACTIVITY_TEMPLATE_COUNT) {
+        return 0;
+      }
+      const sessionsPerCycle = Math.max(1, getSessionGroupCount());
+      const safeSession = Math.max(1, Number(sessionNumber || 1) || 1);
+      const cycleSessionNumber = ((safeSession - 1) % sessionsPerCycle) + 1;
+      const startActivity = ((cycleSessionNumber - 1) * GP_ACTIVITIES_PER_SESSION) + 1;
+      return Math.max(0, Math.min(GP_ACTIVITIES_PER_SESSION, GRAMMAR_ACTIVITY_TEMPLATE_COUNT - startActivity + 1));
     }
 
     function getSessionMeta(activityNumber = sessionConfig?.n || 1) {
-      if (!GP_SESSIONS.length) {
+      if (!GRAMMAR_ACTIVITY_TEMPLATE_COUNT) {
         return null;
       }
-      const safeActivity = Math.max(1, Math.min(GP_SESSIONS.length, Number(activityNumber || 1) || 1));
+      const safeActivity = Math.max(1, Number(activityNumber || 1) || 1);
       const sessionNumber = getSessionNumberForActivity(safeActivity);
       const startActivity = ((sessionNumber - 1) * GP_ACTIVITIES_PER_SESSION) + 1;
       const size = getSessionSize(sessionNumber);
+      const cycleNumber = Math.floor((safeActivity - 1) / GRAMMAR_ACTIVITY_TEMPLATE_COUNT) + 1;
+      const cycleActivityNumber = ((safeActivity - 1) % GRAMMAR_ACTIVITY_TEMPLATE_COUNT) + 1;
+      const cycleSessionNumber = Math.floor((cycleActivityNumber - 1) / GP_ACTIVITIES_PER_SESSION) + 1;
       return {
         sessionNumber,
         activityNumber: safeActivity,
         startActivity,
         size,
-        endActivity: startActivity + size - 1
+        endActivity: startActivity + size - 1,
+        cycleNumber,
+        cycleActivityNumber,
+        cycleSessionNumber
       };
     }
 
@@ -231,8 +258,8 @@ export function createGrammarProgram({
       if (readySession?.n) {
         return getSessionMeta(readySession.n);
       }
-      if (GP_SESSIONS.length) {
-        return getSessionMeta(GP_SESSIONS.length);
+      if (GRAMMAR_ACTIVITY_TEMPLATE_COUNT) {
+        return getSessionMeta(1);
       }
       return null;
     }
@@ -243,16 +270,16 @@ export function createGrammarProgram({
     }
 
     function getCompletedActivitiesInSession(sessionNumber = 1, doneCount = G?.done || 0) {
-      const safeSession = Math.max(1, Math.min(getSessionGroupCount(), Number(sessionNumber || 1) || 1));
+      const safeSession = Math.max(1, Number(sessionNumber || 1) || 1);
       const startActivity = ((safeSession - 1) * GP_ACTIVITIES_PER_SESSION) + 1;
       const size = getSessionSize(safeSession);
-      const safeDoneCount = Math.max(0, Math.min(GP_SESSIONS.length, Number(doneCount || 0) || 0));
+      const safeDoneCount = Math.max(0, Number(doneCount || 0) || 0);
       return Math.max(0, Math.min(size, safeDoneCount - startActivity + 1));
     }
 
     function isSessionBoundaryActivity(activityNumber = sessionConfig?.n || 0) {
-      const safeActivity = Math.max(0, Math.min(GP_SESSIONS.length, Number(activityNumber || 0) || 0));
-      return safeActivity > 0 && (safeActivity === GP_SESSIONS.length || safeActivity % GP_ACTIVITIES_PER_SESSION === 0);
+      const safeActivity = Math.max(0, Number(activityNumber || 0) || 0);
+      return safeActivity > 0 && safeActivity % GP_ACTIVITIES_PER_SESSION === 0;
     }
 
     function didCompleteGroupedSession(activityNumber = sessionConfig?.n || 0) {
@@ -260,16 +287,15 @@ export function createGrammarProgram({
     }
 
     function getRewardCopy() {
-      if (G.done >= GP_SESSIONS.length) {
-        return "The current grammar program is complete.";
-      }
       const readyMeta = getReadySessionMeta();
       if (!readyMeta) {
-        return "The current grammar program is complete.";
+        return "Grammar sessions will keep cycling here as new practice is ready.";
       }
       const remainingActivities = Math.max(0, readyMeta.size - getCompletedActivitiesInSession(readyMeta.sessionNumber));
       if (remainingActivities <= 0) {
-        return "This grammar session is ready to finish. Completing it will unlock the next property renovation.";
+        return readyMeta.sessionNumber <= getSessionGroupCount()
+          ? "This grammar session is ready to finish. Completing it will unlock the next property renovation."
+          : "This grammar session is ready to finish. Completing it will keep grammar practice moving while the property stays at its highest stage.";
       }
       return remainingActivities === 1
         ? "Finish 1 more activity in this session to complete the grammar set."
@@ -279,28 +305,33 @@ export function createGrammarProgram({
     function getReadySessionIndex() {
       const currentNumber = Number(getCompatibleSavedCurrent()?.n || 0);
       if (currentNumber > G.done) {
-        const currentIndex = GP_SESSIONS.findIndex((cfg) => cfg.n === currentNumber);
+        const currentIndex = currentNumber - 1;
         if (currentIndex >= 0) {
           return currentIndex;
         }
       }
-      if (G.done < GP_SESSIONS.length) {
-        return G.done;
-      }
-      return GP_SESSIONS.length ? GP_SESSIONS.length - 1 : -1;
+      return GRAMMAR_ACTIVITY_TEMPLATE_COUNT ? Math.max(0, Number(G.done || 0) || 0) : -1;
     }
 
     function getReadySessionConfig() {
       const index = getReadySessionIndex();
-      return index >= 0 ? GP_SESSIONS[index] || null : null;
+      return index >= 0 ? getSessionConfig(index) : null;
     }
 
     function getSessionConfigByNumber(activityNumber = 0) {
       const safeActivityNumber = Math.max(0, Number(activityNumber || 0) || 0);
-      if (!safeActivityNumber) {
+      if (!safeActivityNumber || !GRAMMAR_ACTIVITY_TEMPLATE_COUNT) {
         return null;
       }
-      return GP_SESSIONS.find((cfg) => Number(cfg?.n || 0) === safeActivityNumber) || null;
+      const template = getSessionTemplateByNumber(safeActivityNumber);
+      return template
+        ? {
+            ...template,
+            n: safeActivityNumber,
+            templateN: Number(template.n || 0) || 0,
+            cycleNumber: Math.floor((safeActivityNumber - 1) / GRAMMAR_ACTIVITY_TEMPLATE_COUNT) + 1
+          }
+        : null;
     }
 
     function clonePlainData(value) {
@@ -443,9 +474,30 @@ export function createGrammarProgram({
         .replace(/\s+/g, " ");
     }
 
+    function getCycleIndex(cfg = sessionConfig) {
+      return Math.max(0, (Number(cfg?.cycleNumber || 1) || 1) - 1);
+    }
+
+    function rotateCycleItems(items = [], cfg = sessionConfig) {
+      const list = Array.isArray(items) ? items.filter(Boolean) : [];
+      if (list.length <= 1) {
+        return list;
+      }
+      const cycleIndex = getCycleIndex(cfg);
+      if (!cycleIndex) {
+        return list;
+      }
+      const shift = (cycleIndex * Math.max(1, Math.floor(list.length / 2))) % list.length;
+      return [...list.slice(shift), ...list.slice(0, shift)];
+    }
+
+    function getWritePrompt(cfg = sessionConfig) {
+      return GRAMMAR_WRITE_PROMPTS[getCycleIndex(cfg) % GRAMMAR_WRITE_PROMPTS.length] || GRAMMAR_WRITE_PROMPTS[0];
+    }
+
     function getSessionIntroTopic(cfg = sessionConfig) {
       const introMap = { 9: "compare", 13: "purpose" };
-      return cfg ? String(introMap[cfg.n] || "") : "";
+      return cfg ? String(introMap[cfg.templateN || cfg.n] || "") : "";
     }
 
     function usesWrittenOnlyIntro(cfg = sessionConfig) {
@@ -543,26 +595,26 @@ export function createGrammarProgram({
       if (cfg.content === "mixed1") {
         return selectWeightedItems(GP_MC.mixedPool, 10);
       }
-      return GP_MC[cfg.content] || [];
+      return rotateCycleItems(GP_MC[cfg.content] || [], cfg);
     }
 
     function getPassageQuestions(cfg = sessionConfig) {
       const questions = GP_PASSAGES[cfg?.content]?.questions || [];
       if (cfg?.content === "passage4") {
-        return selectWeightedItems(questions, 7);
+        return rotateCycleItems(selectWeightedItems(questions, 7), cfg);
       }
       if (cfg?.content === "passage5") {
-        return selectWeightedItems(questions, 10);
+        return rotateCycleItems(selectWeightedItems(questions, 10), cfg);
       }
-      return questions;
+      return rotateCycleItems(questions, cfg);
     }
 
     function getJoinItems(cfg = sessionConfig) {
-      return selectWeightedItems(GP_JOIN[cfg?.content] || [], 8);
+      return rotateCycleItems(selectWeightedItems(GP_JOIN[cfg?.content] || [], 8), cfg);
     }
 
     function getReviewItems(cfg = sessionConfig) {
-      return selectWeightedItems(GP_REVIEW[cfg?.content]?.items || [], 6);
+      return rotateCycleItems(selectWeightedItems(GP_REVIEW[cfg?.content]?.items || [], 6), cfg);
     }
 
     function getRewriteTotal(items = []) {
@@ -733,10 +785,10 @@ export function createGrammarProgram({
         return { items: getMcItems(), i: 0, picked: null, attempts: 0, right: 0, feedback: "" };
       }
       if (sessionConfig.act === "tense") {
-        return { items: GP_TENSE[sessionConfig.content] || [], i: 0, picked: null, attempts: 0, right: 0, feedback: "" };
+        return { items: rotateCycleItems(GP_TENSE[sessionConfig.content] || []), i: 0, picked: null, attempts: 0, right: 0, feedback: "" };
       }
       if (sessionConfig.act === "pick") {
-        return { items: GP_TERMS[sessionConfig.content]?.items || [], i: 0, picked: null, attempts: 0, right: 0, feedback: "" };
+        return { items: rotateCycleItems(GP_TERMS[sessionConfig.content]?.items || []), i: 0, picked: null, attempts: 0, right: 0, feedback: "" };
       }
       if (sessionConfig.act === "fix") {
         const data = GP_FIX[sessionConfig.content] || {};
@@ -745,10 +797,10 @@ export function createGrammarProgram({
           : data.tokens
             ? [{ tokens: data.tokens }]
             : [];
-        return { items, i: 0, filled: {}, chip: "", right: 0, feedback: "" };
+        return { items: rotateCycleItems(items), i: 0, filled: {}, chip: "", right: 0, feedback: "" };
       }
       if (sessionConfig.act === "write") {
-        return { text: "", submitted: false };
+        return { text: "", submitted: false, prompt: getWritePrompt() };
       }
       if (sessionConfig.act === "comp") {
         return { items: getPassageQuestions(), i: 0, picked: null, attempts: 0, right: 0, reading: -1, playing: false, audioStatus: "", feedback: "", replayIndex: -1 };
@@ -757,19 +809,19 @@ export function createGrammarProgram({
         return { items: GP_BINARY[sessionConfig.content] || [], i: 0, picked: null, attempts: 0, right: 0, feedback: "" };
       }
       if (sessionConfig.act === "rewrite") {
-        return { items: GP_REWRITE[sessionConfig.content] || [], i: 0, text: "", attempts: 0, right: 0, feedback: "", checked: false };
+        return { items: rotateCycleItems(GP_REWRITE[sessionConfig.content] || []), i: 0, text: "", attempts: 0, right: 0, feedback: "", checked: false };
       }
       if (sessionConfig.act === "join") {
         return { items: getJoinItems(), i: 0, picked: null, attempts: 0, right: 0, feedback: "" };
       }
       if (sessionConfig.act === "select") {
-        return { items: GP_SELECT[sessionConfig.content] || [], i: 0, subjectPick: null, verbPick: null, attempts: 0, right: 0, feedback: "", checked: false };
+        return { items: rotateCycleItems(GP_SELECT[sessionConfig.content] || []), i: 0, subjectPick: null, verbPick: null, attempts: 0, right: 0, feedback: "", checked: false };
       }
       if (sessionConfig.act === "sort") {
-        return { items: GP_SORT[sessionConfig.content] || [], i: 0, placements: {}, selectedToken: null, attempts: 0, right: 0, feedback: "", checked: false };
+        return { items: rotateCycleItems(GP_SORT[sessionConfig.content] || []), i: 0, placements: {}, selectedToken: null, attempts: 0, right: 0, feedback: "", checked: false };
       }
       if (sessionConfig.act === "build") {
-        return { items: GP_BUILD[sessionConfig.content] || [], i: 0, choices: {}, right: 0, feedback: "", checked: false };
+        return { items: rotateCycleItems(GP_BUILD[sessionConfig.content] || []), i: 0, choices: {}, right: 0, feedback: "", checked: false };
       }
       if (sessionConfig.act === "mixed") {
         return { items: getReviewItems(), i: 0, picked: null, attempts: 0, right: 0, feedback: "" };
@@ -1865,7 +1917,7 @@ export function createGrammarProgram({
     function buildHubView() {
       const compatibleCurrent = getCompatibleSavedCurrent();
       const currentActivityNumber = Number(compatibleCurrent?.n || 0);
-      const hasReadySession = currentActivityNumber > G.done || G.done < GP_SESSIONS.length;
+      const hasReadySession = Boolean(GRAMMAR_ACTIVITY_TEMPLATE_COUNT) && (currentActivityNumber > G.done || Number(G.done || 0) >= 0);
       const readySession = getReadySessionConfig();
       const readyMeta = readySession ? getSessionMeta(readySession.n) : null;
       const hasCurrentActivity = currentActivityNumber > G.done && readySession?.n === currentActivityNumber;
@@ -1886,29 +1938,23 @@ export function createGrammarProgram({
         ? `Session ${recentCompletedMeta?.sessionNumber || 1} complete`
         : hasCurrentActivity
           ? `Session ${readyMeta?.sessionNumber || 1} is ready to continue`
-          : isComplete
-            ? "All current grammar activities are complete"
-            : `Session ${readyMeta?.sessionNumber || 1} is ready`;
+          : `Session ${readyMeta?.sessionNumber || 1} is ready`;
       const copy = showRecentCompletion
         ? hasReadySession && readyMeta && recentCompletedMeta && readyMeta.sessionNumber > recentCompletedMeta.sessionNumber
           ? `You finished all ${recentCompletedMeta.size} activities in Session ${recentCompletedMeta.sessionNumber}. Session ${readyMeta.sessionNumber} is ready when you are.`
           : `You finished all ${recentCompletedMeta?.size || GP_ACTIVITIES_PER_SESSION} activities in this session. You can revisit the latest activity, open Property, or check Progress.`
         : hasCurrentActivity
           ? `Your place is saved. Activity ${getActivityIndexInSession(readySession?.n || 1)} is ready to continue.`
-          : isComplete
-            ? "You can revisit the latest activity, open Property, or check Progress."
-            : readySession
-              ? `${readySession.title} opens first. Finish all ${readyMeta?.size || GP_ACTIVITIES_PER_SESSION} activities in this session to unlock the next property upgrade.`
-              : "Open the next activity and the program will move forward automatically when you finish.";
+          : readySession
+            ? `${readySession.title} opens first. Finish all ${readyMeta?.size || GP_ACTIVITIES_PER_SESSION} activities in this session to ${readyMeta.sessionNumber <= getSessionGroupCount() ? "unlock the next property upgrade" : "keep the grammar cycle going with new practice"}.`
+            : "Open the next activity and the program will move forward automatically when you finish.";
       const buttonLabel = showRecentCompletion
         ? hasReadySession && readyMeta && recentCompletedMeta && readyMeta.sessionNumber > recentCompletedMeta.sessionNumber
           ? `Start Session ${readyMeta.sessionNumber}`
           : "Review latest activity"
         : hasCurrentActivity
           ? "Continue activity"
-          : isComplete
-            ? "Review latest activity"
-            : "Start activity";
+          : "Start activity";
       return `
         <div class="gp-view" data-gp-view="hub">
           <header class="gp-head">
@@ -2262,7 +2308,7 @@ export function createGrammarProgram({
           <div class="gp-chips">${buildProgressChips()}</div>
           <div class="gp-stage">
             <div class="gp-card">
-              <p class="gp-def">Write one complete sentence with at least 12 words. We are checking grammar, not spelling.</p>
+              <p class="gp-def">${escapeHtml(activity.prompt || getWritePrompt())}</p>
               <textarea class="gp-writer" placeholder="Write your sentence here...">${escapeHtml(activity.text)}</textarea>
               ${activity.submitted ? `<div class="gp-checks">${checks.map((check) => `<div class="gp-check${check.ok ? " is-ok" : " is-warm"}"><span>${check.ok ? "✓" : "✕"}</span><span>${escapeHtml(check.label)}</span></div>`).join("")}</div>` : ""}
               <button type="button" class="gp-cta gp-cta-plum" data-gp="submit-write">${activity.submitted ? "Complete activity" : "Check my sentence"}</button>
@@ -2583,7 +2629,7 @@ export function createGrammarProgram({
       const roundScores = Array.isArray(latest?.details?.roundScores) ? latest.details.roundScores : [];
       const missedWords = Array.isArray(latest?.details?.missed) ? latest.details.missed : [];
       const propertyUpgrade = latest?.details?.propertyUpgrade || null;
-      const hasNextActivity = G.done < GP_SESSIONS.length;
+      const hasNextActivity = Boolean(GRAMMAR_ACTIVITY_TEMPLATE_COUNT);
       const groupedSessionComplete = didCompleteGroupedSession();
       const resultsTitle = groupedSessionComplete
         ? `Session ${sessionMeta?.sessionNumber || ""} complete`
@@ -2591,7 +2637,7 @@ export function createGrammarProgram({
       const summaryCopy = groupedSessionComplete
         ? propertyUpgrade?.earned
           ? `${sessionConfig?.title || "This activity"} completed this session. ${propertyUpgrade.label || propertyUpgrade.title || "The next stage"} has been added to your property.`
-          : `${sessionConfig?.title || "This activity"} completed this session. ${propertyUpgrade?.statusNote || "Your property stays at its current stage."}`
+          : `${sessionConfig?.title || "This activity"} completed this session. ${propertyUpgrade?.statusNote || "Your property stays at its current stage while grammar keeps cycling with fresh practice."}`
         : `${sessionConfig?.title || "This activity"} is complete. Return to Session and the next activity will open straight away.`;
       const sessionReviewMarkup = groupedSessionComplete ? buildSessionReviewSummary(sessionConfig?.n || 1) : "";
       return `
@@ -2681,7 +2727,7 @@ export function createGrammarProgram({
           </header>
           <div class="gp-stats">
             <div class="gp-stat"><div class="gp-strong">${escapeHtml(String(G.done))}</div><div class="gp-meta">Activities done</div></div>
-            <div class="gp-stat"><div class="gp-strong">${escapeHtml(String(Math.min(getSessionGroupCount(), getCompletedSessionCount())))}</div><div class="gp-meta">Session upgrades earned</div></div>
+            <div class="gp-stat"><div class="gp-strong">${escapeHtml(String(getCompletedSessionCount()))}</div><div class="gp-meta">Grammar sessions finished</div></div>
           </div>
           <div class="gp-bands">
             <div class="gp-band"><div class="gp-strong">${escapeHtml(String(skillBands.strong))}</div><div class="gp-meta">Strong</div></div>
@@ -2752,10 +2798,7 @@ export function createGrammarProgram({
       if (!targetNumber) {
         return false;
       }
-      const index = GP_SESSIONS.findIndex((cfg) => cfg.n === targetNumber);
-      if (index < 0) {
-        return false;
-      }
+      const index = targetNumber - 1;
       stopAll();
       tab = "hub";
       sessionIndex = index;
@@ -2793,7 +2836,7 @@ export function createGrammarProgram({
       sessionConfig = null;
       lessonKey = "";
       activity = null;
-      const hasReadySession = Number(getCompatibleSavedCurrent()?.n || 0) > G.done || G.done < GP_SESSIONS.length;
+      const hasReadySession = Boolean(GRAMMAR_ACTIVITY_TEMPLATE_COUNT) && (Number(getCompatibleSavedCurrent()?.n || 0) > G.done || Number(G.done || 0) >= 0);
       if (hasReadySession && autoOpenReady) {
         openReadySession();
         return;

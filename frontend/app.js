@@ -4990,7 +4990,7 @@ function renderDockContext() {
     const hasCurrentActivity = Number(grammar.current?.n || 0) > grammar.done;
     elements.dockContextTitle.textContent = "Grammar";
     elements.dockContextBody.innerHTML = subject.id === "spelling"
-      ? `<article class="dock-tile dock-tile--mint"><div class="dock-tile__copy"><strong>${escapeHtml(hasCurrentActivity ? "Continue grammar" : grammar.done < GP_SESSIONS.length ? "Grammar ready" : "Grammar complete")}</strong><span>${escapeHtml(hasCurrentActivity ? "Your place is saved and the current activity is ready to continue." : grammar.done < GP_SESSIONS.length ? "Open Grammar to start the next activity." : "All current grammar activities are complete.")}</span></div></article>`
+      ? `<article class="dock-tile dock-tile--mint"><div class="dock-tile__copy"><strong>${escapeHtml(hasCurrentActivity ? "Continue grammar" : "Grammar ready")}</strong><span>${escapeHtml(hasCurrentActivity ? "Your place is saved and the current activity is ready to continue." : "Open Grammar to start the next activity in the cycle.")}</span></div></article>`
       : `<div class="empty-state empty-state--compact">Open the Practice subject to continue the grammar sessions.</div>`;
     return;
   }
@@ -7003,7 +7003,7 @@ function normaliseGrammarState(grammar, subjectId = "") {
   const normalisedResults = Array.isArray(next.results)
     ? next.results
         .map((entry) => ({
-          n: Math.max(1, Math.min(GP_SESSIONS.length, Number(entry?.n || 0) || 1)),
+          n: Math.max(1, Number(entry?.n || 0) || 1),
           score: Math.max(0, Number(entry?.score || 0) || 0),
           total: Math.max(0, Number(entry?.total || 0) || 0),
           at: String(entry?.at || ""),
@@ -7012,14 +7012,11 @@ function normaliseGrammarState(grammar, subjectId = "") {
         .filter((entry) => entry.n && entry.total >= 0)
     : [];
   const latestCompletedResult = normalisedResults.reduce((max, entry) => Math.max(max, Number(entry?.n || 0) || 0), 0);
-  const normalisedDone = Math.max(0, Math.min(
-    GP_SESSIONS.length,
-    Math.max(Number(next.done || 0) || 0, latestCompletedResult)
-  ));
+  const normalisedDone = Math.max(0, Math.max(Number(next.done || 0) || 0, latestCompletedResult));
   const normalisedCurrent = current && currentVersion === grammarCurrentSnapshotVersion && Number.isFinite(Number(current.n))
     ? {
         version: grammarCurrentSnapshotVersion,
-        n: Math.max(1, Math.min(GP_SESSIONS.length, Number(current.n || 0) || 1)),
+        n: Math.max(1, Number(current.n || 0) || 1),
         title: String(current.title || ""),
         act: String(current.act || ""),
         content: String(current.content || ""),
@@ -7065,7 +7062,7 @@ function normaliseGrammarState(grammar, subjectId = "") {
     skills: normalisedSkills,
     results: normalisedResults,
     pendingResult: pendingResult > 0
-      ? Math.max(1, Math.min(normalisedDone || GP_SESSIONS.length, pendingResult))
+      ? Math.max(1, pendingResult)
       : null,
     current: normalisedCurrent && normalisedCurrent.n > normalisedDone ? normalisedCurrent : null,
     localRevision: derivedLocalRevision,
@@ -7536,7 +7533,7 @@ function getSubjectGrammarState(subject) {
 
 function getSubjectGrammarPendingSessionCount(subject) {
   const grammar = getSubjectGrammarState(subject);
-  return grammar.enabled ? Math.max(0, GP_SESSIONS.length - grammar.done) : 0;
+  return grammar.enabled && GP_SESSIONS.length ? 1 : 0;
 }
 
 function getCompletedGrammarRewardSessions(doneCount = 0) {
@@ -14888,10 +14885,10 @@ function getSubjectHeroCopy(subject, tab) {
 
   if (tab === "grammar") {
     return {
-      big: grammarPending ? "Grammar" : "Grammar complete",
+      big: "Grammar",
       rest: grammarPending
         ? "Your next activity is ready to go."
-        : "All current grammar activities are complete right now."
+        : "Grammar will be ready here when the subject is enabled."
     };
   }
 
@@ -20321,14 +20318,11 @@ function buildPracticeGrammarSpotlight(subject) {
   }
 
   const hasCurrentActivity = Number(grammar.current?.n || 0) > grammar.done;
-  const remainingCount = Math.max(0, GP_SESSIONS.length - grammar.done);
-  const statusLabel = hasCurrentActivity ? "Continue" : remainingCount ? "Ready" : "Complete";
-  const actionLabel = hasCurrentActivity ? "Continue activity" : remainingCount ? "Start activity" : "Review grammar";
+  const statusLabel = hasCurrentActivity ? "Continue" : "Ready";
+  const actionLabel = hasCurrentActivity ? "Continue activity" : "Start activity";
   const summaryCopy = hasCurrentActivity
     ? "Your place is saved, so the current grammar activity can open straight away."
-    : remainingCount
-      ? "Open Grammar and the next activity will be ready to go immediately."
-      : "All grammar activities are complete right now. Open Grammar to replay completed work.";
+    : "Open Grammar and the next activity in the cycle will be ready to go immediately.";
 
   return `
     <article class="homework-focus-card homework-focus-card--grammar">
