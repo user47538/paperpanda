@@ -1112,6 +1112,15 @@ input[type="date"] {
 .assessment-card { padding: 0; overflow: hidden; }
 .assessment-card .section-heading { padding: 18px 22px 8px; }
 .assessment-list { display: grid; gap: 10px; padding: 8px 22px 22px; }
+#upcoming-modal-list {
+  max-height: min(58vh, 560px);
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 26px;
+  scrollbar-gutter: stable;
+}
 .assessment-term-list { display: grid; gap: 18px; }
 .assessment-term-picker {
   display: grid;
@@ -1372,6 +1381,11 @@ input[type="date"] {
 }
 
 @media (max-width: 900px) {
+  #upcoming-modal-list {
+    max-height: min(54vh, 500px);
+    padding-right: 18px;
+  }
+
   .assessment-term-picker {
     grid-template-columns: 1fr;
   }
