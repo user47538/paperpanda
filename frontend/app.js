@@ -1549,6 +1549,7 @@ const state = {
   generatingDocumentRevisionId: "",
   upcomingModalOpen: false,
   upcomingModalMode: "upcoming",
+  upcomingModalSelectedTermKey: "",
   pendingFiles: [],
   termStarts: {
     1: "2026-01-28",
@@ -1765,6 +1766,7 @@ const elements = {
   upcomingModalSummary: document.getElementById("upcoming-modal-summary"),
   upcomingModalList: document.getElementById("upcoming-modal-list"),
   setTermDatesButton: document.getElementById("set-term-dates-button"),
+  backToTermPickerButton: document.getElementById("back-to-term-picker-button"),
   toggleUpcomingModeButton: document.getElementById("toggle-upcoming-mode-button"),
   uploadModal: document.getElementById("upload-modal"),
   closeUploadScrim: document.getElementById("close-upload-scrim"),
@@ -5657,6 +5659,76 @@ function groupAssessmentEntriesByTerm(entries = []) {
   return [...grouped.values()].sort((left, right) => left.order - right.order || left.label.localeCompare(right.label));
 }
 
+function getAllYearAssessmentTermGroups(entries = []) {
+  const groupedEntries = groupAssessmentEntriesByTerm(entries);
+  const groupedByKey = new Map(groupedEntries.map((group) => [group.key, group]));
+  const termGroups = [1, 2, 3, 4].map((termNumber) => ({
+    key: `term-${termNumber}`,
+    label: `Term ${termNumber}`,
+    order: termNumber,
+    termNumber,
+    entries: groupedByKey.get(`term-${termNumber}`)?.entries || []
+  }));
+  const otherGroup = groupedByKey.get("other");
+  return otherGroup ? [...termGroups, otherGroup] : termGroups;
+}
+
+function getCurrentAcademicTermNumber(dateObject = new Date()) {
+  const today = new Date(dateObject.getFullYear(), dateObject.getMonth(), dateObject.getDate());
+  for (const termNumber of [1, 2, 3, 4]) {
+    const startValue = state.termStarts?.[termNumber];
+    const endValue = state.termEnds?.[termNumber];
+    const startDate = startValue ? new Date(`${startValue}T00:00:00`) : null;
+    const endDate = endValue ? new Date(`${endValue}T00:00:00`) : null;
+    if (!startDate || Number.isNaN(startDate.getTime()) || !endDate || Number.isNaN(endDate.getTime())) {
+      continue;
+    }
+    if (today >= startDate && today <= endDate) {
+      return termNumber;
+    }
+  }
+  return 0;
+}
+
+function getAssessmentGroupDateWindow(group) {
+  const datedEntries = (group?.entries || [])
+    .map((entry) => entry?.dueDateObject)
+    .filter((value) => value instanceof Date && !Number.isNaN(value.getTime()))
+    .sort((left, right) => left.getTime() - right.getTime());
+  return {
+    start: datedEntries[0] || null,
+    end: datedEntries[datedEntries.length - 1] || null
+  };
+}
+
+function formatAssessmentGroupWindow(group) {
+  if (typeof group?.termNumber === "number" && group.termNumber > 0) {
+    const startValue = state.termStarts?.[group.termNumber];
+    const endValue = state.termEnds?.[group.termNumber];
+    if (startValue && endValue) {
+      return `${formatAssessmentDate(new Date(`${startValue}T00:00:00`))} to ${formatAssessmentDate(new Date(`${endValue}T00:00:00`))}`;
+    }
+  }
+  const window = getAssessmentGroupDateWindow(group);
+  if (window.start && window.end) {
+    return window.start.getTime() === window.end.getTime()
+      ? formatAssessmentDate(window.start)
+      : `${formatAssessmentDate(window.start)} to ${formatAssessmentDate(window.end)}`;
+  }
+  return "Dates not set";
+}
+
+function getAssessmentGroupSubjectsLabel(group) {
+  const subjectNames = [...new Set((group?.entries || []).map((entry) => entry?.subject?.name).filter(Boolean))];
+  if (!subjectNames.length) {
+    return "No assessments added yet";
+  }
+  if (subjectNames.length <= 3) {
+    return subjectNames.join(" · ");
+  }
+  return `${subjectNames.slice(0, 3).join(" · ")} +${subjectNames.length - 3} more`;
+}
+
 function buildTaskExportName(subjectName, title) {
   const baseName = `${subjectName} ${title}`
     .toLowerCase()
@@ -5673,6 +5745,7 @@ function openUpcomingModal() {
 function openAssessmentCalendar(mode = "upcoming") {
   state.upcomingModalOpen = true;
   state.upcomingModalMode = mode === "all" ? "all" : "upcoming";
+  state.upcomingModalSelectedTermKey = "";
   elements.upcomingModal.classList.remove("hidden");
   elements.upcomingModal.setAttribute("aria-hidden", "false");
   renderUpcomingModal();
@@ -5680,6 +5753,7 @@ function openAssessmentCalendar(mode = "upcoming") {
 
 function closeUpcomingModal() {
   state.upcomingModalOpen = false;
+  state.upcomingModalSelectedTermKey = "";
   elements.upcomingModal.classList.add("hidden");
   elements.upcomingModal.setAttribute("aria-hidden", "true");
   syncTopbarNavigationState();
@@ -16703,6 +16777,19 @@ function attachUpcomingAssessmentHandlers() {
   });
 }
 
+function attachUpcomingTermPickerHandlers() {
+  elements.upcomingModalList.querySelectorAll("[data-upcoming-term-key]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const nextKey = String(button.dataset.upcomingTermKey || "");
+      if (!nextKey) {
+        return;
+      }
+      state.upcomingModalSelectedTermKey = nextKey;
+      renderUpcomingModal();
+    });
+  });
+}
+
 function openEditAssessmentModal(subjectId, assessmentId) {
   const subject = state.subjects.find((item) => item.id === subjectId);
   const assessment = subject?.assessments.find((item) => item.id === assessmentId);
@@ -18373,22 +18460,31 @@ function renderUpcomingModal() {
   const upcomingEntries = getUpcomingAssessmentEntries();
   const yearEntries = getAssessmentEntries();
   const displayEntries = isAllYearMode ? yearEntries : upcomingEntries;
+  const currentTermNumber = getCurrentAcademicTermNumber();
   const fortnightEnd = new Date();
   fortnightEnd.setDate(fortnightEnd.getDate() + 14);
+  const showTermPicker = isAllYearMode && !state.upcomingModalSelectedTermKey;
   if (elements.upcomingModalEyebrow) {
     elements.upcomingModalEyebrow.textContent = isAllYearMode ? "Full year" : "Next 14 days";
   }
   if (elements.upcomingModalTitle) {
-    elements.upcomingModalTitle.textContent = isAllYearMode ? "Assessment calendar" : "Upcoming assessments";
+    elements.upcomingModalTitle.textContent = isAllYearMode
+      ? showTermPicker
+        ? "Choose a term"
+        : "Assessment calendar"
+      : "Upcoming assessments";
   }
   elements.upcomingModalSummary.textContent = isAllYearMode
-    ? `This is the full year assessment list across all subjects. Completed assessments remain visible here.`
+    ? showTermPicker
+      ? currentTermNumber
+        ? `Choose the term you want to view. Today, ${formatAssessmentDate(new Date())}, falls in Term ${currentTermNumber}.`
+        : "Choose the term you want to view. Completed assessments remain visible inside each term."
+      : "Completed assessments remain visible inside this term."
     : upcomingEntries.length
       ? `Assessments due by ${formatAssessmentDate(fortnightEnd)}.`
       : `No assessments fall in the next fortnight ending ${formatAssessmentDate(fortnightEnd)}.`;
-  elements.toggleUpcomingModeButton.textContent = isAllYearMode
-    ? "Back to next fortnight"
-    : "View all assessments for the year";
+  elements.toggleUpcomingModeButton.textContent = isAllYearMode ? "Back to next fortnight" : "View all assessments for the year";
+  elements.backToTermPickerButton?.classList.toggle("hidden", !isAllYearMode || showTermPicker);
   syncTopbarNavigationState();
 
   if (!displayEntries.length) {
@@ -18399,51 +18495,91 @@ function renderUpcomingModal() {
   }
 
   if (isAllYearMode) {
-    const groupedEntries = groupAssessmentEntriesByTerm(displayEntries);
-    elements.upcomingModalList.innerHTML = `
-      <div class="assessment-term-list">
-        ${groupedEntries
-          .map(
-            (group) => `
-              <section class="assessment-term-group">
-                <div class="assessment-term-group__header">
-                  <h4 class="assessment-term-group__title">${escapeHtml(group.label)}</h4>
-                  <span class="document-chip">${group.entries.length} ${group.entries.length === 1 ? "assessment" : "assessments"}</span>
+    const groupedEntries = getAllYearAssessmentTermGroups(displayEntries);
+    if (showTermPicker) {
+      elements.upcomingModalList.innerHTML = `
+        <div class="assessment-term-picker">
+          ${groupedEntries
+            .map((group) => `
+              <button
+                type="button"
+                class="assessment-term-card${group.key === `term-${currentTermNumber}` ? " assessment-term-card--current" : ""}"
+                data-upcoming-term-key="${escapeHtml(group.key)}"
+              >
+                <div class="assessment-term-card__header">
+                  <strong>${escapeHtml(group.label)}</strong>
+                  ${
+                    group.key === `term-${currentTermNumber}`
+                      ? '<span class="document-chip assessment-term-card__chip">Current term</span>'
+                      : ""
+                  }
                 </div>
-                <div class="assessment-term-group__items">
-                  ${group.entries
-                    .map(
-                      ({ subject, assessment }) => `
-                        <article class="assessment-term-row${assessment.completed ? " assessment-term-row--completed" : ""}">
-                          <div class="assessment-term-row__main">
-                            <span class="assessment-term-row__subject">${escapeHtml(subject.name)}</span>
-                            <h4>
-                              <button
-                                type="button"
-                                class="assessment-link-button"
-                                data-upcoming-action="open"
-                                data-upcoming-subject-id="${subject.id}"
-                                data-assessment-id="${assessment.id}"
-                              >
-                                ${escapeHtml(assessment.componentTask || assessment.title)}
-                              </button>
-                            </h4>
-                          </div>
-                          <div class="assessment-term-row__side">
-                            <span class="assessment-date">Due ${escapeHtml(formatAssessmentDueLabel(assessment.dueDate))}</span>
-                            ${getUpcomingAssessmentActionMarkup(subject.id, assessment)}
-                          </div>
-                        </article>
-                      `
-                    )
-                    .join("")}
-                </div>
-              </section>
-            `
-          )
-          .join("")}
-      </div>
-    `;
+                <span class="assessment-term-card__count">${group.entries.length} ${group.entries.length === 1 ? "assessment" : "assessments"}</span>
+                <span class="assessment-term-card__dates">${escapeHtml(formatAssessmentGroupWindow(group))}</span>
+                <span class="assessment-term-card__subjects">${escapeHtml(getAssessmentGroupSubjectsLabel(group))}</span>
+              </button>
+            `)
+            .join("")}
+        </div>
+      `;
+      attachUpcomingTermPickerHandlers();
+      return;
+    }
+    const selectedGroup = groupedEntries.find((group) => group.key === state.upcomingModalSelectedTermKey) || null;
+    if (!selectedGroup) {
+      state.upcomingModalSelectedTermKey = "";
+      renderUpcomingModal();
+      return;
+    }
+    if (elements.upcomingModalEyebrow) {
+      elements.upcomingModalEyebrow.textContent = selectedGroup.label.toUpperCase();
+    }
+    if (elements.upcomingModalTitle) {
+      elements.upcomingModalTitle.textContent = `${selectedGroup.label} assessments`;
+    }
+    elements.upcomingModalSummary.textContent = selectedGroup.entries.length
+      ? `${selectedGroup.entries.length} ${selectedGroup.entries.length === 1 ? "assessment is" : "assessments are"} listed for ${selectedGroup.label}. Completed assessments remain visible here.`
+      : `No assessments are listed for ${selectedGroup.label} yet.`;
+    elements.upcomingModalList.innerHTML = selectedGroup.entries.length
+      ? `
+        <div class="assessment-term-list">
+          <section class="assessment-term-group">
+            <div class="assessment-term-group__header">
+              <h4 class="assessment-term-group__title">${escapeHtml(selectedGroup.label)}</h4>
+              <span class="document-chip">${selectedGroup.entries.length} ${selectedGroup.entries.length === 1 ? "assessment" : "assessments"}</span>
+            </div>
+            <div class="assessment-term-group__items">
+              ${selectedGroup.entries
+                .map(
+                  ({ subject, assessment }) => `
+                    <article class="assessment-term-row${assessment.completed ? " assessment-term-row--completed" : ""}">
+                      <div class="assessment-term-row__main">
+                        <span class="assessment-term-row__subject">${escapeHtml(subject.name)}</span>
+                        <h4>
+                          <button
+                            type="button"
+                            class="assessment-link-button"
+                            data-upcoming-action="open"
+                            data-upcoming-subject-id="${subject.id}"
+                            data-assessment-id="${assessment.id}"
+                          >
+                            ${escapeHtml(assessment.componentTask || assessment.title)}
+                          </button>
+                        </h4>
+                      </div>
+                      <div class="assessment-term-row__side">
+                        <span class="assessment-date">Due ${escapeHtml(formatAssessmentDueLabel(assessment.dueDate))}</span>
+                        ${getUpcomingAssessmentActionMarkup(subject.id, assessment)}
+                      </div>
+                    </article>
+                  `
+                )
+                .join("")}
+            </div>
+          </section>
+        </div>
+      `
+      : `<div class="empty-state">No assessments have been added for ${escapeHtml(selectedGroup.label)} yet.</div>`;
     attachUpcomingAssessmentHandlers();
     return;
   }
@@ -22998,6 +23134,14 @@ elements.saveTaskWorkButton.addEventListener("click", saveTaskWorkspace);
 elements.saveTaskFilesButton.addEventListener("click", saveTaskWorkspaceToFiles);
 elements.toggleUpcomingModeButton.addEventListener("click", () => {
   state.upcomingModalMode = state.upcomingModalMode === "all" ? "upcoming" : "all";
+  state.upcomingModalSelectedTermKey = "";
+  renderUpcomingModal();
+});
+elements.backToTermPickerButton?.addEventListener("click", () => {
+  if (state.upcomingModalMode !== "all") {
+    return;
+  }
+  state.upcomingModalSelectedTermKey = "";
   renderUpcomingModal();
 });
 elements.signInForm.addEventListener("keydown", (event) => {
