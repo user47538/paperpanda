@@ -10587,30 +10587,24 @@ const RewardProperty = (function () {
       : [];
     const savedSessions = Math.max(0, Number(base.sessions || 0) || 0);
     S = {
-      stage: shouldResetGrammarProgress || shouldResetRewardProgress
+      stage: shouldResetGrammarProgress
         ? 0
         : getDerivedStage(getEffectiveRenovationSessionCount(grammarSessions, savedSessions)),
       owned: Math.max(2, Math.min(RP_TACK.length, Number(base.owned || 2) || 2)),
-      sessions: shouldResetRewardProgress ? 0 : savedSessions,
-      claimedRewardIds: shouldResetRewardProgress ? [] : claimedRewardIds,
-      lastClaimedRewardId: shouldResetRewardProgress
-        ? ""
-        : claimedRewardIds.includes(String(base.lastClaimedRewardId || ""))
-          ? String(base.lastClaimedRewardId || "")
-          : "",
+      sessions: savedSessions,
+      claimedRewardIds,
+      lastClaimedRewardId: claimedRewardIds.includes(String(base.lastClaimedRewardId || ""))
+        ? String(base.lastClaimedRewardId || "")
+        : "",
       rewardProgressResetVersion: RP_REWARD_PROGRESS_RESET_VERSION,
       rewardProgressNeedsBaseline: shouldResetRewardProgress,
-      rewardBaselineCompletedAttempts: shouldResetRewardProgress ? 0 : Math.max(0, Number(base.rewardBaselineCompletedAttempts || 0) || 0),
-      rewardBaselineHorseCount: shouldResetRewardProgress ? 0 : Math.max(0, Number(base.rewardBaselineHorseCount || 0) || 0),
+      rewardBaselineCompletedAttempts: Math.max(0, Number(base.rewardBaselineCompletedAttempts || 0) || 0),
+      rewardBaselineHorseCount: Math.max(0, Number(base.rewardBaselineHorseCount || 0) || 0),
       grammarSessions,
       grammarSessionVersion: RP_GRAMMAR_SESSION_VERSION,
       grammarProgressResetVersion: RP_GRAMMAR_PROGRESS_RESET_VERSION,
-      horses: shouldResetRewardProgress
-        ? []
-        : Array.isArray(base.horses) ? base.horses.map((horse, index) => normaliseHorse(horse, index)) : [],
-      arenaJumps: shouldResetRewardProgress
-        ? []
-        : Array.isArray(base.arenaJumps) ? base.arenaJumps.map((jump, index) => normaliseArenaJump(jump, index)) : []
+      horses: Array.isArray(base.horses) ? base.horses.map((horse, index) => normaliseHorse(horse, index)) : [],
+      arenaJumps: Array.isArray(base.arenaJumps) ? base.arenaJumps.map((jump, index) => normaliseArenaJump(jump, index)) : []
     };
   }
 
@@ -10718,27 +10712,22 @@ const RewardProperty = (function () {
     const shouldResetRewardProgress = Boolean(S.rewardProgressNeedsBaseline);
     let changed = false;
     if (shouldResetRewardProgress) {
-      const starterHorseMeta = ownedHorseMeta[0] || SPELLING_PADDOCK_HORSES[0] || null;
       S.rewardProgressResetVersion = RP_REWARD_PROGRESS_RESET_VERSION;
       S.rewardProgressNeedsBaseline = false;
-      S.rewardBaselineCompletedAttempts = completedAttempts;
-      S.rewardBaselineHorseCount = ownedHorseMeta.length;
-      S.stage = 0;
-      S.sessions = 0;
-      S.claimedRewardIds = [];
-      S.lastClaimedRewardId = "";
-      S.horses = [];
-      S.arenaJumps = [];
-      if (starterHorseMeta) {
-        ensureHorse(starterHorseMeta.id, starterHorseMeta.name, starterHorseMeta.label);
-      }
+      S.rewardBaselineCompletedAttempts = 0;
+      S.rewardBaselineHorseCount = 0;
       changed = true;
     }
-    ownedHorseMeta.slice(getRewardBaselineHorseCount()).forEach((horseMeta) => {
+    if (S.rewardBaselineCompletedAttempts || S.rewardBaselineHorseCount) {
+      S.rewardBaselineCompletedAttempts = 0;
+      S.rewardBaselineHorseCount = 0;
+      changed = true;
+    }
+    ownedHorseMeta.forEach((horseMeta) => {
       const result = ensureHorse(horseMeta.id, horseMeta.name, horseMeta.label);
       changed = changed || result.added;
     });
-    const rewardCompletedCount = Math.max(0, completedAttempts - getRewardBaselineCompletedAttempts());
+    const rewardCompletedCount = completedAttempts;
     if (rewardCompletedCount !== S.sessions) {
       S.sessions = rewardCompletedCount;
       changed = true;
