@@ -50,6 +50,7 @@ export function createGrammarProgram({
     let gameFlashTimer = null;
     let recentCompletedResultNumber = 0;
     let persistenceState = { saving: false, error: "" };
+    let rewardClaimNotice = "";
     const GRAMMAR_ACTIVITY_TEMPLATE_COUNT = GP_SESSIONS.length;
     const GRAMMAR_WRITE_PROMPTS = [
       "Write one complete sentence with at least 12 words about a horse, rider, or stable job. We are checking grammar, not spelling.",
@@ -658,6 +659,7 @@ export function createGrammarProgram({
         return;
       }
       recentCompletedResultNumber = 0;
+      rewardClaimNotice = "";
       persistenceState = { saving: false, error: "" };
       const rawSavedCurrent = G.current && Number(G.current.n || 0) === cfg.n ? G.current : null;
       const savedCurrent = clearIncompatibleSavedCurrent(rawSavedCurrent, cfg);
@@ -694,11 +696,33 @@ export function createGrammarProgram({
 
     function openReadySession() {
       refreshState();
-       clearIncompatibleSavedCurrent();
+      clearIncompatibleSavedCurrent();
       const readyIndex = getReadySessionIndex();
       if (readyIndex >= 0) {
         openSession(readyIndex);
       }
+    }
+
+    function buildRewardChoiceMarkup(snapshot) {
+      if (!snapshot || snapshot.pendingChoiceCount <= 0 || !snapshot.availableChoices.length) {
+        return "";
+      }
+      return `
+        <article class="ss-reward-choice">
+          <p class="eyebrow">Reward choice</p>
+          <h5>${escapeHtml(snapshot.pendingChoiceCount > 1 ? `${snapshot.pendingChoiceCount} choices waiting` : "Choose your next reward")}</h5>
+          <p>Choose one reward for this completed grammar session. Tack items can be chosen again so there is enough gear for more horses.</p>
+          <div class="ss-reward-choice__grid">
+            ${snapshot.availableChoices.map((reward) => `
+              <button type="button" class="ss-reward-choice__card" data-gp-claim-reward="${escapeHtml(reward.id)}">
+                <span class="ss-reward-choice__track">${escapeHtml(reward.track)}</span>
+                <strong>${escapeHtml(reward.label)}</strong>
+                <span>${escapeHtml(reward.description)}</span>
+              </button>
+            `).join("")}
+          </div>
+        </article>
+      `;
     }
 
     function speakInstruction(text = "", onDone = () => {}) {
@@ -2593,7 +2617,7 @@ export function createGrammarProgram({
           </div>
           <div class="gp-review">
             ${resultEntries.map((entry) => {
-              const config = GP_SESSIONS.find((candidate) => candidate.n === entry.n) || null;
+              const config = getSessionConfigByNumber(entry.n) || null;
               const right = Math.max(0, Number(entry.score || 0) || 0);
               const total = Math.max(0, Number(entry.total || 0) || 0);
               const wrong = Math.max(0, total - right);
@@ -2629,15 +2653,20 @@ export function createGrammarProgram({
       const roundScores = Array.isArray(latest?.details?.roundScores) ? latest.details.roundScores : [];
       const missedWords = Array.isArray(latest?.details?.missed) ? latest.details.missed : [];
       const propertyUpgrade = latest?.details?.propertyUpgrade || null;
-      const hasNextActivity = Boolean(GRAMMAR_ACTIVITY_TEMPLATE_COUNT);
       const groupedSessionComplete = didCompleteGroupedSession();
+      const rewardSnapshot = groupedSessionComplete && RewardProperty.getRewardLadderSnapshot
+        ? RewardProperty.getRewardLadderSnapshot()
+        : null;
+      const hasNextActivity = Boolean(GRAMMAR_ACTIVITY_TEMPLATE_COUNT);
       const resultsTitle = groupedSessionComplete
         ? `Session ${sessionMeta?.sessionNumber || ""} complete`
         : "Activity complete";
       const summaryCopy = groupedSessionComplete
         ? propertyUpgrade?.earned
           ? `${sessionConfig?.title || "This activity"} completed this session. ${propertyUpgrade.label || propertyUpgrade.title || "The next stage"} has been added to your property.`
-          : `${sessionConfig?.title || "This activity"} completed this session. ${propertyUpgrade?.statusNote || "Your property stays at its current stage while grammar keeps cycling with fresh practice."}`
+          : rewardSnapshot?.pendingChoiceCount
+            ? `${sessionConfig?.title || "This activity"} completed this session. A reward choice is now ready for the property.`
+            : `${sessionConfig?.title || "This activity"} completed this session. ${propertyUpgrade?.statusNote || "Your property stays at its current stage while grammar keeps cycling with fresh practice."}`
         : `${sessionConfig?.title || "This activity"} is complete. Return to Session and the next activity will open straight away.`;
       const sessionReviewMarkup = groupedSessionComplete ? buildSessionReviewSummary(sessionConfig?.n || 1) : "";
       return `
@@ -2656,6 +2685,7 @@ export function createGrammarProgram({
               <p class="gp-def">${escapeHtml(summaryCopy)}</p>
               ${persistenceState.saving ? '<div class="gp-fb is-hint">Saving grammar progress...</div>' : ""}
               ${persistenceState.error ? `<div class="gp-fb is-hint">${escapeHtml(persistenceState.error)}</div>` : ""}
+              ${rewardClaimNotice ? `<div class="gp-fb is-ok">${escapeHtml(rewardClaimNotice)}</div>` : ""}
               ${groupedSessionComplete && propertyUpgrade
                 ? `<article class="gp-upgrade-card">
                     <div class="gp-upgrade-card__image">
@@ -2669,6 +2699,7 @@ export function createGrammarProgram({
                     </div>
                   </article>`
                 : ""}
+              ${groupedSessionComplete ? buildRewardChoiceMarkup(rewardSnapshot) : ""}
               ${roundScores.length
                 ? `<div class="gp-results-grid">
                     ${roundScores.map((roundScore, index) => `<div class="gp-results-chip">Round ${escapeHtml(String(index + 1))}: ${escapeHtml(String(roundScore))}</div>`).join("")}
@@ -2954,7 +2985,7 @@ export function createGrammarProgram({
       }
       root.dataset.grammarBound = "true";
       root.addEventListener("click", (event) => {
-        const target = event.target.closest("[data-gp-tab],[data-gp-open-session],[data-gp],[data-gp-opt],[data-gp-slot],[data-gp-chip],[data-gp-word],[data-gp-select-token],[data-gp-sort-token],[data-gp-sort-slot],[data-gp-sort-chip],[data-gp-build-option]");
+        const target = event.target.closest("[data-gp-tab],[data-gp-open-session],[data-gp],[data-gp-opt],[data-gp-slot],[data-gp-chip],[data-gp-word],[data-gp-select-token],[data-gp-sort-token],[data-gp-sort-slot],[data-gp-sort-chip],[data-gp-build-option],[data-gp-claim-reward]");
         if (!target || !root.contains(target)) {
           return;
         }
@@ -2978,6 +3009,14 @@ export function createGrammarProgram({
         }
         if (target.dataset.gpOpenSession) {
           openSession(Number(target.dataset.gpOpenSession));
+          return;
+        }
+        if (target.dataset.gpClaimReward) {
+          const claimResult = RewardProperty.claimReward ? RewardProperty.claimReward(target.dataset.gpClaimReward || "") : null;
+          if (claimResult?.message) {
+            rewardClaimNotice = claimResult.message;
+            paint();
+          }
           return;
         }
         if (target.dataset.gpWord) {

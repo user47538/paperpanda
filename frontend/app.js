@@ -10146,13 +10146,17 @@ const RewardProperty = (function () {
     const previousStageIndex = getDerivedStage(getEffectiveRenovationSessionCount(previousGrammarSessions, practiceSessions));
     const nextStageIndex = getDerivedStage(getEffectiveRenovationSessionCount(nextGrammarSessions, practiceSessions));
     const earned = nextStageIndex > previousStageIndex;
+    const nextOptionalAllowance = Math.max(0, Math.max(Number(nextGrammarSessions || 0) || 0, Number(practiceSessions || 0) || 0) - RP_MANDATORY_REWARDS.length);
+    const pendingChoiceCount = Math.max(0, nextOptionalAllowance - getClaimedRewardIds().length);
     const summary = getStageSummary(nextStageIndex);
     return {
       earned,
-      heading: earned ? "Renovation unlocked" : "Property progress synced",
+      heading: earned ? "Renovation unlocked" : pendingChoiceCount > 0 ? "Reward choice ready" : "Property progress synced",
       statusNote: earned
         ? `${summary.title} is now visible on the property.`
-        : "This grammar session is complete. The property is already showing the highest unlocked renovation stage.",
+        : pendingChoiceCount > 0
+          ? "This grammar session is complete. The property is already fully rebuilt, and a reward choice is now waiting."
+          : "This grammar session is complete. The property is already showing the highest unlocked renovation stage.",
       ...summary
     };
   }
@@ -10272,7 +10276,7 @@ const RewardProperty = (function () {
 
   function getOptionalRewardAllowance() {
     ensureLoaded();
-    return Math.max(0, (Number(S.sessions || 0) || 0) - RP_MANDATORY_REWARDS.length);
+    return Math.max(0, getEffectiveRenovationSessionCount() - RP_MANDATORY_REWARDS.length);
   }
 
   function getPendingRewardChoiceCount() {
@@ -10371,7 +10375,7 @@ const RewardProperty = (function () {
     if (!upcomingChoices.length) {
       return "The current reward ladder is fully claimed. Keep completing sessions to build skill and collect horses.";
     }
-    return "The next completed Practice session will unlock another reward choice. Tack items can be chosen again, and any unclaimed property or arena upgrades stay available.";
+    return "The next completed grammar or Practice session will unlock another reward choice. Tack items can be chosen again, and any unclaimed property or arena upgrades stay available.";
   }
 
   function getRewardClaimMessage(rewardId = "") {
@@ -10418,7 +10422,7 @@ const RewardProperty = (function () {
       }))
     ];
     return {
-      sessionCount: Math.max(0, Number(S.sessions || 0) || 0),
+      sessionCount: getEffectiveRenovationSessionCount(),
       mandatoryCompleted,
       pendingChoiceCount: getPendingRewardChoiceCount(),
       availableChoices: getAvailableRewardChoices(),
