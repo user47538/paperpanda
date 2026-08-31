@@ -716,7 +716,7 @@ const RP_STAGES = [
   ["/property/horse-property-stage7-back-trail.jpeg", "Stage 6 - back paddock trail", "The full property is finished, with the back trail open and riders moving through the far paddocks."]
 ];
 const RP_TACK = [
-  { k: "saddle", label: "Saddle", x: 38.8, y: 40.3, w: 21.5, h: 23.5, rotate: -2 },
+  { k: "saddle", label: "Saddle", x: 59.2, y: 34.4, w: 31.4, h: 18.4, rotate: -1 },
   { k: "bridle", label: "Bridle", x: 28.8, y: 64.5, w: 15.4, h: 26.2, rotate: -2 },
   { k: "girth", label: "Girth", x: 52.2, y: 47.6, w: 12.6, h: 8.6, rotate: 2 },
   { k: "pad", label: "Saddle pad", x: 84.1, y: 38.6, w: 15.2, h: 12.8, rotate: 10 }
@@ -10295,6 +10295,10 @@ const RewardProperty = (function () {
     return Math.max(0, Math.max(Number(grammarSessions || 0) || 0, Number(practiceSessions || 0) || 0));
   }
 
+  function getCombinedCompletedSessionCount(grammarSessions = S?.grammarSessions || 0, practiceSessions = S?.sessions || 0) {
+    return Math.max(0, Number(grammarSessions || 0) || 0) + Math.max(0, Number(practiceSessions || 0) || 0);
+  }
+
   function syncVisibleStage() {
     const nextStage = getDerivedStage(getEffectiveRenovationSessionCount());
     S.stage = nextStage;
@@ -10319,8 +10323,7 @@ const RewardProperty = (function () {
     const previousStageIndex = getDerivedStage(getEffectiveRenovationSessionCount(previousGrammarSessions, practiceSessions));
     const nextStageIndex = getDerivedStage(getEffectiveRenovationSessionCount(nextGrammarSessions, practiceSessions));
     const earned = nextStageIndex > previousStageIndex;
-    const nextOptionalAllowance = Math.max(0, Math.max(Number(nextGrammarSessions || 0) || 0, Number(practiceSessions || 0) || 0) - RP_MANDATORY_REWARDS.length);
-    const pendingChoiceCount = Math.max(0, nextOptionalAllowance - getClaimedRewardIds().length);
+    const pendingChoiceCount = getPendingRewardChoiceCount(nextGrammarSessions, practiceSessions, getClaimedRewardIds().length);
     const summary = getStageSummary(nextStageIndex);
     return {
       earned,
@@ -10447,13 +10450,20 @@ const RewardProperty = (function () {
     return Math.max(0, Math.min(RP_MANDATORY_REWARDS.length, getEffectiveRenovationSessionCount()));
   }
 
-  function getOptionalRewardAllowance() {
+  function getOptionalRewardAllowance(grammarSessions = S?.grammarSessions || 0, practiceSessions = S?.sessions || 0) {
     ensureLoaded();
-    return Math.max(0, getEffectiveRenovationSessionCount() - RP_MANDATORY_REWARDS.length);
+    if (getEffectiveRenovationSessionCount(grammarSessions, practiceSessions) < RP_MANDATORY_REWARDS.length) {
+      return 0;
+    }
+    return Math.max(0, getCombinedCompletedSessionCount(grammarSessions, practiceSessions) - RP_MANDATORY_REWARDS.length);
   }
 
-  function getPendingRewardChoiceCount() {
-    return Math.max(0, getOptionalRewardAllowance() - getClaimedRewardIds().length);
+  function getPendingRewardChoiceCount(
+    grammarSessions = S?.grammarSessions || 0,
+    practiceSessions = S?.sessions || 0,
+    claimedRewardCount = getClaimedRewardIds().length
+  ) {
+    return Math.max(0, getOptionalRewardAllowance(grammarSessions, practiceSessions) - Math.max(0, Number(claimedRewardCount || 0) || 0));
   }
 
   function getTrackRewardChoices(track = "") {
@@ -10542,7 +10552,7 @@ const RewardProperty = (function () {
     if (pendingChoices > 0) {
       return pendingChoices === 1
         ? "A reward choice is waiting. Pick one reward. Tack items can be chosen again any time to outfit more horses."
-        : `${pendingChoices} reward choices are waiting. Pick one reward each time you complete a session, and keep adding tack as your horse team grows.`;
+        : `${pendingChoices} reward choices are waiting. Pick one reward after each completed session, and keep adding tack as your horse team grows.`;
     }
     const upcomingChoices = getUpcomingRewardChoices();
     if (!upcomingChoices.length) {
@@ -10632,10 +10642,10 @@ const RewardProperty = (function () {
         kind: "image",
         src: RP_ASSETS.horseWashBay,
         label: "Horse wash bay",
-        x: 91.8,
-        y: 71.1,
-        width: 12.8,
-        tilt: 1.5,
+        x: 87.8,
+        y: 71.8,
+        width: 10.1,
+        tilt: 0.5,
         className: "rp-world-prop--wash-bay"
       });
     }
@@ -10645,10 +10655,10 @@ const RewardProperty = (function () {
         kind: "image",
         src: RP_ASSETS.horseFloat,
         label: "Horse float",
-        x: 82.1,
-        y: 80.8,
-        width: 20.2,
-        tilt: -2.25,
+        x: 69.2,
+        y: 79.8,
+        width: 18.6,
+        tilt: -1.5,
         className: "rp-world-prop--horse-float"
       });
     }
@@ -11727,7 +11737,7 @@ function buildSpellingRewardLadderMarkup(snapshot) {
     <article class="ss-reward-ladder">
       <div class="ss-reward-ladder__head">
         <p class="eyebrow">Reward ladder</p>
-        <p class="ss-reward-ladder__copy">The six renovation stages fill in as grammar or Practice sessions are completed. After the property is fully rebuilt, each new Practice session unlocks one reward choice. Tack can be chosen again for more horses, while riders, the horse float, the wash bay, and arena upgrades stay available until claimed.</p>
+        <p class="ss-reward-ladder__copy">The six renovation stages fill in as grammar or Practice sessions are completed. After the property is fully rebuilt, each new completed session unlocks one reward choice. Tack can be chosen again for more horses, while riders, the horse float, the wash bay, and arena upgrades stay available until claimed.</p>
       </div>
       <div class="ss-reward-ladder__list">
         ${snapshot.entries.map((reward, index) => `
@@ -11780,10 +11790,10 @@ function buildSpellingRewardChoiceMarkup(snapshot) {
   }
   if (snapshot.upcomingChoices.length) {
     return `
-      <article class="ss-reward-choice">
-        <p class="eyebrow">Next reward choice</p>
-        <h5>Another choice unlocks next Practice session</h5>
-        <p>The next completed Practice session will unlock one more choice. Tack items can be chosen again, and any unclaimed property or arena rewards will still be waiting.</p>
+        <article class="ss-reward-choice">
+          <p class="eyebrow">Next reward choice</p>
+        <h5>Another choice unlocks next completed session</h5>
+        <p>The next completed grammar or Practice session will unlock one more choice. Tack items can be chosen again, and any unclaimed property or arena rewards will still be waiting.</p>
         <div class="ss-reward-choice__grid">
           ${snapshot.upcomingChoices.map((reward) => `
             <article class="ss-reward-choice__card is-static">

@@ -11124,13 +11124,13 @@ input[type="date"] {
 }
 
 .rp-rack-art--saddle {
-  inset: -18% -14% 2% -12%;
-  transform: rotate(-5deg);
+  inset: -42% -8% -10% -8%;
+  transform: rotate(-1deg);
   transform-origin: center center;
 }
 
 .rp-rack-art--saddle img {
-  object-position: 50% 52%;
+  object-position: 50% 44%;
   filter: drop-shadow(0 10px 14px rgba(52, 42, 30, 0.2));
 }
 
