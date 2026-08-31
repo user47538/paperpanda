@@ -2,6 +2,7 @@ import {
   GP_ACTIVITIES_PER_SESSION,
   GP_BINARY,
   GP_BUILD,
+  GP_CYCLE_VARIANTS,
   GP_FIX,
   GP_JOIN,
   GP_LESSON_INTROS,
@@ -479,6 +480,18 @@ export function createGrammarProgram({
       return Math.max(0, (Number(cfg?.cycleNumber || 1) || 1) - 1);
     }
 
+    function getCycleVariantNumber(cfg = sessionConfig) {
+      return (getCycleIndex(cfg) % 2) + 1;
+    }
+
+    function getCycleContent(groupKey = "", contentKey = "", cfg = sessionConfig) {
+      const variantNumber = getCycleVariantNumber(cfg);
+      if (variantNumber <= 1) {
+        return null;
+      }
+      return GP_CYCLE_VARIANTS?.[variantNumber]?.[groupKey]?.[String(contentKey || "")] || null;
+    }
+
     function rotateCycleItems(items = [], cfg = sessionConfig) {
       const list = Array.isArray(items) ? items.filter(Boolean) : [];
       if (list.length <= 1) {
@@ -531,11 +544,11 @@ export function createGrammarProgram({
     }
 
     function getLessonDefinition(key = lessonKey) {
-      return GP_TERMS[key] || GP_LESSON_INTROS[key] || null;
+      return getCycleContent("terms", key) || GP_TERMS[key] || GP_LESSON_INTROS[key] || null;
     }
 
     function getTermDefinition(contentKey = sessionConfig?.content) {
-      return GP_TERMS[String(contentKey || "")] || null;
+      return getCycleContent("terms", contentKey) || GP_TERMS[String(contentKey || "")] || null;
     }
 
     function getCompatibleSavedCurrent(savedCurrent = G.current, cfg = null) {
@@ -593,14 +606,22 @@ export function createGrammarProgram({
       if (!cfg) {
         return [];
       }
+      const items = getCycleContent("mc", cfg.content, cfg) || GP_MC[cfg.content] || [];
       if (cfg.content === "mixed1") {
-        return selectWeightedItems(GP_MC.mixedPool, 10);
+        return selectWeightedItems(items, 10);
       }
-      return rotateCycleItems(GP_MC[cfg.content] || [], cfg);
+      return rotateCycleItems(items, cfg);
+    }
+
+    function getPassageData(cfg = sessionConfig) {
+      if (!cfg) {
+        return null;
+      }
+      return getCycleContent("passages", cfg.content, cfg) || GP_PASSAGES[cfg.content] || null;
     }
 
     function getPassageQuestions(cfg = sessionConfig) {
-      const questions = GP_PASSAGES[cfg?.content]?.questions || [];
+      const questions = getPassageData(cfg)?.questions || [];
       if (cfg?.content === "passage4") {
         return rotateCycleItems(selectWeightedItems(questions, 7), cfg);
       }
@@ -611,11 +632,12 @@ export function createGrammarProgram({
     }
 
     function getJoinItems(cfg = sessionConfig) {
-      return rotateCycleItems(selectWeightedItems(GP_JOIN[cfg?.content] || [], 8), cfg);
+      return rotateCycleItems(selectWeightedItems(getCycleContent("join", cfg?.content, cfg) || GP_JOIN[cfg?.content] || [], 8), cfg);
     }
 
     function getReviewItems(cfg = sessionConfig) {
-      return rotateCycleItems(selectWeightedItems(GP_REVIEW[cfg?.content]?.items || [], 6), cfg);
+      const items = getCycleContent("review", cfg?.content, cfg)?.items || GP_REVIEW[cfg?.content]?.items || [];
+      return rotateCycleItems(selectWeightedItems(items, 6), cfg);
     }
 
     function getRewriteTotal(items = []) {
@@ -809,13 +831,27 @@ export function createGrammarProgram({
         return { items: getMcItems(), i: 0, picked: null, attempts: 0, right: 0, feedback: "" };
       }
       if (sessionConfig.act === "tense") {
-        return { items: rotateCycleItems(GP_TENSE[sessionConfig.content] || []), i: 0, picked: null, attempts: 0, right: 0, feedback: "" };
+        return {
+          items: rotateCycleItems(getCycleContent("tense", sessionConfig.content) || GP_TENSE[sessionConfig.content] || []),
+          i: 0,
+          picked: null,
+          attempts: 0,
+          right: 0,
+          feedback: ""
+        };
       }
       if (sessionConfig.act === "pick") {
-        return { items: rotateCycleItems(GP_TERMS[sessionConfig.content]?.items || []), i: 0, picked: null, attempts: 0, right: 0, feedback: "" };
+        return {
+          items: rotateCycleItems(getTermDefinition(sessionConfig.content)?.items || []),
+          i: 0,
+          picked: null,
+          attempts: 0,
+          right: 0,
+          feedback: ""
+        };
       }
       if (sessionConfig.act === "fix") {
-        const data = GP_FIX[sessionConfig.content] || {};
+        const data = getCycleContent("fix", sessionConfig.content) || GP_FIX[sessionConfig.content] || {};
         const items = Array.isArray(data.items) && data.items.length
           ? data.items
           : data.tokens
@@ -833,19 +869,52 @@ export function createGrammarProgram({
         return { items: GP_BINARY[sessionConfig.content] || [], i: 0, picked: null, attempts: 0, right: 0, feedback: "" };
       }
       if (sessionConfig.act === "rewrite") {
-        return { items: rotateCycleItems(GP_REWRITE[sessionConfig.content] || []), i: 0, text: "", attempts: 0, right: 0, feedback: "", checked: false };
+        return {
+          items: rotateCycleItems(getCycleContent("rewrite", sessionConfig.content) || GP_REWRITE[sessionConfig.content] || []),
+          i: 0,
+          text: "",
+          attempts: 0,
+          right: 0,
+          feedback: "",
+          checked: false
+        };
       }
       if (sessionConfig.act === "join") {
         return { items: getJoinItems(), i: 0, picked: null, attempts: 0, right: 0, feedback: "" };
       }
       if (sessionConfig.act === "select") {
-        return { items: rotateCycleItems(GP_SELECT[sessionConfig.content] || []), i: 0, subjectPick: null, verbPick: null, attempts: 0, right: 0, feedback: "", checked: false };
+        return {
+          items: rotateCycleItems(getCycleContent("select", sessionConfig.content) || GP_SELECT[sessionConfig.content] || []),
+          i: 0,
+          subjectPick: null,
+          verbPick: null,
+          attempts: 0,
+          right: 0,
+          feedback: "",
+          checked: false
+        };
       }
       if (sessionConfig.act === "sort") {
-        return { items: rotateCycleItems(GP_SORT[sessionConfig.content] || []), i: 0, placements: {}, selectedToken: null, attempts: 0, right: 0, feedback: "", checked: false };
+        return {
+          items: rotateCycleItems(getCycleContent("sort", sessionConfig.content) || GP_SORT[sessionConfig.content] || []),
+          i: 0,
+          placements: {},
+          selectedToken: null,
+          attempts: 0,
+          right: 0,
+          feedback: "",
+          checked: false
+        };
       }
       if (sessionConfig.act === "build") {
-        return { items: rotateCycleItems(GP_BUILD[sessionConfig.content] || []), i: 0, choices: {}, right: 0, feedback: "", checked: false };
+        return {
+          items: rotateCycleItems(getCycleContent("build", sessionConfig.content) || GP_BUILD[sessionConfig.content] || []),
+          i: 0,
+          choices: {},
+          right: 0,
+          feedback: "",
+          checked: false
+        };
       }
       if (sessionConfig.act === "mixed") {
         return { items: getReviewItems(), i: 0, picked: null, attempts: 0, right: 0, feedback: "" };
@@ -1058,7 +1127,7 @@ export function createGrammarProgram({
 
     function beginGame(roundIndex = 0) {
       stopGame();
-      const rounds = GP_TERMS[sessionConfig.content]?.rounds || [];
+      const rounds = getTermDefinition(sessionConfig.content)?.rounds || [];
       const prior = game || { score: 0, wrong: 0, missed: [], roundScores: [] };
       game = {
         round: roundIndex,
@@ -1455,7 +1524,7 @@ export function createGrammarProgram({
     }
 
     function getFixData() {
-      const data = GP_FIX[sessionConfig?.content] || {};
+      const data = getCycleContent("fix", sessionConfig?.content) || GP_FIX[sessionConfig?.content] || {};
       const items = Array.isArray(data.items) && data.items.length
         ? data.items
         : data.tokens
@@ -1767,7 +1836,7 @@ export function createGrammarProgram({
       if (!activity || sessionConfig?.act !== "comp") {
         return;
       }
-      const passage = GP_PASSAGES[sessionConfig.content];
+      const passage = getPassageData();
       if (!passage) {
         return;
       }
@@ -1845,7 +1914,7 @@ export function createGrammarProgram({
     }
 
     function readPassage() {
-      const passage = GP_PASSAGES[sessionConfig?.content];
+      const passage = getPassageData();
       if (!passage) {
         return;
       }
@@ -2278,7 +2347,7 @@ export function createGrammarProgram({
     }
 
     function buildComprehensionView() {
-      const passage = GP_PASSAGES[sessionConfig.content];
+      const passage = getPassageData();
       const question = getCurrentActivityItem();
       const replayButton = activity.replayIndex >= 0
         ? `<button type="button" class="gp-pill-btn gp-pill-btn--mini gp-replay-btn" data-gp="replay-paragraph">Replay ${escapeHtml(`paragraph ${activity.replayIndex + 1}`)}</button>`
