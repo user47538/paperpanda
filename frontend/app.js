@@ -721,6 +721,7 @@ const RP_TACK = [
   { k: "girth", label: "Girth", x: 52.2, y: 47.6, w: 12.6, h: 8.6, rotate: 2 },
   { k: "pad", label: "Saddle pad", x: 84.1, y: 38.6, w: 15.2, h: 12.8, rotate: 10 }
 ];
+const RP_MIN_WORLD_HORSE_DEPTH = 0.55 + (((45 - 44) / 48) * 0.8);
 const RP_ZONES = [
   { n: "the round pen", x1: 3, x2: 19, y1: 24, y2: 38, minStage: 5 },
   { n: "the back paddock", x1: 17, x2: 45, y1: 16, y2: 42 },
@@ -10947,7 +10948,7 @@ const RewardProperty = (function () {
       world.insertBefore(propElement, occluder);
     });
     S.horses.filter((horse) => !horse.stabled).forEach((horse) => {
-      const depth = 0.55 + (((horse.y - 44) / 48) * 0.8);
+      const depth = Math.max(RP_MIN_WORLD_HORSE_DEPTH, 0.55 + (((horse.y - 44) / 48) * 0.8));
       const tags = RP_TACK.filter((item) => horse[item.k]).map((item) => item.label);
       const horseElement = document.createElement("div");
       horseElement.className = "rp-horse";
