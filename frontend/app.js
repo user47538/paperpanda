@@ -688,18 +688,25 @@ const RP_OPTIONAL_REWARDS = [
   { id: "riders", track: "property", label: "Riders", description: "Riders you can put up on any horse" },
   { id: "horse-float", track: "property", label: "Horse float", description: "Two-horse float parked by the shed" },
   { id: "horse-wash-bay", track: "property", label: "Horse wash bay", description: "Tiled bay with warm water and a hose" },
-  { id: "arena-lights", track: "arena", label: "Arena lights", description: "Four towers — ride after dark" },
-  { id: "arena-roof", track: "arena", label: "Arena roof", description: "Covered arena, ride in any weather" }
+  { id: "jump-vertical", track: "arena", label: "Vertical jump", description: "A red-and-white vertical for the arena course" },
+  { id: "jump-spread-oxer", track: "arena", label: "Spread oxer", description: "A wider oxer for more advanced arena practice" },
+  { id: "jump-water", track: "arena", label: "Water jump", description: "A water jump to add variety to the arena" },
+  { id: "jump-rustic-plank", track: "arena", label: "Rustic plank", description: "A rustic plank fence for the arena line-up" },
+  { id: "jump-hay-bale", track: "arena", label: "Hay bale", description: "A hay bale obstacle to finish the jump collection" }
 ];
 const RP_REPEATABLE_REWARD_IDS = new Set(["saddles", "bridles", "saddle-pads", "girths"]);
 const RP_OPTIONAL_REWARD_TRACKS = {
   tack: ["saddles", "bridles", "saddle-pads", "girths"],
   property: ["riders", "horse-float", "horse-wash-bay"],
-  arena: ["arena-lights", "arena-roof"]
+  arena: ["jump-vertical", "jump-spread-oxer", "jump-water", "jump-rustic-plank", "jump-hay-bale"]
 };
 const RP_REWARD_BY_ID = Object.fromEntries(
   [...RP_MANDATORY_REWARDS, ...RP_OPTIONAL_REWARDS].map((reward) => [reward.id, reward])
 );
+const RP_LEGACY_REWARD_ID_MIGRATIONS = {
+  "arena-lights": "jump-vertical",
+  "arena-roof": "jump-spread-oxer"
+};
 const RP_TACK_REWARD_BY_CATEGORY = {
   saddle: "saddles",
   bridle: "bridles",
@@ -741,12 +748,13 @@ const RP_ASSETS = {
   tackRoom: "/property/tack-room-empty.jpeg",
   saddle: "/property/saddle-reward-cutout.png",
   arena: "/property/arena-empty.jpeg",
-  horseFloat: "/property/horse-float-cutout.png",
-  horseWashBay: "/property/horse-wash-bay-cutout.png"
+  horseFloat: "/property/horse-float-placement.jpeg",
+  horseWashBay: "/property/horse-wash-bay-placement.jpeg"
 };
 const RP_ASSET_DISPLAY_PROFILES = {
   [RP_ASSETS.horseFloat]: "checker-cutout",
-  [RP_ASSETS.horseWashBay]: "checker-cutout"
+  [RP_ASSETS.horseWashBay]: "white-cutout",
+  "/property/jumps-sheet.jpeg": "white-cutout"
 };
 const RP_ASSET_DISPLAY_CACHE = new Map();
 const RP_ASSET_DISPLAY_PENDING = new Set();
@@ -802,11 +810,11 @@ const RP_JUMP_SHEET = {
   width: 3090,
   height: 1344,
   items: [
-    { id: "vertical-jump", label: "Vertical jump", x: 20, y: 240, w: 500, h: 560, arenaWidth: 13 },
-    { id: "spread-oxer", label: "Spread oxer", x: 520, y: 240, w: 620, h: 560, arenaWidth: 17 },
-    { id: "water-jump", label: "Water jump", x: 1080, y: 250, w: 690, h: 560, arenaWidth: 19 },
-    { id: "rustic-plank", label: "Rustic plank", x: 1790, y: 250, w: 620, h: 540, arenaWidth: 17 },
-    { id: "hay-bale", label: "Hay bale", x: 2440, y: 250, w: 620, h: 540, arenaWidth: 17 }
+    { id: "vertical-jump", rewardId: "jump-vertical", label: "Vertical jump", x: 20, y: 240, w: 500, h: 560, arenaWidth: 13 },
+    { id: "spread-oxer", rewardId: "jump-spread-oxer", label: "Spread oxer", x: 520, y: 240, w: 620, h: 560, arenaWidth: 17 },
+    { id: "water-jump", rewardId: "jump-water", label: "Water jump", x: 1080, y: 250, w: 690, h: 560, arenaWidth: 19 },
+    { id: "rustic-plank", rewardId: "jump-rustic-plank", label: "Rustic plank", x: 1790, y: 250, w: 620, h: 540, arenaWidth: 17 },
+    { id: "hay-bale", rewardId: "jump-hay-bale", label: "Hay bale", x: 2440, y: 250, w: 620, h: 540, arenaWidth: 17 }
   ]
 };
 const RP_TACK_VARIANT_KEYS = ["pad", "bridle", "girth"];
@@ -10436,6 +10444,36 @@ const RewardProperty = (function () {
     return new Set(getClaimedRewardIds());
   }
 
+  function getNormalisedRewardId(rewardId = "") {
+    const rawRewardId = String(rewardId || "");
+    return RP_LEGACY_REWARD_ID_MIGRATIONS[rawRewardId] || rawRewardId;
+  }
+
+  function getJumpRewardId(type = "") {
+    return getJumpMeta(type)?.rewardId || "";
+  }
+
+  function getNormalisedClaimedRewardIds(rawClaimedRewardIds = [], rawArenaJumps = []) {
+    const claimedRewardIds = [];
+    if (Array.isArray(rawClaimedRewardIds)) {
+      rawClaimedRewardIds.forEach((rewardId) => {
+        const normalizedRewardId = getNormalisedRewardId(rewardId);
+        if (RP_REWARD_BY_ID[normalizedRewardId]) {
+          claimedRewardIds.push(normalizedRewardId);
+        }
+      });
+    }
+    if (Array.isArray(rawArenaJumps)) {
+      rawArenaJumps.forEach((jump) => {
+        const rewardId = getJumpRewardId(jump?.type);
+        if (RP_REWARD_BY_ID[rewardId] && !claimedRewardIds.includes(rewardId)) {
+          claimedRewardIds.push(rewardId);
+        }
+      });
+    }
+    return claimedRewardIds;
+  }
+
   function isRepeatableReward(rewardId = "") {
     return RP_REPEATABLE_REWARD_IDS.has(String(rewardId || ""));
   }
@@ -10515,14 +10553,7 @@ const RewardProperty = (function () {
   }
 
   function ownedJumpCount() {
-    const arenaRewardCount = ["arena-lights", "arena-roof"].filter((rewardId) => hasClaimedReward(rewardId)).length;
-    if (arenaRewardCount <= 0) {
-      return 0;
-    }
-    if (arenaRewardCount === 1) {
-      return Math.min(2, RP_JUMP_SHEET.items.length);
-    }
-    return RP_JUMP_SHEET.items.length;
+    return RP_JUMP_SHEET.items.filter((item) => hasClaimedReward(item.rewardId)).length;
   }
 
   function isTackUnlocked(category = "") {
@@ -10530,8 +10561,8 @@ const RewardProperty = (function () {
   }
 
   function isJumpUnlocked(type = "") {
-    const jumpIndex = RP_JUMP_SHEET.items.findIndex((item) => item.id === type);
-    return jumpIndex >= 0 && jumpIndex < ownedJumpCount();
+    const jumpMeta = getJumpMeta(type);
+    return Boolean(jumpMeta?.rewardId) && hasClaimedReward(jumpMeta.rewardId);
   }
 
   function getTackDisplayVariant(category = "", horse = null) {
@@ -10573,7 +10604,7 @@ const RewardProperty = (function () {
         : `${reward.label} have been added again. Collected so far: ${count}.`;
     }
     if (reward.track === "arena") {
-      return `${reward.label} have been added to the reward ladder.`;
+      return `${reward.label} can now be added to the arena.`;
     }
     if (reward.id === "riders") {
       return "The rider team is now waiting beside the paddock.";
@@ -10642,10 +10673,10 @@ const RewardProperty = (function () {
         kind: "image",
         src: RP_ASSETS.horseWashBay,
         label: "Horse wash bay",
-        x: 87.8,
-        y: 71.8,
-        width: 10.1,
-        tilt: 0.5,
+        x: 81.8,
+        y: 69.2,
+        width: 11.4,
+        tilt: 0,
         className: "rp-world-prop--wash-bay"
       });
     }
@@ -10655,10 +10686,10 @@ const RewardProperty = (function () {
         kind: "image",
         src: RP_ASSETS.horseFloat,
         label: "Horse float",
-        x: 69.2,
-        y: 79.8,
-        width: 18.6,
-        tilt: -1.5,
+        x: 63.4,
+        y: 86.4,
+        width: 18.2,
+        tilt: -2,
         className: "rp-world-prop--horse-float"
       });
     }
@@ -10768,9 +10799,7 @@ const RewardProperty = (function () {
       : grammarSessionVersion >= RP_GRAMMAR_SESSION_VERSION
         ? rawGrammarSessions
         : getCompletedGrammarRewardSessions(rawGrammarSessions);
-    const claimedRewardIds = Array.isArray(base.claimedRewardIds)
-      ? base.claimedRewardIds.map((value) => String(value || "")).filter((value) => RP_REWARD_BY_ID[value])
-      : [];
+    const claimedRewardIds = getNormalisedClaimedRewardIds(base.claimedRewardIds, base.arenaJumps);
     const savedSessions = Math.max(0, Number(base.sessions || 0) || 0);
     S = {
       stage: shouldResetGrammarProgress
@@ -10986,12 +11015,13 @@ const RewardProperty = (function () {
     if (!sheet || !item) {
       return "";
     }
+    const displaySrc = getProcessedPropertyAssetSrc(sheet.src);
     return `
       <span
         class="${className}"
         style="--sheet-width:${sheet.width}px;--sheet-height:${sheet.height}px;--sprite-x:${item.x}px;--sprite-y:${item.y}px;--sprite-width:${item.w}px;--sprite-height:${item.h}px;"
       >
-        <img src="${escapeHtml(sheet.src)}" alt="${escapeHtml(label || item.label || "")}" loading="lazy" />
+        <img src="${escapeHtml(displaySrc)}" alt="${escapeHtml(label || item.label || "")}" loading="lazy" />
       </span>
     `;
   }
@@ -11025,7 +11055,12 @@ const RewardProperty = (function () {
   }
 
   function createProcessedPropertyAsset(src = "", profile = "") {
-    if (profile !== "checker-cutout") {
+    const cutoutProfile = profile === "checker-cutout"
+      ? { maxDistance: 34, featherDistance: 16 }
+      : profile === "white-cutout"
+        ? { maxDistance: 46, featherDistance: 18 }
+        : null;
+    if (!cutoutProfile) {
       return Promise.resolve(src);
     }
     return new Promise((resolve) => {
@@ -11044,7 +11079,7 @@ const RewardProperty = (function () {
         }
         context.drawImage(image, 0, 0, width, height);
         const imageData = context.getImageData(0, 0, width, height);
-        knockOutConnectedBackground(imageData);
+        knockOutConnectedBackground(imageData, cutoutProfile);
         context.putImageData(imageData, 0, 0);
         resolve(canvas.toDataURL("image/png"));
       };
@@ -11053,14 +11088,14 @@ const RewardProperty = (function () {
     });
   }
 
-  function knockOutConnectedBackground(imageData) {
+  function knockOutConnectedBackground(imageData, options = {}) {
     const { data, width, height } = imageData;
     const palette = collectBackgroundPalette(data, width, height);
     if (!palette.length) {
       return;
     }
-    const maxDistance = 34;
-    const featherDistance = 16;
+    const maxDistance = Math.max(0, Number(options.maxDistance ?? 34) || 34);
+    const featherDistance = Math.max(0, Number(options.featherDistance ?? 16) || 16);
     const visited = new Uint8Array(width * height);
     const queue = [];
 
@@ -11098,7 +11133,7 @@ const RewardProperty = (function () {
       if (distance > maxDistance + featherDistance) {
         continue;
       }
-      if (distance <= maxDistance) {
+      if (distance <= maxDistance || featherDistance <= 0) {
         data[offset + 3] = 0;
       } else {
         const nextAlpha = Math.round(((distance - maxDistance) / featherDistance) * 255);
@@ -11385,7 +11420,7 @@ const RewardProperty = (function () {
         `
         : `<div class="rp-choice-empty">${escapeHtml(activeTackCategory === "saddle" ? "The saddle reward is live. Use the saddle row on the right to fit or remove it from the selected horse." : "Choose a rack to open the tack tray.")}</div>`;
 
-    query(".rp-arena-stage").style.backgroundImage = `url('${RP_ASSETS.arena}')`;
+    query(".rp-arena-stage").style.backgroundImage = `url('${stage[0] || RP_ASSETS.arena}')`;
     query(".rp-arena-canvas").innerHTML = S.arenaJumps.map((jump) => {
       const jumpMeta = getJumpMeta(jump.type);
       if (!jumpMeta) {
@@ -11399,21 +11434,21 @@ const RewardProperty = (function () {
           style="left:${jump.x}%;top:${jump.y}%;width:${(jumpMeta.arenaWidth * jump.scale).toFixed(2)}%;"
           aria-label="${escapeHtml(jumpMeta.label)}"
         >
-          ${buildSpriteCropMarkup(RP_JUMP_SHEET, jumpMeta, jumpMeta.label, "rp-sprite-crop rp-sprite-crop--jump")}
+          ${buildSpriteCropMarkup(RP_JUMP_SHEET, jumpMeta, jumpMeta.label, "rp-sprite-crop rp-sprite-crop--jump rp-sprite-crop--plain")}
         </button>
       `;
     }).join("");
     query(".rp-arenahint").textContent = ownedJumpCount()
-        ? `${ownedJumpCount()} jump reward${ownedJumpCount() === 1 ? "" : "s"} unlocked. Add each jump once, then drag it anywhere in the arena.`
+        ? `${ownedJumpCount()} arena jump reward${ownedJumpCount() === 1 ? "" : "s"} collected. Add each jump once, then drag it anywhere in the arena.`
         : getRewardMilestoneMessage();
-    query(".rp-arena-library").innerHTML = RP_JUMP_SHEET.items.map((jumpMeta, index) => {
-      const unlocked = index < ownedJumpCount();
+    query(".rp-arena-library").innerHTML = RP_JUMP_SHEET.items.map((jumpMeta) => {
+      const unlocked = isJumpUnlocked(jumpMeta.id);
       const added = S.arenaJumps.some((jump) => jump.type === jumpMeta.id);
       return `
         <button type="button" class="rp-jumplib${unlocked ? "" : " is-locked"}${added ? " is-added" : ""}" ${unlocked ? `data-rp-jump-type="${escapeHtml(jumpMeta.id)}"` : ""}>
-          ${buildSpriteCropMarkup(RP_JUMP_SHEET, jumpMeta, jumpMeta.label, "rp-sprite-crop rp-sprite-crop--library")}
+          ${buildSpriteCropMarkup(RP_JUMP_SHEET, jumpMeta, jumpMeta.label, "rp-sprite-crop rp-sprite-crop--library rp-sprite-crop--plain")}
           <span>${escapeHtml(jumpMeta.label)}</span>
-          <small>${escapeHtml(unlocked ? (added ? "Already in arena" : "Add to arena") : `Reward ${index + 1}`)}</small>
+          <small>${escapeHtml(unlocked ? (added ? "Already in arena" : "Add to arena") : "Choose on reward ladder")}</small>
         </button>
       `;
     }).join("");
@@ -11458,7 +11493,7 @@ const RewardProperty = (function () {
         ? "Horses sent back from the property stand in their stall with their plaque below."
         : view === "tack"
           ? "Claim tack rewards again as needed, then use the tack room to fit that collected gear to a selected horse."
-          : "Arena rewards unlock jump access here. Add unlocked jumps once, then drag them around the arena to build the course.";
+          : "Arena jump rewards unlock placement here. Add each collected jump once, then drag it around the arena to build the course.";
   }
 
   function bind() {

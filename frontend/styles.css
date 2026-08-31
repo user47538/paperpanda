@@ -11317,6 +11317,14 @@ input[type="date"] {
   background: #fffdfd;
 }
 
+.rp-sprite-crop--plain {
+  background: transparent;
+}
+
+.rp-sprite-crop--plain img {
+  mix-blend-mode: normal;
+}
+
 .rp-sprite-crop--jump {
   width: 100%;
   background: transparent;
