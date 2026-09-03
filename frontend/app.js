@@ -805,15 +805,12 @@ const RP_VARIANT_SHEETS = {
   }
 };
 const RP_JUMP_SHEET = {
-  src: "/property/jumps-sheet.jpeg",
-  width: 3090,
-  height: 1344,
   items: [
-    { id: "vertical-jump", rewardId: "jump-vertical", label: "Vertical jump", x: 20, y: 240, w: 500, h: 560, arenaWidth: 13 },
-    { id: "spread-oxer", rewardId: "jump-spread-oxer", label: "Spread oxer", x: 520, y: 240, w: 620, h: 560, arenaWidth: 17 },
-    { id: "water-jump", rewardId: "jump-water", label: "Water jump", x: 1080, y: 250, w: 690, h: 560, arenaWidth: 19 },
-    { id: "rustic-plank", rewardId: "jump-rustic-plank", label: "Rustic plank", x: 1790, y: 250, w: 620, h: 540, arenaWidth: 17 },
-    { id: "hay-bale", rewardId: "jump-hay-bale", label: "Hay bale", x: 2440, y: 250, w: 620, h: 540, arenaWidth: 17 }
+    { id: "vertical-jump", rewardId: "jump-vertical", label: "Vertical jump", src: "/property/jumps/vertical-jump.png", arenaWidth: 13 },
+    { id: "spread-oxer", rewardId: "jump-spread-oxer", label: "Spread oxer", src: "/property/jumps/spread-oxer.png", arenaWidth: 17 },
+    { id: "water-jump", rewardId: "jump-water", label: "Water jump", src: "/property/jumps/water-jump.png", arenaWidth: 19 },
+    { id: "rustic-plank", rewardId: "jump-rustic-plank", label: "Rustic plank", src: "/property/jumps/rustic-plank.png", arenaWidth: 17 },
+    { id: "hay-bale", rewardId: "jump-hay-bale", label: "Hay bale", src: "/property/jumps/hay-bale.png", arenaWidth: 17 }
   ]
 };
 const RP_TACK_VARIANT_KEYS = ["pad", "bridle", "girth"];
@@ -10298,6 +10295,17 @@ const RewardProperty = (function () {
     return Math.max(0, Math.min(RP_STAGES.length - 1, Math.max(0, Number(sessionCount || 0) || 0)));
   }
 
+  function getRewardStageFloor(rewardIds = getClaimedRewardIds()) {
+    const claimed = new Set(Array.isArray(rewardIds) ? rewardIds : []);
+    if (RP_OPTIONAL_REWARDS.some((reward) => claimed.has(reward.id))) {
+      return RP_STAGES.length - 1;
+    }
+    return RP_MANDATORY_REWARDS.reduce(
+      (stage, reward) => claimed.has(reward.id) ? Math.max(stage, Number(reward.worldStage || 0) || 0) : stage,
+      0
+    );
+  }
+
   function getEffectiveRenovationSessionCount(grammarSessions = S?.grammarSessions || 0, practiceSessions = S?.sessions || 0) {
     return Math.max(0, Math.max(Number(grammarSessions || 0) || 0, Number(practiceSessions || 0) || 0));
   }
@@ -10307,7 +10315,7 @@ const RewardProperty = (function () {
   }
 
   function syncVisibleStage() {
-    const nextStage = getDerivedStage(getEffectiveRenovationSessionCount());
+    const nextStage = Math.max(getDerivedStage(getEffectiveRenovationSessionCount()), getRewardStageFloor());
     S.stage = nextStage;
     return nextStage;
   }
@@ -10654,6 +10662,7 @@ const RewardProperty = (function () {
     const nextClaimedIds = [...getClaimedRewardIds(), reward.id];
     S.claimedRewardIds = nextClaimedIds;
     S.lastClaimedRewardId = reward.id;
+    syncVisibleStage();
     save();
     if (root?.isConnected) {
       render();
@@ -10801,9 +10810,10 @@ const RewardProperty = (function () {
     const claimedRewardIds = getNormalisedClaimedRewardIds(base.claimedRewardIds, base.arenaJumps);
     const savedSessions = Math.max(0, Number(base.sessions || 0) || 0);
     S = {
-      stage: shouldResetGrammarProgress
-        ? 0
-        : getDerivedStage(getEffectiveRenovationSessionCount(grammarSessions, savedSessions)),
+      stage: Math.max(
+        shouldResetGrammarProgress ? 0 : getDerivedStage(getEffectiveRenovationSessionCount(grammarSessions, savedSessions)),
+        getRewardStageFloor(claimedRewardIds)
+      ),
       owned: Math.max(2, Math.min(RP_TACK.length, Number(base.owned || 2) || 2)),
       sessions: savedSessions,
       claimedRewardIds,
@@ -10946,7 +10956,7 @@ const RewardProperty = (function () {
       S.sessions = rewardCompletedCount;
       changed = true;
     }
-    const derivedStage = getDerivedStage(getEffectiveRenovationSessionCount(S.grammarSessions, rewardCompletedCount));
+    const derivedStage = Math.max(getDerivedStage(getEffectiveRenovationSessionCount(S.grammarSessions, rewardCompletedCount)), getRewardStageFloor());
     if (derivedStage !== S.stage) {
       S.stage = derivedStage;
       changed = true;
@@ -11031,6 +11041,13 @@ const RewardProperty = (function () {
         <img src="${escapeHtml(displaySrc)}" alt="${escapeHtml(label || item.label || "")}" loading="lazy" />
       </span>
     `;
+  }
+
+  function buildJumpArtMarkup(jump, className = "rp-jump-art") {
+    if (!jump?.src) {
+      return "";
+    }
+    return `<span class="${className}"><img src="${escapeHtml(jump.src)}" alt="${escapeHtml(jump.label || "")}" loading="lazy" /></span>`;
   }
 
   function getProcessedPropertyAssetSrc(src = "") {
@@ -11441,7 +11458,7 @@ const RewardProperty = (function () {
           style="left:${jump.x}%;top:${jump.y}%;width:${(jumpMeta.arenaWidth * jump.scale).toFixed(2)}%;"
           aria-label="${escapeHtml(jumpMeta.label)}"
         >
-          ${buildSpriteCropMarkup(RP_JUMP_SHEET, jumpMeta, jumpMeta.label, "rp-sprite-crop rp-sprite-crop--jump rp-sprite-crop--plain")}
+          ${buildJumpArtMarkup(jumpMeta, "rp-jump-art rp-jump-art--arena")}
         </button>
       `;
     }).join("");
@@ -11453,7 +11470,7 @@ const RewardProperty = (function () {
       const added = S.arenaJumps.some((jump) => jump.type === jumpMeta.id);
       return `
         <button type="button" class="rp-jumplib${unlocked ? "" : " is-locked"}${added ? " is-added" : ""}" ${unlocked ? `data-rp-jump-type="${escapeHtml(jumpMeta.id)}"` : ""}>
-          ${buildSpriteCropMarkup(RP_JUMP_SHEET, jumpMeta, jumpMeta.label, "rp-sprite-crop rp-sprite-crop--library rp-sprite-crop--plain")}
+          ${buildJumpArtMarkup(jumpMeta, "rp-jump-art rp-jump-art--library")}
           <span>${escapeHtml(jumpMeta.label)}</span>
           <small>${escapeHtml(unlocked ? (added ? "Already in arena" : "Add to arena") : "Choose on reward ladder")}</small>
         </button>

@@ -11337,9 +11337,32 @@ input[type="date"] {
   opacity: 0.98;
 }
 
-/* Keep the jump-sheet artwork intact while blending its white backdrop away. */
-.rp-jumplib .rp-sprite-crop img {
-  mix-blend-mode: multiply;
+.rp-jump-art {
+  display: block;
+  line-height: 0;
+}
+
+.rp-jump-art img {
+  display: block;
+  width: 100%;
+  height: auto;
+  pointer-events: none;
+}
+
+.rp-jump-art--arena {
+  filter: drop-shadow(0 6px 10px rgba(47, 38, 27, 0.22));
+}
+
+.rp-jump-art--library {
+  display: flex;
+  height: 142px;
+  align-items: center;
+  justify-content: center;
+}
+
+.rp-jump-art--library img {
+  max-height: 100%;
+  object-fit: contain;
 }
 
 .rp-arenahint {

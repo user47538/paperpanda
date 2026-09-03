@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "extract:jumps": "node scripts/extract-jump-assets.mjs",
     "preview": "vite preview",
     "test": "node --test grammar-state.test.mjs"
   },
