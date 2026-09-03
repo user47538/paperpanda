@@ -11412,11 +11412,14 @@ const RewardProperty = (function () {
     S.horses.filter((horse) => !horse.stabled).forEach((horse) => {
       const depth = Math.max(RP_MIN_WORLD_HORSE_DEPTH, 0.55 + (((horse.y - 44) / 48) * 0.8));
       const tags = RP_TACK.filter((item) => horse[item.k]).map((item) => item.label);
+      const saddleMarkup = horse.saddle
+        ? `<img class="rp-horse-saddle" src="${escapeHtml(RP_ASSETS.saddle)}" alt="" aria-hidden="true" />`
+        : "";
       const horseElement = document.createElement("div");
       horseElement.className = "rp-horse";
       horseElement.dataset.id = horse.id;
       horseElement.style.cssText = `left:${horse.x}%;top:${horse.y}%;width:${(6.4 * depth * horse.scale).toFixed(2)}%;z-index:${10 + Math.round(horse.y)}`;
-      horseElement.innerHTML = `<div class="rp-sprite" style="background-image:url('${horse.src}')"></div>${tags.length ? `<div class="rp-badge">${escapeHtml(tags.join(" · "))}</div>` : ""}${horse.id === sel ? '<div class="rp-ring"></div>' : ""}`;
+      horseElement.innerHTML = `<div class="rp-sprite" style="background-image:url('${horse.src}')"></div>${saddleMarkup}${tags.length ? `<div class="rp-badge">${escapeHtml(tags.join(" · "))}</div>` : ""}${horse.id === sel ? '<div class="rp-ring"></div>' : ""}`;
       world.insertBefore(horseElement, occluder);
     });
 
@@ -11521,9 +11524,13 @@ const RewardProperty = (function () {
       }),
       ...S.horses.filter((horse) => !horse.stabled).map((horse) => {
         const depth = Math.max(RP_MIN_WORLD_HORSE_DEPTH, 0.55 + (((horse.y - 44) / 48) * 0.8));
+        const saddleMarkup = horse.saddle
+          ? `<img class="rp-horse-saddle" src="${escapeHtml(RP_ASSETS.saddle)}" alt="" aria-hidden="true" />`
+          : "";
         return `
           <div class="rp-arena-horse" style="left:${horse.x}%;top:${horse.y}%;width:${(6.4 * depth * horse.scale).toFixed(2)}%;z-index:${10 + Math.round(horse.y)};">
             <div class="rp-sprite" style="background-image:url('${escapeHtml(horse.src)}')"></div>
+            ${saddleMarkup}
           </div>
         `;
       })
