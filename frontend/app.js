@@ -753,8 +753,7 @@ const RP_ASSETS = {
 };
 const RP_ASSET_DISPLAY_PROFILES = {
   [RP_ASSETS.horseFloat]: "checker-cutout",
-  [RP_ASSETS.horseWashBay]: "white-cutout",
-  "/property/jumps-sheet.jpeg": "white-cutout"
+  [RP_ASSETS.horseWashBay]: "white-cutout"
 };
 const RP_ASSET_DISPLAY_CACHE = new Map();
 const RP_ASSET_DISPLAY_PENDING = new Set();
@@ -11016,10 +11015,18 @@ const RewardProperty = (function () {
       return "";
     }
     const displaySrc = getProcessedPropertyAssetSrc(sheet.src);
+    const sheetWidth = Math.max(1, Number(sheet.width || 1) || 1);
+    const sheetHeight = Math.max(1, Number(sheet.height || 1) || 1);
+    const spriteWidth = Math.max(1, Number(item.w || 1) || 1);
+    const spriteHeight = Math.max(1, Number(item.h || 1) || 1);
+    const sheetWidthPercent = ((sheetWidth / spriteWidth) * 100).toFixed(4);
+    const sheetHeightPercent = ((sheetHeight / spriteHeight) * 100).toFixed(4);
+    const spriteXPercent = ((Number(item.x || 0) / spriteWidth) * -100).toFixed(4);
+    const spriteYPercent = ((Number(item.y || 0) / spriteHeight) * -100).toFixed(4);
     return `
       <span
         class="${className}"
-        style="--sheet-width:${sheet.width}px;--sheet-height:${sheet.height}px;--sprite-x:${item.x}px;--sprite-y:${item.y}px;--sprite-width:${item.w}px;--sprite-height:${item.h}px;"
+        style="--sheet-width:${sheetWidthPercent}%;--sheet-height:${sheetHeightPercent}%;--sprite-x:${spriteXPercent}%;--sprite-y:${spriteYPercent}%;--sprite-width:${spriteWidth};--sprite-height:${spriteHeight};"
       >
         <img src="${escapeHtml(displaySrc)}" alt="${escapeHtml(label || item.label || "")}" loading="lazy" />
       </span>
@@ -11420,7 +11427,7 @@ const RewardProperty = (function () {
         `
         : `<div class="rp-choice-empty">${escapeHtml(activeTackCategory === "saddle" ? "The saddle reward is live. Use the saddle row on the right to fit or remove it from the selected horse." : "Choose a rack to open the tack tray.")}</div>`;
 
-    query(".rp-arena-stage").style.backgroundImage = `url('${stage[0] || RP_ASSETS.arena}')`;
+    query(".rp-arena-stage").style.backgroundImage = `url('${RP_ASSETS.arena}')`;
     query(".rp-arena-canvas").innerHTML = S.arenaJumps.map((jump) => {
       const jumpMeta = getJumpMeta(jump.type);
       if (!jumpMeta) {
