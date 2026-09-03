@@ -668,6 +668,20 @@ const SPELLING_PADDOCK_HORSE_ID_ALIASES = Object.fromEntries(
 const SPELLING_PADDOCK_HORSE_BY_ID = Object.fromEntries(
   SPELLING_PADDOCK_HORSES.map((horse) => [horse.id, horse])
 );
+const RP_HORSE_TACK_ARTWORK = {
+  arabian: 2,
+  "quarter-horse": 2,
+  "welsh-pony": 11,
+  "connemara-pony": 12,
+  "shetland-pony": 13,
+  "gypsy-vanner": 14,
+  percheron: 15,
+  haflinger: 16,
+  "tennessee-walking-horse": 17,
+  "akhal-teke": 18,
+  mustang: 19,
+  "irish-sport-horse": 20
+};
 const SPELLING_HORSE_RANKS = ["Foal", "Pony", "School Horse", "Show Horse", "Champion"];
 const SPELLING_TENSE_IDS = ["past", "present", "future"];
 const SPELLING_CHALLENGE_MODE_ORDER = ["looks-right", "dictation", "root-word", "missing-letter"];
@@ -10406,6 +10420,13 @@ const RewardProperty = (function () {
     return horseMeta?.image || "";
   }
 
+  function getHorseDisplaySource(horse) {
+    const artworkNumber = RP_HORSE_TACK_ARTWORK[String(horse?.slug || "")];
+    if (!artworkNumber) return horse?.src || "";
+    const tackSuffix = horse?.bridle ? "-bridle" : horse?.saddle ? "-saddle" : "";
+    return `/property/horses/horse-${artworkNumber}${tackSuffix}.png`;
+  }
+
   function getVariantSheet(category = "") {
     return RP_VARIANT_SHEETS[String(category || "")] || null;
   }
@@ -11412,14 +11433,12 @@ const RewardProperty = (function () {
     S.horses.filter((horse) => !horse.stabled).forEach((horse) => {
       const depth = Math.max(RP_MIN_WORLD_HORSE_DEPTH, 0.55 + (((horse.y - 44) / 48) * 0.8));
       const tags = RP_TACK.filter((item) => horse[item.k]).map((item) => item.label);
-      const saddleMarkup = horse.saddle
-        ? `<img class="rp-horse-saddle" src="${escapeHtml(RP_ASSETS.saddle)}" alt="" aria-hidden="true" />`
-        : "";
+      const horseSource = getHorseDisplaySource(horse);
       const horseElement = document.createElement("div");
       horseElement.className = "rp-horse";
       horseElement.dataset.id = horse.id;
       horseElement.style.cssText = `left:${horse.x}%;top:${horse.y}%;width:${(6.4 * depth * horse.scale).toFixed(2)}%;z-index:${10 + Math.round(horse.y)}`;
-      horseElement.innerHTML = `<div class="rp-sprite" style="background-image:url('${horse.src}')"></div>${saddleMarkup}${tags.length ? `<div class="rp-badge">${escapeHtml(tags.join(" · "))}</div>` : ""}${horse.id === sel ? '<div class="rp-ring"></div>' : ""}`;
+      horseElement.innerHTML = `<div class="rp-sprite" style="background-image:url('${escapeHtml(horseSource)}')"></div>${tags.length ? `<div class="rp-badge">${escapeHtml(tags.join(" · "))}</div>` : ""}${horse.id === sel ? '<div class="rp-ring"></div>' : ""}`;
       world.insertBefore(horseElement, occluder);
     });
 
@@ -11524,13 +11543,10 @@ const RewardProperty = (function () {
       }),
       ...S.horses.filter((horse) => !horse.stabled).map((horse) => {
         const depth = Math.max(RP_MIN_WORLD_HORSE_DEPTH, 0.55 + (((horse.y - 44) / 48) * 0.8));
-        const saddleMarkup = horse.saddle
-          ? `<img class="rp-horse-saddle" src="${escapeHtml(RP_ASSETS.saddle)}" alt="" aria-hidden="true" />`
-          : "";
+        const horseSource = getHorseDisplaySource(horse);
         return `
           <div class="rp-arena-horse" style="left:${horse.x}%;top:${horse.y}%;width:${(6.4 * depth * horse.scale).toFixed(2)}%;z-index:${10 + Math.round(horse.y)};">
-            <div class="rp-sprite" style="background-image:url('${escapeHtml(horse.src)}')"></div>
-            ${saddleMarkup}
+            <div class="rp-sprite" style="background-image:url('${escapeHtml(horseSource)}')"></div>
           </div>
         `;
       })

@@ -11527,19 +11527,6 @@ input[type="date"] {
   background-size: contain;
 }
 
-.rp-horse-saddle {
-  position: absolute;
-  z-index: 2;
-  top: 4%;
-  left: 1%;
-  width: 120%;
-  height: auto;
-  pointer-events: none;
-  transform: rotate(-4deg);
-  transform-origin: 48% 30%;
-  filter: drop-shadow(0 3px 4px rgba(39, 27, 18, 0.28));
-}
-
 .rp-sel-name {
   font: 600 18px/1.2 "Lexend", system-ui, sans-serif;
 }
