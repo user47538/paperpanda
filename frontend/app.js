@@ -10254,6 +10254,7 @@ function buildRewardPropertyMarkup() {
                 <div class="rp-sel-where"></div>
               </div>
             </div>
+            <div class="rp-horse-resize"></div>
             <div class="rp-label">Tack setup</div>
             <div class="rp-tackrows"></div>
             <div class="rp-choice-summary"></div>
@@ -10701,7 +10702,7 @@ const RewardProperty = (function () {
         label: "Horse float",
         x: horseFloatPosition.x,
         y: horseFloatPosition.y,
-        width: 18.2,
+        width: 21.84,
         tilt: -2,
         className: "rp-world-prop--horse-float"
       });
@@ -10792,6 +10793,7 @@ const RewardProperty = (function () {
       src: String(rawHorse?.src || getHorseSource(rawHorse?.slug || rawHorse?.id || fallbackMeta?.id || "")),
       x: clamped.x,
       y: clamped.y,
+      scale: Math.max(0.5, Math.min(1.8, Number(rawHorse?.scale ?? 1) || 1)),
       zone: clamped.zone,
       stabled: Boolean(rawHorse?.stabled)
     };
@@ -10918,6 +10920,7 @@ const RewardProperty = (function () {
       src: String(horseMeta?.image || getHorseSource(slug)),
       x: position.x,
       y: position.y,
+      scale: 1,
       zone: position.zone,
       stabled: false
     };
@@ -11294,6 +11297,17 @@ const RewardProperty = (function () {
     render();
   }
 
+  function resizeSelectedHorse(delta = 0) {
+    const horse = sel ? byId(sel) : null;
+    if (!horse) {
+      return;
+    }
+    const nextScale = Math.max(0.5, Math.min(1.8, Number(horse.scale || 1) + Number(delta || 0)));
+    horse.scale = Math.round(nextScale * 100) / 100;
+    save();
+    render();
+  }
+
   function toggleTack(category = "") {
     const horse = sel ? byId(sel) : null;
     if (!horse || !isTackUnlocked(category)) {
@@ -11401,7 +11415,7 @@ const RewardProperty = (function () {
       const horseElement = document.createElement("div");
       horseElement.className = "rp-horse";
       horseElement.dataset.id = horse.id;
-      horseElement.style.cssText = `left:${horse.x}%;top:${horse.y}%;width:${(6.4 * depth).toFixed(2)}%;z-index:${10 + Math.round(horse.y)}`;
+      horseElement.style.cssText = `left:${horse.x}%;top:${horse.y}%;width:${(6.4 * depth * horse.scale).toFixed(2)}%;z-index:${10 + Math.round(horse.y)}`;
       horseElement.innerHTML = `<div class="rp-sprite" style="background-image:url('${horse.src}')"></div>${tags.length ? `<div class="rp-badge">${escapeHtml(tags.join(" · "))}</div>` : ""}${horse.id === sel ? '<div class="rp-ring"></div>' : ""}`;
       world.insertBefore(horseElement, occluder);
     });
@@ -11508,7 +11522,7 @@ const RewardProperty = (function () {
       ...S.horses.filter((horse) => !horse.stabled).map((horse) => {
         const depth = Math.max(RP_MIN_WORLD_HORSE_DEPTH, 0.55 + (((horse.y - 44) / 48) * 0.8));
         return `
-          <div class="rp-arena-horse" style="left:${horse.x}%;top:${horse.y}%;width:${(6.4 * depth).toFixed(2)}%;z-index:${10 + Math.round(horse.y)};">
+          <div class="rp-arena-horse" style="left:${horse.x}%;top:${horse.y}%;width:${(6.4 * depth * horse.scale).toFixed(2)}%;z-index:${10 + Math.round(horse.y)};">
             <div class="rp-sprite" style="background-image:url('${escapeHtml(horse.src)}')"></div>
           </div>
         `;
@@ -11553,6 +11567,11 @@ const RewardProperty = (function () {
       query(".rp-sel-breed").textContent = selectedHorse.breed;
       query(".rp-sel-where").textContent = selectedHorse.stabled ? "In the stables" : `Out in ${selectedHorse.zone || "the paddock"}`;
       query("[data-rp='stable-toggle']").textContent = selectedHorse.stabled ? "Bring out to the property" : "Send to the stables";
+      query(".rp-horse-resize").innerHTML = `
+        <span>Horse size: ${Math.round(selectedHorse.scale * 100)}%</span>
+        <button type="button" class="rp-btn rp-btn-ghost" data-rp="resize-horse" data-rp-horse-delta="-0.1">Smaller</button>
+        <button type="button" class="rp-btn rp-btn-ghost" data-rp="resize-horse" data-rp-horse-delta="0.1">Larger</button>
+      `;
       query(".rp-tackrows").innerHTML = RP_TACK.map((item) => {
         const unlocked = isTackUnlocked(item.k);
         const active = Boolean(selectedHorse[item.k]);
@@ -11648,6 +11667,10 @@ const RewardProperty = (function () {
       }
       if (action === "resize-jump") {
         resizeSelectedArenaJump(target.dataset.rpJumpDelta || 0);
+        return;
+      }
+      if (action === "resize-horse") {
+        resizeSelectedHorse(target.dataset.rpHorseDelta || 0);
         return;
       }
       if (action === "deselect") {
