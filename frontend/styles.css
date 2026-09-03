@@ -10833,23 +10833,6 @@ input[type="date"] {
   filter: drop-shadow(0 6px 6px rgba(40, 30, 50, 0.25));
 }
 
-.rp-badge {
-  position: absolute;
-  left: 50%;
-  top: -16%;
-  z-index: 2;
-  transform: translateX(-50%);
-  padding: 3px 7px;
-  border-radius: 999px;
-  background: var(--ink);
-  color: var(--surface);
-  font: 600 9px/1.2 "Lexend", system-ui, sans-serif;
-  letter-spacing: 0.04em;
-  white-space: nowrap;
-  pointer-events: none;
-  box-shadow: 0 3px 8px -3px rgba(0, 0, 0, 0.5);
-}
-
 .rp-ring {
   position: absolute;
   left: 50%;

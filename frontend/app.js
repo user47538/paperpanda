@@ -10421,7 +10421,11 @@ const RewardProperty = (function () {
   }
 
   function getHorseDisplaySource(horse) {
-    const artworkNumber = RP_HORSE_TACK_ARTWORK[String(horse?.slug || "")];
+    const slug = String(horse?.slug || "");
+    const horseMeta = getSpellingPaddockHorseMeta(slug)
+      || SPELLING_PADDOCK_HORSES.find((candidate) => candidate.image === horse?.src || candidate.name === horse?.name)
+      || null;
+    const artworkNumber = RP_HORSE_TACK_ARTWORK[slug] || RP_HORSE_TACK_ARTWORK[horseMeta?.id] || (S.horses.length === 1 ? 2 : 0);
     if (!artworkNumber) return horse?.src || "";
     const tackSuffix = horse?.bridle ? "-bridle" : horse?.saddle ? "-saddle" : "";
     return `/property/horses/horse-${artworkNumber}${tackSuffix}.png`;
@@ -11432,13 +11436,12 @@ const RewardProperty = (function () {
     });
     S.horses.filter((horse) => !horse.stabled).forEach((horse) => {
       const depth = Math.max(RP_MIN_WORLD_HORSE_DEPTH, 0.55 + (((horse.y - 44) / 48) * 0.8));
-      const tags = RP_TACK.filter((item) => horse[item.k]).map((item) => item.label);
       const horseSource = getHorseDisplaySource(horse);
       const horseElement = document.createElement("div");
       horseElement.className = "rp-horse";
       horseElement.dataset.id = horse.id;
       horseElement.style.cssText = `left:${horse.x}%;top:${horse.y}%;width:${(6.4 * depth * horse.scale).toFixed(2)}%;z-index:${10 + Math.round(horse.y)}`;
-      horseElement.innerHTML = `<div class="rp-sprite" style="background-image:url('${escapeHtml(horseSource)}')"></div>${tags.length ? `<div class="rp-badge">${escapeHtml(tags.join(" · "))}</div>` : ""}${horse.id === sel ? '<div class="rp-ring"></div>' : ""}`;
+      horseElement.innerHTML = `<div class="rp-sprite" style="background-image:url('${escapeHtml(horseSource)}')"></div>${horse.id === sel ? '<div class="rp-ring"></div>' : ""}`;
       world.insertBefore(horseElement, occluder);
     });
 
@@ -11457,7 +11460,7 @@ const RewardProperty = (function () {
     let stallsMarkup = "";
     for (let index = 0; index < totalStalls; index += 1) {
       const horse = inside[index];
-      stallsMarkup += `<div class="rp-stall${horse ? (horse.id === sel ? " is-on" : "") : " is-empty"}" data-id="${horse ? escapeHtml(horse.id) : ""}">${horse ? `<div class="rp-stall-horse" style="background-image:url('${horse.src}')"></div>` : ""}<div class="rp-rails"></div><div class="rp-rail-top"></div><div class="rp-rail-bot"></div><div class="rp-door"></div><div class="rp-plaque">${escapeHtml(horse ? horse.name : `No. ${index + 1}`)}</div></div>`;
+      stallsMarkup += `<div class="rp-stall${horse ? (horse.id === sel ? " is-on" : "") : " is-empty"}" data-id="${horse ? escapeHtml(horse.id) : ""}">${horse ? `<div class="rp-stall-horse" style="background-image:url('${escapeHtml(getHorseDisplaySource(horse))}')"></div>` : ""}<div class="rp-rails"></div><div class="rp-rail-top"></div><div class="rp-rail-bot"></div><div class="rp-door"></div><div class="rp-plaque">${escapeHtml(horse ? horse.name : `No. ${index + 1}`)}</div></div>`;
     }
     query(".rp-stalls").innerHTML = stallsMarkup;
 
