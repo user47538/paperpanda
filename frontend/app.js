@@ -10366,7 +10366,15 @@ const RewardProperty = (function () {
       grammarSessionVersion: RP_GRAMMAR_SESSION_VERSION,
       grammarProgressResetVersion: RP_GRAMMAR_PROGRESS_RESET_VERSION,
       horses: [],
+      horseFloatPosition: { x: 63.4, y: 86.4 },
       arenaJumps: []
+    };
+  }
+
+  function normalisePropertyPosition(rawPosition, fallbackPosition) {
+    return {
+      x: Math.max(5, Math.min(95, Number(rawPosition?.x ?? fallbackPosition.x) || fallbackPosition.x)),
+      y: Math.max(12, Math.min(95, Number(rawPosition?.y ?? fallbackPosition.y) || fallbackPosition.y))
     };
   }
 
@@ -10678,20 +10686,21 @@ const RewardProperty = (function () {
         src: RP_ASSETS.horseWashBay,
         label: "Horse wash bay",
         x: 81.8,
-        y: 69.2,
+        y: 79.2,
         width: 11.4,
         tilt: 0,
         className: "rp-world-prop--wash-bay"
       });
     }
     if (hasClaimedReward("horse-float")) {
+      const horseFloatPosition = normalisePropertyPosition(S.horseFloatPosition, { x: 63.4, y: 86.4 });
       props.push({
         id: "horse-float",
         kind: "image",
         src: RP_ASSETS.horseFloat,
         label: "Horse float",
-        x: 63.4,
-        y: 86.4,
+        x: horseFloatPosition.x,
+        y: horseFloatPosition.y,
         width: 18.2,
         tilt: -2,
         className: "rp-world-prop--horse-float"
@@ -10843,6 +10852,7 @@ const RewardProperty = (function () {
       grammarSessionVersion: RP_GRAMMAR_SESSION_VERSION,
       grammarProgressResetVersion: RP_GRAMMAR_PROGRESS_RESET_VERSION,
       horses: Array.isArray(base.horses) ? base.horses.map((horse, index) => normaliseHorse(horse, index)) : [],
+      horseFloatPosition: normalisePropertyPosition(base.horseFloatPosition, { x: 63.4, y: 86.4 }),
       arenaJumps: Array.isArray(base.arenaJumps) ? base.arenaJumps.map((jump, index) => normaliseArenaJump(jump, index)) : []
     };
   }
@@ -11373,6 +11383,10 @@ const RewardProperty = (function () {
       const propElement = document.createElement("div");
       propElement.className = `rp-world-prop rp-world-prop--${prop.kind}${prop.className ? ` ${prop.className}` : ""}`;
       propElement.style.cssText = `left:${prop.x}%;top:${prop.y}%;width:${prop.width}%;z-index:${8 + Math.round(prop.y)};--prop-tilt:${prop.tilt || 0}deg;`;
+      if (prop.id === "horse-float") {
+        propElement.dataset.rpWorldProp = "horse-float";
+        propElement.setAttribute("aria-label", "Drag horse float to move it");
+      }
       propElement.setAttribute("aria-hidden", "true");
       propElement.innerHTML = prop.kind === "sprite"
         ? buildSpriteCropMarkup(prop.sheet, prop.item, prop.label, "rp-sprite-crop rp-sprite-crop--world")
@@ -11685,11 +11699,15 @@ const RewardProperty = (function () {
 
     stage?.addEventListener("pointerdown", (event) => {
       const horse = event.target.closest(".rp-horse");
+      const horseFloat = event.target.closest("[data-rp-world-prop='horse-float']");
       let shouldCapture = false;
       if (horse) {
         drag = { kind: "horse", id: horse.dataset.id || "" };
         sel = horse.dataset.id || null;
         render();
+        shouldCapture = true;
+      } else if (horseFloat) {
+        drag = { kind: "horse-float" };
         shouldCapture = true;
       } else if (!event.target.closest(".rp-hotspot,.rp-zoom,.rp-hud")) {
         pan = { x: event.clientX, y: event.clientY };
@@ -11718,6 +11736,11 @@ const RewardProperty = (function () {
           horse.stabled = false;
           render();
         }
+      } else if (drag?.kind === "horse-float") {
+        const cx = (((event.clientX - rect.left) / rect.width) - 0.5) / zoom + 0.5 - (px / 100);
+        const cy = (((event.clientY - rect.top) / rect.height) - 0.5) / zoom + 0.5 - (py / 100);
+        S.horseFloatPosition = normalisePropertyPosition({ x: cx * 100, y: cy * 100 }, { x: 63.4, y: 86.4 });
+        render();
       } else if (pan) {
         px += (((event.clientX - pan.x) / rect.width) * 100) / zoom;
         py += (((event.clientY - pan.y) / rect.height) * 100) / zoom;

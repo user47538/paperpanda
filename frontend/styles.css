@@ -10793,6 +10793,16 @@ input[type="date"] {
   filter: drop-shadow(0 12px 18px rgba(41, 31, 25, 0.24));
 }
 
+.rp-world-prop--horse-float {
+  cursor: grab;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.rp-world-prop--horse-float:active {
+  cursor: grabbing;
+}
+
 .rp-world-prop--wash-bay img {
   filter: drop-shadow(0 10px 16px rgba(41, 31, 25, 0.2));
 }
