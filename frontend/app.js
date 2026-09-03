@@ -10230,6 +10230,7 @@ function buildRewardPropertyMarkup() {
             </div>
             <div class="rp-arena-actions">
               <div class="rp-arena-library"></div>
+              <div class="rp-arena-resize" hidden></div>
               <button class="rp-btn rp-btn-ghost" data-rp="remove-jump">Remove selected jump</button>
             </div>
           </div>
@@ -10749,7 +10750,7 @@ const RewardProperty = (function () {
       type: fallback.id,
       x: Math.max(8, Math.min(92, Number(rawJump?.x ?? 50) || 50)),
       y: Math.max(20, Math.min(90, Number(rawJump?.y ?? 62) || 62)),
-      scale: Math.max(0.8, Math.min(1.35, Number(rawJump?.scale ?? 1) || 1))
+      scale: Math.max(0.5, Math.min(1.8, Number(rawJump?.scale ?? 1) || 1))
     };
   }
 
@@ -11258,6 +11259,17 @@ const RewardProperty = (function () {
     render();
   }
 
+  function resizeSelectedArenaJump(delta = 0) {
+    const arenaJump = arenaJumpById(selectedArenaJumpId);
+    if (!arenaJump) {
+      return;
+    }
+    const nextScale = Math.max(0.5, Math.min(1.8, arenaJump.scale + Number(delta || 0)));
+    arenaJump.scale = Math.round(nextScale * 100) / 100;
+    save();
+    render();
+  }
+
   function toggleTack(category = "") {
     const horse = sel ? byId(sel) : null;
     if (!horse || !isTackUnlocked(category)) {
@@ -11444,7 +11456,7 @@ const RewardProperty = (function () {
         `
         : `<div class="rp-choice-empty">${escapeHtml(activeTackCategory === "saddle" ? "The saddle reward is live. Use the saddle row on the right to fit or remove it from the selected horse." : "Choose a rack to open the tack tray.")}</div>`;
 
-    query(".rp-arena-stage").style.backgroundImage = `url('${RP_ASSETS.arena}')`;
+    query(".rp-arena-stage").style.backgroundImage = `url('${stage[0]}')`;
     query(".rp-arena-canvas").innerHTML = S.arenaJumps.map((jump) => {
       const jumpMeta = getJumpMeta(jump.type);
       if (!jumpMeta) {
@@ -11479,6 +11491,18 @@ const RewardProperty = (function () {
     const removeButton = query("[data-rp='remove-jump']");
     if (removeButton) {
       removeButton.disabled = !selectedArenaJumpId;
+    }
+    const selectedArenaJump = arenaJumpById(selectedArenaJumpId);
+    const resizeControls = query(".rp-arena-resize");
+    if (resizeControls) {
+      resizeControls.hidden = !selectedArenaJump;
+      resizeControls.innerHTML = selectedArenaJump
+        ? `
+          <span>Jump size: ${Math.round(selectedArenaJump.scale * 100)}%</span>
+          <button type="button" class="rp-btn rp-btn-ghost" data-rp="resize-jump" data-rp-jump-delta="-0.1">Smaller</button>
+          <button type="button" class="rp-btn rp-btn-ghost" data-rp="resize-jump" data-rp-jump-delta="0.1">Larger</button>
+        `
+        : "";
     }
 
     query(".rp-sel").hidden = !selectedHorse;
@@ -11580,6 +11604,10 @@ const RewardProperty = (function () {
       }
       if (action === "remove-jump") {
         removeSelectedArenaJump();
+        return;
+      }
+      if (action === "resize-jump") {
+        resizeSelectedArenaJump(target.dataset.rpJumpDelta || 0);
         return;
       }
       if (action === "deselect") {

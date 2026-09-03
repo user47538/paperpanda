@@ -11415,6 +11415,19 @@ input[type="date"] {
   padding: 14px;
 }
 
+.rp-arena-resize {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: #3b3226;
+  font: 600 13px/1.3 "Lexend", system-ui, sans-serif;
+}
+
+.rp-arena-resize .rp-btn {
+  padding: 8px 12px;
+}
+
 .rp-arena-library {
   grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
 }
