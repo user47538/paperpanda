@@ -10298,13 +10298,11 @@ const RewardProperty = (function () {
 
   function getRewardStageFloor(rewardIds = getClaimedRewardIds()) {
     const claimed = new Set(Array.isArray(rewardIds) ? rewardIds : []);
-    if (RP_OPTIONAL_REWARDS.some((reward) => claimed.has(reward.id))) {
-      return RP_STAGES.length - 1;
-    }
-    return RP_MANDATORY_REWARDS.reduce(
+    const mandatoryStage = RP_MANDATORY_REWARDS.reduce(
       (stage, reward) => claimed.has(reward.id) ? Math.max(stage, Number(reward.worldStage || 0) || 0) : stage,
       0
     );
+    return Math.max(mandatoryStage, Math.min(RP_STAGES.length - 1, claimed.size));
   }
 
   function getEffectiveRenovationSessionCount(grammarSessions = S?.grammarSessions || 0, practiceSessions = S?.sessions || 0) {
@@ -10498,10 +10496,7 @@ const RewardProperty = (function () {
 
   function getOptionalRewardAllowance(grammarSessions = S?.grammarSessions || 0, practiceSessions = S?.sessions || 0) {
     ensureLoaded();
-    if (getEffectiveRenovationSessionCount(grammarSessions, practiceSessions) < RP_MANDATORY_REWARDS.length) {
-      return 0;
-    }
-    return Math.max(0, getCombinedCompletedSessionCount(grammarSessions, practiceSessions) - RP_MANDATORY_REWARDS.length);
+    return Math.max(0, getCombinedCompletedSessionCount(grammarSessions, practiceSessions));
   }
 
   function getPendingRewardChoiceCount(
