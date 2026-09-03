@@ -10769,7 +10769,7 @@ const RewardProperty = (function () {
       type: fallback.id,
       x: Math.max(8, Math.min(92, Number(rawJump?.x ?? 50) || 50)),
       y: Math.max(20, Math.min(90, Number(rawJump?.y ?? 62) || 62)),
-      scale: Math.max(0.5, Math.min(1.8, Number(rawJump?.scale ?? 1) || 1))
+      scale: Math.max(0.3, Math.min(1.8, Number(rawJump?.scale ?? 1) || 1))
     };
   }
 
@@ -11283,7 +11283,7 @@ const RewardProperty = (function () {
     if (!arenaJump) {
       return;
     }
-    const nextScale = Math.max(0.5, Math.min(1.8, arenaJump.scale + Number(delta || 0)));
+    const nextScale = Math.max(0.3, Math.min(1.8, arenaJump.scale + Number(delta || 0)));
     arenaJump.scale = Math.round(nextScale * 100) / 100;
     save();
     render();
