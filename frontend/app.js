@@ -10731,6 +10731,25 @@ const RewardProperty = (function () {
     return props;
   }
 
+  function getPlacedArenaJumpProps() {
+    return S.arenaJumps.map((jump) => {
+      const jumpMeta = getJumpMeta(jump.type);
+      if (!jumpMeta) {
+        return null;
+      }
+      return {
+        id: jump.id,
+        kind: "jump",
+        jump: jumpMeta,
+        x: jump.x,
+        y: jump.y,
+        width: jumpMeta.arenaWidth * jump.scale,
+        tilt: 0,
+        className: "rp-world-prop--arena-jump"
+      };
+    }).filter(Boolean);
+  }
+
   function buildRackArtMarkup(category = "", horse = null) {
     if (category === "saddle") {
       return `<span class="rp-rack-art rp-rack-art--image rp-rack-art--saddle"><img src="${escapeHtml(getProcessedPropertyAssetSrc(RP_ASSETS.saddle))}" alt="Saddle reward" loading="lazy" /></span>`;
@@ -11355,14 +11374,16 @@ const RewardProperty = (function () {
     const world = query(".rp-world");
     world.querySelectorAll(".rp-horse,.rp-hotspot,.rp-world-prop").forEach((node) => node.remove());
     const occluder = query(".rp-occluder");
-    getWorldRewardProps().forEach((prop) => {
+    [...getWorldRewardProps(), ...getPlacedArenaJumpProps()].forEach((prop) => {
       const propElement = document.createElement("div");
       propElement.className = `rp-world-prop rp-world-prop--${prop.kind}${prop.className ? ` ${prop.className}` : ""}`;
       propElement.style.cssText = `left:${prop.x}%;top:${prop.y}%;width:${prop.width}%;z-index:${8 + Math.round(prop.y)};--prop-tilt:${prop.tilt || 0}deg;`;
       propElement.setAttribute("aria-hidden", "true");
       propElement.innerHTML = prop.kind === "sprite"
         ? buildSpriteCropMarkup(prop.sheet, prop.item, prop.label, "rp-sprite-crop rp-sprite-crop--world")
-        : `<img src="${escapeHtml(getProcessedPropertyAssetSrc(prop.src))}" alt="${escapeHtml(prop.label || "")}" loading="lazy" />`;
+        : prop.kind === "jump"
+          ? buildJumpArtMarkup(prop.jump, "rp-jump-art rp-jump-art--property")
+          : `<img src="${escapeHtml(getProcessedPropertyAssetSrc(prop.src))}" alt="${escapeHtml(prop.label || "")}" loading="lazy" />`;
       world.insertBefore(propElement, occluder);
     });
     S.horses.filter((horse) => !horse.stabled).forEach((horse) => {
@@ -11457,7 +11478,8 @@ const RewardProperty = (function () {
         : `<div class="rp-choice-empty">${escapeHtml(activeTackCategory === "saddle" ? "The saddle reward is live. Use the saddle row on the right to fit or remove it from the selected horse." : "Choose a rack to open the tack tray.")}</div>`;
 
     query(".rp-arena-stage").style.backgroundImage = `url('${stage[0]}')`;
-    query(".rp-arena-canvas").innerHTML = S.arenaJumps.map((jump) => {
+    query(".rp-arena-canvas").innerHTML = [
+      ...S.arenaJumps.map((jump) => {
       const jumpMeta = getJumpMeta(jump.type);
       if (!jumpMeta) {
         return "";
@@ -11467,13 +11489,22 @@ const RewardProperty = (function () {
           type="button"
           class="rp-arena-jump${jump.id === selectedArenaJumpId ? " is-on" : ""}"
           data-rp-arena-jump="${escapeHtml(jump.id)}"
-          style="left:${jump.x}%;top:${jump.y}%;width:${(jumpMeta.arenaWidth * jump.scale).toFixed(2)}%;"
+          style="left:${jump.x}%;top:${jump.y}%;width:${(jumpMeta.arenaWidth * jump.scale).toFixed(2)}%;z-index:${8 + Math.round(jump.y)};"
           aria-label="${escapeHtml(jumpMeta.label)}"
         >
           ${buildJumpArtMarkup(jumpMeta, "rp-jump-art rp-jump-art--arena")}
         </button>
       `;
-    }).join("");
+      }),
+      ...S.horses.filter((horse) => !horse.stabled).map((horse) => {
+        const depth = Math.max(RP_MIN_WORLD_HORSE_DEPTH, 0.55 + (((horse.y - 44) / 48) * 0.8));
+        return `
+          <div class="rp-arena-horse" style="left:${horse.x}%;top:${horse.y}%;width:${(6.4 * depth).toFixed(2)}%;z-index:${10 + Math.round(horse.y)};">
+            <div class="rp-sprite" style="background-image:url('${escapeHtml(horse.src)}')"></div>
+          </div>
+        `;
+      })
+    ].join("");
     query(".rp-arenahint").textContent = ownedJumpCount()
         ? `${ownedJumpCount()} arena jump reward${ownedJumpCount() === 1 ? "" : "s"} collected. Add each jump once, then drag it anywhere in the arena.`
         : getRewardMilestoneMessage();

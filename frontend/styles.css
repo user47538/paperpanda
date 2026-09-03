@@ -10805,6 +10805,14 @@ input[type="date"] {
   opacity: 0.98;
 }
 
+.rp-world-prop--arena-jump {
+  transform: translate(-50%, -86%);
+}
+
+.rp-jump-art--property {
+  filter: drop-shadow(0 6px 10px rgba(47, 38, 27, 0.22));
+}
+
 .rp-sprite {
   position: absolute;
   inset: 0;
@@ -11406,6 +11414,13 @@ input[type="date"] {
 .rp-arena-jump.is-on {
   filter: drop-shadow(0 0 0 rgba(0, 0, 0, 0));
   box-shadow: 0 0 0 3px rgba(110, 90, 134, 0.28);
+}
+
+.rp-arena-horse {
+  position: absolute;
+  aspect-ratio: 1.22;
+  transform: translate(-50%, -85%);
+  pointer-events: none;
 }
 
 .rp-arena-actions {
