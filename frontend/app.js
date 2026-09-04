@@ -10184,7 +10184,6 @@ function buildRewardPropertyMarkup() {
     <div class="rp-acts">
       <button class="rp-btn rp-btn-moss" data-rp="session">+ Practice session complete</button>
       <button class="rp-btn rp-btn-plum" data-rp="renovate">+ Grammar session complete</button>
-      <button class="rp-btn rp-btn-ghost" data-rp="reset">Reset</button>
     </div>
   ` : "";
   return `
@@ -10195,6 +10194,7 @@ function buildRewardPropertyMarkup() {
           <h2 class="rp-title">Your horse property</h2>
           <p class="rp-sub">Grammar and Practice sessions rebuild the property stage by stage. Practice sessions also add horses and unlock later reward choices. Move between the paddocks, the stables, and the tack room.</p>
         </div>
+        <button class="rp-btn rp-btn-ghost" data-rp="reset-progress">Reset grammar &amp; rewards</button>
         ${devActions}
       </header>
 
@@ -11044,6 +11044,10 @@ const RewardProperty = (function () {
 
   function reset(options = {}) {
     const preservePracticeBaseline = options.preservePracticeBaseline !== false;
+    const resetGrammar = options.resetGrammar === true;
+    if (resetGrammar && currentPracticeSubject) {
+      currentPracticeSubject.grammar = createDefaultGrammarState(currentPracticeSubject.id);
+    }
     S = {
       ...defaultState(),
       rewardProgressNeedsBaseline: preservePracticeBaseline
@@ -11060,6 +11064,7 @@ const RewardProperty = (function () {
     } else {
       save();
     }
+    if (resetGrammar) persistSubjects();
     render();
   }
 
@@ -11683,8 +11688,11 @@ const RewardProperty = (function () {
         renovate();
         return;
       }
-      if (action === "reset") {
-        reset();
+      if (action === "reset-progress") {
+        const confirmed = typeof window === "undefined" || window.confirm(
+          "Reset grammar stages and property rewards for this account? Your completed spelling stage and earned horse will stay."
+        );
+        if (confirmed) reset({ resetGrammar: true });
         return;
       }
       if (action === "remove-jump") {
