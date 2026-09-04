@@ -11,6 +11,10 @@ const currentUiVersion = "2026-08-18-grammar-reset-and-signout";
 const grammarResetVersion = 3;
 const grammarCurrentSnapshotVersion = 1;
 const grammarStateMigrationVersion = 1;
+const oneTimeAccountProgressReset = Object.freeze({
+  id: "2026-09-04-amy-restart",
+  email: "amyjwoolley@gmail.com"
+});
 const grammarDebugStorageKey = "paperpanda-debug-grammar";
 const previewDatabaseName = "paperpanda-assets";
 const previewStoreName = "document-previews";
@@ -7675,6 +7679,32 @@ function getSubjectSpellingState(subject) {
   return subject.spelling;
 }
 
+function applyOneTimeAccountProgressReset() {
+  if (normaliseAccountKey(state.currentUserEmail) !== oneTimeAccountProgressReset.email) {
+    return false;
+  }
+
+  const spellingSubject = state.subjects.find((subject) => isSpellingSubjectRecord(subject?.id, subject?.name));
+  if (!spellingSubject) {
+    return false;
+  }
+
+  const completedResetIds = Array.isArray(spellingSubject.oneTimeAccountResetIds)
+    ? spellingSubject.oneTimeAccountResetIds.map((value) => String(value || "")).filter(Boolean)
+    : [];
+  if (completedResetIds.includes(oneTimeAccountProgressReset.id)) {
+    return false;
+  }
+
+  // This one-off migration deliberately leaves spelling attempts and Horse 2 intact.
+  spellingSubject.grammar = createDefaultGrammarState(spellingSubject.id);
+  spellingSubject.oneTimeAccountResetIds = [...completedResetIds, oneTimeAccountProgressReset.id];
+  RewardProperty.syncPracticeState(spellingSubject);
+  RewardProperty.reset();
+  persistSubjects();
+  return true;
+}
+
 function hasMeaningfulWritingProgress(writing) {
   const openingAnswers = writing?.openingAnswers && typeof writing.openingAnswers === "object" ? writing.openingAnswers : {};
   const sections = Array.isArray(writing?.sections) ? writing.sections : [];
@@ -13284,6 +13314,7 @@ function applyAuthenticatedAccount(account, { token = "", subjects = null, setti
   persistSession(state.currentUserEmail, state.authToken);
   restoreSubjectsForAccount(account, subjects, { skipRemoteSync });
   persistSettings({ skipRemoteSync });
+  applyOneTimeAccountProgressReset();
 }
 
 async function restoreSessionUser() {
