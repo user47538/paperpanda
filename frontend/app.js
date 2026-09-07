@@ -12,7 +12,7 @@ const grammarResetVersion = 3;
 const grammarCurrentSnapshotVersion = 1;
 const grammarStateMigrationVersion = 1;
 const oneTimeAccountProgressReset = Object.freeze({
-  id: "2026-09-04-amy-restart",
+  id: "2026-09-07-amy-grammar-restart",
   email: "amyjwoolley@gmail.com"
 });
 const grammarDebugStorageKey = "paperpanda-debug-grammar";
@@ -6313,6 +6313,7 @@ function createCompletedRemoteGrammarState(grammar, subjectId = "") {
   return {
     ...createDefaultGrammarState(subjectId),
     resetVersion: grammarResetVersion,
+    grammarProgressResetId: normalized.grammarProgressResetId,
     enabled: subjectId === "spelling",
     done: normalized.done,
     results: normalized.results,
@@ -6800,6 +6801,12 @@ function compareGrammarCompletionPriority(leftGrammar, rightGrammar) {
   return 0;
 }
 
+function compareGrammarProgressResetPriority(leftGrammar, rightGrammar) {
+  const leftResetId = String(leftGrammar?.grammarProgressResetId || "");
+  const rightResetId = String(rightGrammar?.grammarProgressResetId || "");
+  return leftResetId.localeCompare(rightResetId);
+}
+
 function isGrammarLocalStateCompatible(grammar, completedGrammar) {
   const grammarRevision = Math.max(0, Number(grammar?.completedRevision || 0) || 0);
   const completedRevision = Math.max(0, Number(completedGrammar?.completedRevision || 0) || 0);
@@ -6835,8 +6842,15 @@ function chooseMergedGrammarCurrent(grammarCandidates, mergedDone) {
 function mergeGrammarStates(primaryGrammar, secondaryGrammar, subjectId = "") {
   const primary = normaliseGrammarState(primaryGrammar, subjectId);
   const secondary = normaliseGrammarState(secondaryGrammar, subjectId);
-  const completedSource = compareGrammarCompletionPriority(primary, secondary) >= 0 ? primary : secondary;
-  const compatibleLocalSources = [primary, secondary].filter((grammar) => isGrammarLocalStateCompatible(grammar, completedSource));
+  const resetPriorityCompare = compareGrammarProgressResetPriority(primary, secondary);
+  const completedSource = resetPriorityCompare === 0
+    ? compareGrammarCompletionPriority(primary, secondary) >= 0 ? primary : secondary
+    : resetPriorityCompare > 0 ? primary : secondary;
+  const completedResetId = String(completedSource.grammarProgressResetId || "");
+  const compatibleLocalSources = [primary, secondary].filter((grammar) =>
+    String(grammar.grammarProgressResetId || "") === completedResetId
+    && isGrammarLocalStateCompatible(grammar, completedSource)
+  );
   const mergedCurrent = chooseMergedGrammarCurrent(compatibleLocalSources, completedSource.done);
   const mergedAudioHeard = [...new Set(
     compatibleLocalSources.flatMap((grammar) => Array.isArray(grammar?.audioHeard) ? grammar.audioHeard : [])
@@ -6878,6 +6892,7 @@ function mergeGrammarStates(primaryGrammar, secondaryGrammar, subjectId = "") {
     secondary: getGrammarStateSummary(secondary, subjectId),
     merged: getGrammarStateSummary(mergedState, subjectId),
     completedSource: completedSource === primary ? "primary" : "secondary",
+    completedResetId,
     compatibleLocalSources: compatibleLocalSources.map((grammar) => grammar === primary ? "primary" : "secondary")
   });
 
@@ -6899,6 +6914,7 @@ function hasMeaningfulGrammarProgress(grammar) {
 function getGrammarStateSummary(grammar, subjectId = "spelling") {
   const normalized = normaliseGrammarState(grammar, subjectId);
   return {
+    grammarProgressResetId: normalized.grammarProgressResetId,
     done: normalized.done,
     current: Number(normalized.current?.n || 0) || 0,
     pendingResult: Number(normalized.pendingResult || 0) || 0,
@@ -7131,6 +7147,7 @@ function createDefaultGrammarState(subjectId = "") {
   return {
     resetVersion: grammarResetVersion,
     migrationVersion: grammarStateMigrationVersion,
+    grammarProgressResetId: "",
     enabled,
     done: 0,
     audioHeard: [],
@@ -7249,6 +7266,7 @@ function normaliseGrammarState(grammar, subjectId = "") {
     ...next,
     resetVersion: grammarResetVersion,
     migrationVersion: Math.max(grammarStateMigrationVersion, migrationVersion),
+    grammarProgressResetId: String(next.grammarProgressResetId || ""),
     enabled: subjectId === "spelling",
     done: normalisedDone,
     audioHeard: Array.isArray(next.audioHeard)
@@ -7692,15 +7710,26 @@ function applyOneTimeAccountProgressReset() {
   const completedResetIds = Array.isArray(spellingSubject.oneTimeAccountResetIds)
     ? spellingSubject.oneTimeAccountResetIds.map((value) => String(value || "")).filter(Boolean)
     : [];
-  if (completedResetIds.includes(oneTimeAccountProgressReset.id)) {
+  const grammar = normaliseGrammarState(spellingSubject.grammar, spellingSubject.id);
+  const grammarResetApplied = grammar.grammarProgressResetId === oneTimeAccountProgressReset.id;
+  const rewardResetApplied = RewardProperty.state.grammarProgressResetId === oneTimeAccountProgressReset.id;
+  if (grammarResetApplied && rewardResetApplied) {
     return false;
   }
 
-  // This one-off migration deliberately leaves spelling attempts and Horse 2 intact.
-  spellingSubject.grammar = createDefaultGrammarState(spellingSubject.id);
-  spellingSubject.oneTimeAccountResetIds = [...completedResetIds, oneTimeAccountProgressReset.id];
+  // The grammar-owned reset generation prevents stale local or remote progress from winning a later merge.
+  // Spelling attempts and their earned horses deliberately remain intact.
+  if (!grammarResetApplied) {
+    spellingSubject.grammar = {
+      ...createDefaultGrammarState(spellingSubject.id),
+      grammarProgressResetId: oneTimeAccountProgressReset.id
+    };
+  }
+  spellingSubject.oneTimeAccountResetIds = [
+    ...new Set([...completedResetIds, oneTimeAccountProgressReset.id])
+  ];
   RewardProperty.syncPracticeState(spellingSubject);
-  RewardProperty.reset();
+  RewardProperty.reset({ grammarProgressResetId: oneTimeAccountProgressReset.id });
   persistSubjects();
   return true;
 }
@@ -10401,6 +10430,7 @@ const RewardProperty = (function () {
       stage: 0,
       owned: 2,
       sessions: 0,
+      grammarProgressResetId: "",
       claimedRewardIds: [],
       lastClaimedRewardId: "",
       rewardProgressResetVersion: RP_REWARD_PROGRESS_RESET_VERSION,
@@ -10897,6 +10927,7 @@ const RewardProperty = (function () {
       ),
       owned: Math.max(2, Math.min(RP_TACK.length, Number(base.owned || 2) || 2)),
       sessions: savedSessions,
+      grammarProgressResetId: String(base.grammarProgressResetId || ""),
       claimedRewardIds,
       lastClaimedRewardId: claimedRewardIds.includes(String(base.lastClaimedRewardId || ""))
         ? String(base.lastClaimedRewardId || "")
@@ -11074,8 +11105,12 @@ const RewardProperty = (function () {
 
   function reset(options = {}) {
     const preservePracticeBaseline = options.preservePracticeBaseline !== false;
+    const grammarProgressResetId = options.grammarProgressResetId === undefined
+      ? String(S?.grammarProgressResetId || "")
+      : String(options.grammarProgressResetId || "");
     S = {
       ...defaultState(),
+      grammarProgressResetId,
       rewardProgressNeedsBaseline: preservePracticeBaseline
     };
     sel = null;

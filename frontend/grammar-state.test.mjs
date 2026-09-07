@@ -31,12 +31,32 @@ function extractFunctionSource(name) {
 }
 
 function loadGrammarStateHarness() {
+  const rewardState = { grammarProgressResetId: "" };
   const context = vm.createContext({
     GP_SESSIONS: Array.from({ length: 24 }, (_, index) => ({ n: index + 1 })),
     grammarResetVersion: 3,
     grammarCurrentSnapshotVersion: 1,
     grammarStateMigrationVersion: 1,
     grammarDebugStorageKey: "paperpanda-debug-grammar",
+    oneTimeAccountProgressReset: {
+      id: "2026-09-07-amy-grammar-restart",
+      email: "amyjwoolley@gmail.com"
+    },
+    state: {
+      currentUserEmail: "",
+      subjects: []
+    },
+    RewardProperty: {
+      state: rewardState,
+      syncPracticeState() {},
+      reset(options = {}) {
+        rewardState.grammarProgressResetId = String(options.grammarProgressResetId || "");
+      }
+    },
+    persistCount: 0,
+    persistSubjects() {
+      context.persistCount += 1;
+    },
     window: {
       localStorage: {
         getItem() {
@@ -52,6 +72,7 @@ function loadGrammarStateHarness() {
   });
 
   const functionNames = [
+    "normaliseAccountKey",
     "createDefaultGrammarState",
     "normaliseGrammarState",
     "mergeGrammarSkills",
@@ -60,6 +81,7 @@ function loadGrammarStateHarness() {
     "getLatestGrammarTimestamp",
     "getGrammarCompletionPriority",
     "compareGrammarCompletionPriority",
+    "compareGrammarProgressResetPriority",
     "isGrammarLocalStateCompatible",
     "chooseMergedGrammarCurrent",
     "mergeGrammarStates",
@@ -67,7 +89,8 @@ function loadGrammarStateHarness() {
     "getGrammarStateSummary",
     "isGrammarRecoveryCandidateBetter",
     "recoverResolvedSubjectsForGrammar",
-    "createCompletedRemoteGrammarState"
+    "createCompletedRemoteGrammarState",
+    "applyOneTimeAccountProgressReset"
   ];
 
   const source = functionNames.map(extractFunctionSource).join("\n\n");
@@ -117,6 +140,17 @@ test("createCompletedRemoteGrammarState keeps only completed grammar progress", 
   assert.equal(Object.keys(remoteState.skills).length, 0);
   assert.equal(remoteState.results.length, 1);
   assert.equal(remoteState.completedRevision, 5);
+});
+
+test("createCompletedRemoteGrammarState preserves the grammar reset generation", () => {
+  const harness = loadGrammarStateHarness();
+  const remoteState = harness.createCompletedRemoteGrammarState({
+    resetVersion: 3,
+    grammarProgressResetId: "2026-09-07-amy-grammar-restart",
+    done: 0
+  }, "spelling");
+
+  assert.equal(remoteState.grammarProgressResetId, "2026-09-07-amy-grammar-restart");
 });
 
 test("mergeGrammarStates keeps newer completed baseline and drops incompatible local current", () => {
@@ -170,6 +204,80 @@ test("mergeGrammarStates keeps compatible local current when completed baseline 
 
   assert.equal(merged.done, 3);
   assert.equal(merged.current?.n, 4);
+});
+
+test("mergeGrammarStates keeps a newer reset over stale completed progress", () => {
+  const harness = loadGrammarStateHarness();
+  const merged = harness.mergeGrammarStates({
+    resetVersion: 3,
+    grammarProgressResetId: "2026-09-07-amy-grammar-restart",
+    done: 0,
+    completedRevision: 0,
+    results: []
+  }, {
+    resetVersion: 3,
+    done: 14,
+    completedRevision: 14,
+    results: [
+      { n: 14, score: 5, total: 6, at: "2026-09-06T10:00:00.000Z", details: {} }
+    ]
+  }, "spelling");
+
+  assert.equal(merged.grammarProgressResetId, "2026-09-07-amy-grammar-restart");
+  assert.equal(merged.done, 0);
+  assert.equal(merged.results.length, 0);
+});
+
+test("mergeGrammarStates accepts new progress within the current reset generation", () => {
+  const harness = loadGrammarStateHarness();
+  const merged = harness.mergeGrammarStates({
+    resetVersion: 3,
+    grammarProgressResetId: "2026-09-07-amy-grammar-restart",
+    done: 3,
+    completedRevision: 3,
+    results: [
+      { n: 3, score: 5, total: 6, at: "2026-09-07T11:00:00.000Z", details: {} }
+    ]
+  }, {
+    resetVersion: 3,
+    grammarProgressResetId: "2026-09-07-amy-grammar-restart",
+    done: 0,
+    completedRevision: 0,
+    results: []
+  }, "spelling");
+
+  assert.equal(merged.done, 3);
+  assert.equal(merged.results.length, 1);
+});
+
+test("account reset replaces stale grammar even when the subject stamp already exists", () => {
+  const harness = loadGrammarStateHarness();
+  harness.state.currentUserEmail = "AMYJWOOLLEY@GMAIL.COM";
+  harness.state.subjects = [{
+    id: "spelling",
+    name: "Practice",
+    oneTimeAccountResetIds: ["2026-09-07-amy-grammar-restart"],
+    grammar: {
+      resetVersion: 3,
+      done: 14,
+      completedRevision: 14,
+      results: []
+    }
+  }];
+
+  assert.equal(harness.applyOneTimeAccountProgressReset(), true);
+  assert.equal(harness.state.subjects[0].grammar.done, 0);
+  assert.equal(
+    harness.state.subjects[0].grammar.grammarProgressResetId,
+    "2026-09-07-amy-grammar-restart"
+  );
+  assert.equal(harness.RewardProperty.state.grammarProgressResetId, "2026-09-07-amy-grammar-restart");
+  assert.equal(harness.persistCount, 1);
+
+  harness.state.subjects[0].grammar.done = 3;
+  assert.equal(harness.applyOneTimeAccountProgressReset(), false);
+  assert.equal(harness.state.subjects[0].grammar.done, 3);
+  assert.equal(harness.persistCount, 1);
 });
 
 test("recoverResolvedSubjectsForGrammar promotes stronger legacy grammar state once", () => {
