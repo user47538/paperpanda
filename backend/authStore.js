@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import pg from "pg";
+import { createDefaultLanguagesState, normalizeLanguagesState } from "./languages.js";
 
 const { Pool } = pg;
 const scrypt = promisify(scryptCallback);
@@ -34,6 +35,10 @@ function normalizeSubjects(subjects) {
 
 function normalizeAccountSettings(settings) {
   return settings && typeof settings === "object" && !Array.isArray(settings) ? settings : {};
+}
+
+function languagesFromUserRow(user) {
+  return normalizeLanguagesState(user?.languagesJson);
 }
 
 function createSessionToken() {
@@ -115,9 +120,10 @@ async function maybeMigrateLegacyJson(client) {
             password_salt,
             subjects_json,
             settings_json,
+            languages_json,
             created_at,
             updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10, $11)
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11, $12)
           ON CONFLICT (email) DO NOTHING
         `,
         [
@@ -130,6 +136,7 @@ async function maybeMigrateLegacyJson(client) {
           String(user?.passwordSalt || ""),
           JSON.stringify(normalizeSubjects(user?.subjects)),
           JSON.stringify(normalizeAccountSettings(user?.settings)),
+          JSON.stringify(normalizeLanguagesState(user?.languages)),
           user?.createdAt || new Date().toISOString(),
           user?.updatedAt || new Date().toISOString()
         ]
@@ -180,6 +187,7 @@ async function ensureDatabaseReady() {
             password_salt TEXT NOT NULL,
             subjects_json JSONB NOT NULL DEFAULT '[]'::jsonb,
             settings_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            languages_json JSONB NOT NULL DEFAULT '{}'::jsonb,
             created_at TIMESTAMPTZ NOT NULL,
             updated_at TIMESTAMPTZ NOT NULL
           )
@@ -187,6 +195,10 @@ async function ensureDatabaseReady() {
         await client.query(`
           ALTER TABLE ${usersTableName}
           ADD COLUMN IF NOT EXISTS settings_json JSONB NOT NULL DEFAULT '{}'::jsonb
+        `);
+        await client.query(`
+          ALTER TABLE ${usersTableName}
+          ADD COLUMN IF NOT EXISTS languages_json JSONB NOT NULL DEFAULT '{}'::jsonb
         `);
         await client.query(`
           CREATE TABLE IF NOT EXISTS ${sessionsTableName} (
@@ -226,6 +238,7 @@ async function getUserByEmail(client, email) {
         password_salt AS "passwordSalt",
         subjects_json AS "subjectsJson",
         settings_json AS "settingsJson",
+        languages_json AS "languagesJson",
         created_at AS "createdAt",
         updated_at AS "updatedAt"
       FROM ${usersTableName}
@@ -251,6 +264,7 @@ async function getUserById(client, userId) {
         password_salt AS "passwordSalt",
         subjects_json AS "subjectsJson",
         settings_json AS "settingsJson",
+        languages_json AS "languagesJson",
         created_at AS "createdAt",
         updated_at AS "updatedAt"
       FROM ${usersTableName}
@@ -288,7 +302,7 @@ export function getDataFilePath() {
   return databaseUrl ? "postgres" : "unconfigured";
 }
 
-export async function registerUser({ name, email, password, grade, subjects = [], settings = {} }) {
+export async function registerUser({ name, email, password, grade, subjects = [], settings = {}, languages = createDefaultLanguagesState() }) {
   await ensureDatabaseReady();
   const activePool = requirePool();
   const client = await activePool.connect();
@@ -326,9 +340,10 @@ export async function registerUser({ name, email, password, grade, subjects = []
           password_salt,
           subjects_json,
           settings_json,
+          languages_json,
           created_at,
           updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10, $11)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11, $12)
       `,
       [
         userId,
@@ -340,6 +355,7 @@ export async function registerUser({ name, email, password, grade, subjects = []
         salt,
         JSON.stringify(normalizeSubjects(subjects)),
         JSON.stringify(normalizeAccountSettings(settings)),
+        JSON.stringify(normalizeLanguagesState(languages)),
         now,
         now
       ]
@@ -353,7 +369,8 @@ export async function registerUser({ name, email, password, grade, subjects = []
       token,
       account: sanitizeAccount(user),
       subjects: subjectsFromUserRow(user),
-      settings: settingsFromUserRow(user)
+      settings: settingsFromUserRow(user),
+      languages: languagesFromUserRow(user)
     };
   } catch (error) {
     try {
@@ -396,7 +413,8 @@ export async function signInUser({ email, password }) {
       token,
       account: sanitizeAccount(refreshedUser),
       subjects: subjectsFromUserRow(refreshedUser),
-      settings: settingsFromUserRow(refreshedUser)
+      settings: settingsFromUserRow(refreshedUser),
+      languages: languagesFromUserRow(refreshedUser)
     };
   } catch (error) {
     try {
@@ -443,7 +461,8 @@ export async function getSessionAccount(token) {
       token: String(token || ""),
       account: sanitizeAccount(user),
       subjects: subjectsFromUserRow(user),
-      settings: settingsFromUserRow(user)
+      settings: settingsFromUserRow(user),
+      languages: languagesFromUserRow(user)
     };
   } finally {
     client.release();
@@ -642,6 +661,42 @@ export async function updateAccountSettings(token, settings) {
     );
 
     return normalizedSettings;
+  } finally {
+    client.release();
+  }
+}
+
+export async function updateAccountLanguages(token, languages) {
+  await ensureDatabaseReady();
+  const activePool = requirePool();
+  const client = await activePool.connect();
+
+  try {
+    const sessionResult = await client.query(
+      `SELECT user_id AS "userId" FROM ${sessionsTableName} WHERE token = $1 LIMIT 1`,
+      [String(token || "")]
+    );
+    const session = sessionResult.rows[0];
+    if (!session) {
+      const error = new Error("Session expired. Sign in again.");
+      error.status = 401;
+      throw error;
+    }
+
+    const user = await getUserById(client, session.userId);
+    if (!user) {
+      const error = new Error("Account could not be found.");
+      error.status = 404;
+      throw error;
+    }
+
+    const normalizedLanguages = normalizeLanguagesState(languages);
+    await client.query(
+      `UPDATE ${usersTableName} SET languages_json = $1::jsonb, updated_at = $2 WHERE id = $3`,
+      [JSON.stringify(normalizedLanguages), new Date().toISOString(), user.id]
+    );
+
+    return normalizedLanguages;
   } finally {
     client.release();
   }

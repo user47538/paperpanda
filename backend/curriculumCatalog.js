@@ -880,13 +880,32 @@ export const availableRevisionGrades = [
   { value: "12", label: "HSC / Year 12" }
 ];
 
+function languageEntryForGrade(grade) {
+  return createEntry({
+    grade,
+    subjectId: "languages",
+    subjectName: "Languages",
+    curriculumOverview: "French and Spanish learning follows the international CEFR pathway from A1 beginner communication through C2 precise, flexible language use. Each learner progresses separately in vocabulary, grammar, verbs, speaking, listening and viewing.",
+    skillsTested: [
+      "target-language vocabulary recall",
+      "grammar and verb conjugation",
+      "listening comprehension",
+      "spoken interaction and pronunciation",
+      "reading and audiovisual comprehension"
+    ],
+    topics: ["French", "Spanish", "vocabulary", "grammar", "verbs", "listening and speaking"],
+    resources: [],
+    revisionStyle: "cefr-language"
+  });
+}
+
 export const revisionCatalogueByGrade = {
-  "7": juniorEntriesForGrade("7"),
-  "8": juniorEntriesForGrade("8"),
-  "9": juniorEntriesForGrade("9"),
-  "10": juniorEntriesForGrade("10"),
-  "11": seniorEntriesForGrade("11"),
-  "12": seniorEntriesForGrade("12")
+  "7": [...juniorEntriesForGrade("7"), languageEntryForGrade("7")],
+  "8": [...juniorEntriesForGrade("8"), languageEntryForGrade("8")],
+  "9": [...juniorEntriesForGrade("9"), languageEntryForGrade("9")],
+  "10": [...juniorEntriesForGrade("10"), languageEntryForGrade("10")],
+  "11": [...seniorEntriesForGrade("11"), languageEntryForGrade("11")],
+  "12": [...seniorEntriesForGrade("12"), languageEntryForGrade("12")]
 };
 
 export function getRevisionCatalogueForGrade(grade) {

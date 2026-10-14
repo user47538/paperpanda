@@ -12,11 +12,20 @@ import {
   signInUser,
   signOutSession,
   updateAccount,
+  updateAccountLanguages,
   updateAccountPassword,
   updateAccountSettings,
   updateAccountSubjects
 } from "./authStore.js";
 import { availableRevisionGrades, getRevisionCatalogueForGrade, getRevisionEntry } from "./curriculumCatalog.js";
+import {
+  applyLanguageProgress,
+  applyPlacementResult,
+  LANGUAGE_IDS,
+  LANGUAGE_SECTION_IDS,
+  normalizeLanguagesState,
+  setLanguageTopics
+} from "./languages.js";
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
@@ -1393,13 +1402,13 @@ app.get("/health", (_request, response) => {
 
 app.post("/api/auth/register", async (request, response) => {
   try {
-    const { name, email, password, grade, subjects = [], settings = {} } = request.body || {};
+    const { name, email, password, grade, subjects = [], settings = {}, languages } = request.body || {};
     if (!name || !email || !password || !grade) {
       response.status(400).json({ error: "name, email, password, and grade are required." });
       return;
     }
 
-    const accountSession = await registerUser({ name, email, password, grade, subjects, settings });
+    const accountSession = await registerUser({ name, email, password, grade, subjects, settings, languages });
     response.status(201).json(accountSession);
   } catch (error) {
     response.status(error?.status || 500).json({
@@ -1809,6 +1818,250 @@ app.post("/api/speak", async (request, response) => {
     response.status(500).json({
       error: error instanceof Error ? error.message : "Speech generation failed."
     });
+  }
+});
+
+app.get("/api/languages", async (request, response) => {
+  try {
+    const session = await requireSession(request, response);
+    if (!session) return;
+    response.json({ languages: normalizeLanguagesState(session.languages) });
+  } catch (error) {
+    response.status(500).json({ error: error instanceof Error ? error.message : "Language profile lookup failed." });
+  }
+});
+
+app.post("/api/languages/active", async (request, response) => {
+  try {
+    const session = await requireSession(request, response);
+    if (!session) return;
+    const lang = String(request.body?.lang || "").trim().toLowerCase();
+    if (!LANGUAGE_IDS.includes(lang)) {
+      response.status(400).json({ error: "Choose French or Spanish." });
+      return;
+    }
+    const languages = normalizeLanguagesState(session.languages);
+    languages.active = lang;
+    response.json({ languages: await updateAccountLanguages(session.token, languages) });
+  } catch (error) {
+    response.status(error?.status || 500).json({ error: error instanceof Error ? error.message : "Language selection failed." });
+  }
+});
+
+app.post("/api/languages/placement", async (request, response) => {
+  try {
+    const session = await requireSession(request, response);
+    if (!session) return;
+    const lang = String(request.body?.lang || "").trim().toLowerCase();
+    const answers = Array.isArray(request.body?.answers) ? request.body.answers : [];
+    if (!LANGUAGE_IDS.includes(lang) || !answers.length) {
+      response.status(400).json({ error: "A supported language and placement answers are required." });
+      return;
+    }
+    const result = applyPlacementResult(session.languages, lang, answers);
+    const languages = await updateAccountLanguages(session.token, result.languages);
+    response.json({ languages, levels: result.levels, pandaAwarded: result.pandaAwarded });
+  } catch (error) {
+    response.status(error?.status || 500).json({ error: error instanceof Error ? error.message : "Language placement failed." });
+  }
+});
+
+app.post("/api/languages/progress", async (request, response) => {
+  try {
+    const session = await requireSession(request, response);
+    if (!session) return;
+    const lang = String(request.body?.lang || "").trim().toLowerCase();
+    const section = String(request.body?.section || "").trim().toLowerCase();
+    const lessonId = String(request.body?.lessonId || "").trim();
+    if (!LANGUAGE_IDS.includes(lang) || !LANGUAGE_SECTION_IDS.includes(section) || !lessonId) {
+      response.status(400).json({ error: "A supported language, section, and lesson ID are required." });
+      return;
+    }
+    const result = applyLanguageProgress(session.languages, {
+      lang,
+      section,
+      lessonId,
+      correct: request.body?.correct,
+      total: request.body?.total,
+      activityDate: request.body?.activityDate,
+      complete: request.body?.complete !== false
+    });
+    const profile = result.languages.profiles[lang];
+    const vocabWord = clipText(String(request.body?.vocabWord || "").trim(), 120);
+    const reviewWord = clipText(String(request.body?.reviewWord || "").trim(), 120);
+    const verbKey = clipText(String(request.body?.verbKey || "").trim(), 180);
+    const peppaId = clipText(String(request.body?.peppaId || "").trim(), 120);
+    if (vocabWord && !profile.vocab.thousandLearned.includes(vocabWord)) profile.vocab.thousandLearned.push(vocabWord);
+    if (reviewWord && !profile.vocab.review.includes(reviewWord)) profile.vocab.review.push(reviewWord);
+    if (verbKey) profile.verbsMastered[verbKey] = true;
+    if (peppaId && !profile.peppaWatched.includes(peppaId)) profile.peppaWatched.push(peppaId);
+    const languages = await updateAccountLanguages(session.token, result.languages);
+    response.json({ languages, alreadyCompleted: result.alreadyCompleted, levelledUp: result.levelledUp, pandaAwarded: result.pandaAwarded });
+  } catch (error) {
+    response.status(error?.status || 500).json({ error: error instanceof Error ? error.message : "Language progress update failed." });
+  }
+});
+
+app.post("/api/languages/vocab/topics", async (request, response) => {
+  try {
+    const session = await requireSession(request, response);
+    if (!session) return;
+    const lang = String(request.body?.lang || "").trim().toLowerCase();
+    if (!LANGUAGE_IDS.includes(lang)) {
+      response.status(400).json({ error: "Choose French or Spanish." });
+      return;
+    }
+    const languages = setLanguageTopics(session.languages, lang, request.body?.topics);
+    response.json({ languages: await updateAccountLanguages(session.token, languages) });
+  } catch (error) {
+    response.status(error?.status || 500).json({ error: error instanceof Error ? error.message : "Vocabulary topics could not be saved." });
+  }
+});
+
+app.post("/api/languages/placement-review", async (request, response) => {
+  try {
+    const session = await requireSession(request, response);
+    if (!session) {
+      return;
+    }
+    const language = String(request.body?.language || "").trim().toLowerCase();
+    const responses = Array.isArray(request.body?.responses) ? request.body.responses.slice(0, 20) : [];
+    if (!["french", "spanish"].includes(language) || responses.length !== 20) {
+      response.status(400).json({ error: "A French or Spanish placement test with 20 responses is required." });
+      return;
+    }
+    const cleanedResponses = responses.map((item) => ({
+      prompt: clipText(String(item?.prompt || ""), 300),
+      skill: clipText(String(item?.skill || ""), 40),
+      level: clipText(String(item?.level || ""), 12),
+      type: clipText(String(item?.type || ""), 30),
+      expectedAnswer: clipText(String(item?.answer || ""), 180),
+      response: clipText(String(item?.response || ""), 1200),
+      responseTimeMs: Math.max(0, Math.min(300_000, Number(item?.responseTimeMs || 0) || 0))
+    }));
+    const responsePayload = await callOpenAiJson("responses", {
+      model: "gpt-4o-mini",
+      input: [
+        {
+          role: "system",
+          content: [{
+            type: "input_text",
+            text: "You are a careful CEFR placement assessor for a 13-year-old Australian learner. Score a 20-question French or Spanish diagnostic. Mark choices against expectedAnswer. For writing and conversation, judge whether the learner communicates the requested meaning at the stated CEFR level; do not demand perfect accents, punctuation, or native-like phrasing. Speed is supporting evidence only and must never lower the placement. Return only the requested JSON. The highest defensible placement from this diagnostic is B2; strong B2 results should be described as needing a later C1 confirmation, not awarded C1 or C2."
+          }]
+        },
+        {
+          role: "user",
+          content: [{
+            type: "input_text",
+            text: JSON.stringify({
+              language,
+              responses: cleanedResponses,
+              outputSchema: {
+                result: {
+                  level: "A1 | A2 | B1 | B2",
+                  score: "integer 0-100",
+                  skills: {
+                    vocabulary: "integer 0-100",
+                    verbs: "integer 0-100",
+                    listening: "integer 0-100",
+                    writing: "integer 0-100",
+                    speed: "integer 0-100",
+                    conversation: "integer 0-100"
+                  },
+                  feedback: "2-4 concise, encouraging sentences in English"
+                }
+              }
+            })
+          }]
+        }
+      ],
+      text: { format: { type: "json_object" } },
+      max_output_tokens: 900
+    });
+    const parsed = extractResponseJson(responsePayload);
+    const result = parsed?.result || {};
+    const level = ["A1", "A2", "B1", "B2"].includes(String(result.level || "")) ? result.level : "A1";
+    const skills = Object.fromEntries(
+      ["vocabulary", "verbs", "listening", "writing", "speed", "conversation"].map((skill) => [
+        skill,
+        Math.max(0, Math.min(100, Number(result?.skills?.[skill] || 0) || 0))
+      ])
+    );
+    response.json({
+      result: {
+        level,
+        score: Math.max(0, Math.min(100, Number(result.score || 0) || 0)),
+        skills,
+        feedback: clipText(String(result.feedback || `You are ready to begin ${level} ${language}.`), 1200)
+      }
+    });
+  } catch (error) {
+    response.status(500).json({ error: error instanceof Error ? error.message : "Language placement assessment failed." });
+  }
+});
+
+app.post("/api/languages/tutor", async (request, response) => {
+  try {
+    const session = await requireSession(request, response);
+    if (!session) {
+      return;
+    }
+    const language = String(request.body?.language || "").trim().toLowerCase();
+    const level = ["A1", "A2", "B1", "B2", "C1", "C2"].includes(String(request.body?.level || "")) ? String(request.body.level) : "A1";
+    const history = Array.isArray(request.body?.history)
+      ? request.body.history.slice(-6).map((turn) => ({
+          role: turn?.role === "tutor" ? "tutor" : "learner",
+          text: clipText(String(turn?.text || ""), 1000)
+        })).filter((turn) => turn.text)
+      : [];
+    if (!["french", "spanish"].includes(language) || !history.length || history.at(-1)?.role !== "learner") {
+      response.status(400).json({ error: "A learner reply and a supported language are required." });
+      return;
+    }
+    const responseTimeMs = Math.max(0, Math.min(300_000, Number(request.body?.responseTimeMs || 0) || 0));
+    const mode = ["daily", "chat", "picture", "roleplay"].includes(String(request.body?.mode || "")) ? String(request.body.mode) : "chat";
+    const languageName = language === "french" ? "French" : "Spanish";
+    const responsePayload = await callOpenAiJson("responses", {
+      model: "gpt-4o-mini",
+      input: [
+        {
+          role: "system",
+          content: [{
+            type: "input_text",
+            text: `You are a warm ${languageName} voice tutor for a 13-year-old Australian learner at CEFR ${level}. The practice mode is ${mode}. Reply only in ${languageName}, play the natural conversational role, and keep the reply to 1-2 short, age-appropriate sentences. End with one clear question when continuing a conversation. Also provide an accurate English gloss of your reply and one concise English feedback sentence focused on one strength and at most one improvement. Do not penalise accent or minor spelling. Do not mention that you are AI. Return only JSON.`
+          }]
+        },
+        {
+          role: "user",
+          content: [{
+            type: "input_text",
+            text: JSON.stringify({
+              conversation: history,
+              responseTimeMs,
+              outputSchema: {
+                reply: `${languageName} tutor reply`,
+                gloss: "accurate English gloss of the tutor reply",
+                feedback: "brief English feedback",
+                conversationScore: "integer 0-100",
+                speedScore: "integer 0-100; supporting fluency signal only"
+              }
+            })
+          }]
+        }
+      ],
+      text: { format: { type: "json_object" } },
+      max_output_tokens: 500
+    });
+    const parsed = extractResponseJson(responsePayload);
+    response.json({
+      reply: clipText(String(parsed?.reply || ""), 800),
+      gloss: clipText(String(parsed?.gloss || ""), 800),
+      feedback: clipText(String(parsed?.feedback || "Keep going—try adding one more detail."), 320),
+      conversationScore: Math.max(0, Math.min(100, Number(parsed?.conversationScore || 0) || 0)),
+      speedScore: Math.max(0, Math.min(100, Number(parsed?.speedScore || 0) || 0))
+    });
+  } catch (error) {
+    response.status(500).json({ error: error instanceof Error ? error.message : "Language tutor failed." });
   }
 });
 

@@ -1,5 +1,6 @@
 import { GP_ACTIVITIES_PER_SESSION, GP_SESSIONS } from "./grammar-content.js";
 import { createGrammarProgram } from "./grammar-runtime.js";
+import { createDefaultLanguagesState, createLanguagesRuntime, LANGUAGE_LEVELS as LANGUAGE_CEFR_LEVELS } from "./languages-runtime.js";
 
 const accountsStorageKey = "studylift-accounts";
 const sessionStorageKey = "studylift-session";
@@ -457,6 +458,26 @@ const subjectSeed = [
       seededAssessment("3", "Historical and Critical", "Term 3 Week 2", "Term 3 Week 10", "15%"),
       seededAssessment("4", "Artmaking + VAPD", "Term 3 Week 2", "Term 4 Week 5", "35%")
     ]
+  },
+  {
+    id: "languages",
+    name: "Languages",
+    focus: "French and Spanish vocabulary, listening, writing, and real conversation",
+    summary: "Build a separate pathway for French and Spanish, with a tutor that listens and responds.",
+    practice: [
+      {
+        title: "French pathway",
+        tag: "CEFR",
+        description: "Choose French to complete a placement check and continue at the right level."
+      },
+      {
+        title: "Spanish pathway",
+        tag: "CEFR",
+        description: "Choose Spanish to complete a placement check and continue at the right level."
+      }
+    ],
+    documents: [],
+    assessments: []
   }
 ];
 
@@ -531,7 +552,8 @@ const subjectAliasMap = {
   pdhpe: ["PDHPE", "PDHPE/PE", "PE", "Personal Development Health and Physical Education"],
   wellbeing: ["Wellbeing", "Well Being"],
   "design-tech": ["Design & Technology", "Design and Technology", "Design Technology", "D&T", "Design Tech"],
-  art: ["Art", "Visual Arts"]
+  art: ["Art", "Visual Arts"],
+  languages: ["Languages", "Language", "French", "Spanish"]
 };
 
 const FOCUS_AREAS = [
@@ -543,6 +565,68 @@ const FOCUS_AREAS = [
   { id: "watch", icon: "▶", label: "Watch", blurb: "Class videos" },
   { id: "assessments", icon: "🎯", label: "Assessments", blurb: "Tests & due dates" }
 ];
+
+const LANGUAGE_STATE_VERSION = 1;
+const LANGUAGE_TRACKS = {
+  french: { label: "French", locale: "fr-FR", greeting: "Bonjour ! Je suis ton tuteur de français." },
+  spanish: { label: "Spanish", locale: "es-ES", greeting: "¡Hola! Soy tu tutor de español." }
+};
+const LANGUAGE_SKILLS = ["vocabulary", "verbs", "listening", "writing", "speed", "conversation"];
+const LANGUAGE_LEVEL_DESCRIPTORS = {
+  A1: "Introduce yourself, name familiar objects, and manage predictable exchanges.",
+  A2: "Handle daily routines, directions, shopping, and simple past or future plans.",
+  B1: "Describe experiences, explain opinions, and sustain familiar conversations.",
+  B2: "Discuss ideas, justify choices, and use a wider range of tenses confidently.",
+  C1: "Adapt language for audience, register, nuance, and more abstract topics.",
+  C2: "Use precise, flexible language in complex spontaneous and academic contexts."
+};
+const LANGUAGE_LEVEL_ORDER = Object.keys(LANGUAGE_LEVEL_DESCRIPTORS);
+
+function buildLanguagePlacementQuestions(languageId) {
+  const isFrench = languageId === "french";
+  const words = isFrench
+    ? { horse: "cheval", apple: "pomme", book: "livre", house: "maison", IAm: "je suis", have: "j'ai", go: "je vais", ate: "j'ai mangé" }
+    : { horse: "caballo", apple: "manzana", book: "libro", house: "casa", IAm: "soy", have: "tengo", go: "voy", ate: "comí" };
+  const language = isFrench ? "French" : "Spanish";
+  const objectOptions = isFrench
+    ? ["chat", "cheval", "chien", "poisson"]
+    : ["gato", "caballo", "perro", "pez"];
+  const appleOptions = isFrench
+    ? ["pomme", "porte", "table", "fleur"]
+    : ["manzana", "puerta", "mesa", "flor"];
+  const bookOptions = isFrench
+    ? ["livre", "stylo", "chaise", "sac"]
+    : ["libro", "bolígrafo", "silla", "bolsa"];
+  const houseOptions = isFrench
+    ? ["maison", "école", "voiture", "ville"]
+    : ["casa", "escuela", "coche", "ciudad"];
+  const helloAudio = isFrench ? "Bonjour, comment ça va aujourd'hui ?" : "Hola, ¿cómo estás hoy?";
+  const horseAudio = isFrench ? "J'aime les chevaux parce qu'ils sont intelligents." : "Me gustan los caballos porque son inteligentes.";
+  const tomorrowAudio = isFrench ? "Demain, je vais à l'école en bus." : "Mañana voy a la escuela en autobús.";
+  const opinionAudio = isFrench ? "À mon avis, apprendre une langue demande de la patience." : "En mi opinión, aprender un idioma requiere paciencia.";
+  return [
+    { id: "object-horse", skill: "vocabulary", level: "A1", type: "choice", prompt: "What is this object called? 🐴", options: objectOptions, answer: words.horse },
+    { id: "object-apple", skill: "vocabulary", level: "A1", type: "choice", prompt: "What is this object called? 🍎", options: appleOptions, answer: words.apple },
+    { id: "object-book", skill: "vocabulary", level: "A1", type: "choice", prompt: "What is this object called? 📚", options: bookOptions, answer: words.book },
+    { id: "object-house", skill: "vocabulary", level: "A1", type: "choice", prompt: "What is this object called? 🏠", options: houseOptions, answer: words.house },
+    { id: "verb-be", skill: "verbs", level: "A1", type: "choice", prompt: `Choose the best form: “I ___ a student.”`, options: isFrench ? ["je suis", "tu es", "nous sommes", "ils sont"] : ["soy", "eres", "somos", "son"], answer: words.IAm },
+    { id: "verb-have", skill: "verbs", level: "A1", type: "choice", prompt: "Choose the best form: “I have a book.”", options: isFrench ? ["j'ai", "tu as", "il a", "nous avons"] : ["tengo", "tienes", "tiene", "tenemos"], answer: words.have },
+    { id: "verb-go", skill: "verbs", level: "A2", type: "choice", prompt: "Choose the best form: “Tomorrow I am going to school.”", options: isFrench ? ["je vais", "j'allais", "je suis allé", "j'irai"] : ["voy", "iba", "fui", "iré"], answer: words.go },
+    { id: "verb-past", skill: "verbs", level: "A2", type: "choice", prompt: "Choose the best form: “Yesterday I ate.”", options: isFrench ? ["je mange", "j'ai mangé", "je mangerai", "je mangeais"] : ["como", "comí", "comeré", "comía"], answer: words.ate },
+    { id: "listen-greeting", skill: "listening", level: "A1", type: "listening", prompt: "Listen, then choose the meaning.", audio: helloAudio, options: ["Hello, how are you today?", "Where is the school?", "I like apples.", "Goodnight, see you tomorrow."], answer: "Hello, how are you today?" },
+    { id: "listen-horse", skill: "listening", level: "A1", type: "listening", prompt: "Listen, then choose the meaning.", audio: horseAudio, options: ["I like horses because they are intelligent.", "I have a horse today.", "The horse is at school.", "I ride every morning."], answer: "I like horses because they are intelligent." },
+    { id: "listen-tomorrow", skill: "listening", level: "A2", type: "listening", prompt: "Listen, then choose the key detail.", audio: tomorrowAudio, options: ["They go to school by bus tomorrow.", "They went to school yesterday.", "They walk home today.", "They have no school tomorrow."], answer: "They go to school by bus tomorrow." },
+    { id: "listen-opinion", skill: "listening", level: "B1", type: "listening", prompt: "Listen, then choose the main idea.", audio: opinionAudio, options: ["Learning a language needs patience.", "Languages are not useful.", "The speaker is travelling tomorrow.", "The speaker wants a book."], answer: "Learning a language needs patience." },
+    { id: "write-intro", skill: "writing", level: "A1", type: "text", prompt: `Write a short ${language} introduction: your name and one thing you like.` },
+    { id: "write-routine", skill: "writing", level: "A2", type: "text", prompt: `Write 2–3 ${language} sentences about your normal day.` },
+    { id: "write-opinion", skill: "writing", level: "B1", type: "text", prompt: `In ${language}, give your opinion about learning languages and one reason why.` },
+    { id: "speed-greeting", skill: "speed", level: "A1", type: "speed", prompt: `Reply naturally in ${language}: “Hello! How are you?”` },
+    { id: "speed-plan", skill: "speed", level: "A2", type: "speed", prompt: `Reply naturally in ${language}: “What are you doing this weekend?”` },
+    { id: "conversation-meet", skill: "conversation", level: "A1", type: "conversation", prompt: `You have just met a new student. In ${language}, greet them and ask their name.` },
+    { id: "conversation-help", skill: "conversation", level: "A2", type: "conversation", prompt: `In ${language}, ask for help finding the library and respond politely to an answer.` },
+    { id: "conversation-opinion", skill: "conversation", level: "B1", type: "conversation", prompt: `In ${language}, give an opinion about a hobby and ask the other person what they think.` }
+  ];
+}
 
 const WRITING_STUDIO_SECTION_COUNT = 6;
 const WRITING_STUDIO_TAB_LABEL = "Writing Studio";
@@ -1595,6 +1679,7 @@ const state = {
     headingColor: "#111111",
     subjectIcons: { ...defaultSubjectIconMap }
   },
+  languages: createDefaultLanguagesState(),
   subjects: createBaseSubjects()
 };
 const currentSpellingSessionKey = createId();
@@ -1625,6 +1710,8 @@ const elements = {
   navCalendarButton: document.getElementById("nav-calendar-button"),
   navSettingsButton: document.getElementById("nav-settings-button"),
   homeView: document.getElementById("home-view"),
+  languagesView: document.getElementById("languages-view"),
+  langRoot: document.getElementById("lang-root"),
   focusHomeNextCard: document.getElementById("focus-home-next-card"),
   focusHomeSubjectHeading: document.getElementById("focus-home-subject-heading"),
   focusHomeSubjectSummary: document.getElementById("focus-home-subject-summary"),
@@ -1839,6 +1926,20 @@ const elements = {
   closeRevisionViewButton: document.getElementById("close-revision-view-button")
 };
 
+const languagesRuntime = createLanguagesRuntime({
+  root: elements.langRoot,
+  apiGet: (path) => requestApiGet(path, { headers: buildAuthHeaders() }),
+  apiPost: (path, body) => requestApi(path, body, false, { headers: buildAuthHeaders(), timeoutMs: 45_000 }),
+  getStudentName: () => state.studentName,
+  onExit: () => {
+    state.currentView = "home";
+    render();
+  },
+  onStateChange: (nextLanguages) => {
+    state.languages = nextLanguages;
+  }
+});
+
 function normaliseAccountKey(value) {
   return String(value || "").trim().toLowerCase();
 }
@@ -1899,7 +2000,8 @@ function createBaseSubjects() {
     savedRevisionTests: [],
     grammar: createDefaultGrammarState(subject.id),
     spelling: createDefaultSpellingState(subject.id, subject.name),
-    writing: createDefaultWritingState(subject.id)
+    writing: createDefaultWritingState(subject.id),
+    language: subject.id === "languages" ? createDefaultLanguageState() : null
   }));
 }
 
@@ -1914,7 +2016,8 @@ function createInitialSubjectsForAccount(account) {
     savedRevisionTests: [],
     grammar: createDefaultGrammarState(subject.id),
     spelling: createDefaultSpellingState(subject.id, subject.name),
-    writing: createDefaultWritingState(subject.id)
+    writing: createDefaultWritingState(subject.id),
+    language: subject.id === "languages" ? createDefaultLanguageState() : null
   }));
 }
 
@@ -2216,6 +2319,14 @@ function selectSubjectForSubjectsView(subjectId, { returnToHome = false } = {}) 
   state.documentsExpanded = false;
   state.taskAskResponse = "";
   state.taskAskStatus = "";
+  if (subject.id === "languages" && !returnToHome) {
+    state.currentView = "languages";
+    languagesRuntime.setData(state.languages);
+    languagesRuntime.open();
+    render();
+    void languagesRuntime.load();
+    return;
+  }
   state.currentView = returnToHome ? "home" : "subjects";
   render();
 }
@@ -3907,6 +4018,329 @@ window.__paperpandaOpenStandaloneAsk = function __paperpandaOpenStandaloneAsk({
   return true;
 };
 
+function getLanguagePlacementProgress(track) {
+  const answered = Object.values(track.placement.responses).filter((entry) => String(entry?.value || "").trim()).length;
+  return Math.min(20, answered);
+}
+
+function getLanguageSkillLabel(skill) {
+  return {
+    vocabulary: "Object words",
+    verbs: "Verb conjugation",
+    listening: "Listening",
+    writing: "Writing",
+    speed: "Quick response",
+    conversation: "Conversation"
+  }[skill] || skill;
+}
+
+function recordLanguagePlacementResponse(track, question, value) {
+  const existing = track.placement.responses[question.id] || {};
+  track.placement.responses[question.id] = {
+    value: String(value || "").trim().slice(0, 1200),
+    responseTimeMs: existing.responseTimeMs || Math.max(0, Date.now() - (new Date(track.placement.presentedAt || Date.now()).getTime() || Date.now()))
+  };
+  track.placement.status = "in-progress";
+}
+
+function getLocalLanguagePlacementResult(languageId, track) {
+  const questions = buildLanguagePlacementQuestions(languageId);
+  const totals = Object.fromEntries(LANGUAGE_SKILLS.map((skill) => [skill, { right: 0, total: 0 }]));
+  questions.forEach((question) => {
+    const response = track.placement.responses[question.id];
+    totals[question.skill].total += 1;
+    if (question.answer && String(response?.value || "").trim().toLowerCase() === String(question.answer).toLowerCase()) {
+      totals[question.skill].right += 1;
+    } else if (!question.answer && String(response?.value || "").trim().length >= 8) {
+      totals[question.skill].right += 0.65;
+    }
+  });
+  const score = Math.round((Object.values(totals).reduce((sum, entry) => sum + entry.right, 0) / questions.length) * 100);
+  const level = score >= 86 ? "B2" : score >= 70 ? "B1" : score >= 48 ? "A2" : "A1";
+  return {
+    level,
+    score,
+    skills: Object.fromEntries(Object.entries(totals).map(([skill, entry]) => [skill, Math.round((entry.right / entry.total) * 100)])),
+    feedback: `Your starting point is ${level}. This will keep changing as your listening, writing, and conversation become stronger.`
+  };
+}
+
+async function completeLanguagePlacement(subject) {
+  const language = getSubjectLanguageState(subject);
+  const languageId = language.activeLanguage;
+  const track = language.tracks[languageId];
+  const questions = buildLanguagePlacementQuestions(languageId);
+  const unanswered = questions.find((question) => !String(track.placement.responses[question.id]?.value || "").trim());
+  if (unanswered) {
+    track.placement.currentQuestion = questions.indexOf(unanswered);
+    track.placement.presentedAt = new Date().toISOString();
+    render();
+    return;
+  }
+  track.placement.status = "submitting";
+  render();
+  const responses = questions.map((question) => ({
+    id: question.id,
+    prompt: question.prompt,
+    skill: question.skill,
+    level: question.level,
+    type: question.type,
+    answer: question.answer || "",
+    response: track.placement.responses[question.id]?.value || "",
+    responseTimeMs: track.placement.responses[question.id]?.responseTimeMs || 0
+  }));
+  let result;
+  try {
+    const payload = await requestApi("/api/languages/placement", { language: languageId, responses }, false, { headers: buildAuthHeaders(), timeoutMs: 45_000 });
+    result = payload?.result;
+  } catch (error) {
+    console.error("Language placement AI marking failed; using the local result.", error);
+    result = getLocalLanguagePlacementResult(languageId, track);
+    result.feedback = `${result.feedback} The detailed AI review could not be reached, so this initial result is based on the automatically marked questions.`;
+  }
+  const normalised = normaliseLanguageTrack({ placement: { ...track.placement, result }, course: track.course, tutor: track.tutor });
+  track.placement = { ...normalised.placement, status: "complete", result: { ...normalised.placement.result, completedAt: new Date().toISOString() } };
+  track.course.currentLevel = track.placement.result.level;
+  track.course.skillScores = { ...track.course.skillScores, ...track.placement.result.skills };
+  track.course.updatedAt = new Date().toISOString();
+  persistSubjects();
+  render();
+}
+
+function playLanguagePrompt(languageId, text, context) {
+  void speakTextWithOpenAi(text, {
+    context,
+    statusMessages: { preparing: "Preparing tutor audio...", playing: "Tutor is speaking...", error: "Tutor audio failed." }
+  }).catch((error) => console.error("Language audio failed.", error));
+}
+
+function startLanguageMicrophone(subject) {
+  const language = getSubjectLanguageState(subject);
+  const languageId = language.activeLanguage;
+  const track = language.tracks[languageId];
+  const SpeechRecognitionConstructor = getSpeechRecognitionConstructor();
+  if (!SpeechRecognitionConstructor) {
+    track.tutor.status = "Voice input is not available in this browser. You can type your reply instead.";
+    render();
+    return;
+  }
+  stopAskMicrophone({ preserveStatus: true });
+  const recognition = new SpeechRecognitionConstructor();
+  currentSpeechRecognition = recognition;
+  recognition.lang = LANGUAGE_TRACKS[languageId].locale;
+  recognition.interimResults = true;
+  recognition.continuous = false;
+  track.tutor.status = "Listening…";
+  track.tutor.responseStartedAt = Date.now();
+  render();
+  recognition.onresult = (event) => {
+    const transcript = Array.from(event.results || []).map((result) => result[0]?.transcript || "").join(" ").trim();
+    track.tutor.draft = transcript;
+    if (event.results?.[event.results.length - 1]?.isFinal && transcript) {
+      currentSpeechRecognition = null;
+      void submitLanguageTutorTurn(subject, { responseTimeMs: Date.now() - Number(track.tutor.responseStartedAt || Date.now()) });
+    }
+  };
+  recognition.onerror = (event) => {
+    currentSpeechRecognition = null;
+    track.tutor.status = event?.error === "not-allowed" ? "Microphone permission was denied. You can type your reply instead." : "Voice input did not work. You can type your reply instead.";
+    render();
+  };
+  recognition.onend = () => {
+    if (currentSpeechRecognition === recognition) {
+      currentSpeechRecognition = null;
+    }
+  };
+  recognition.start();
+}
+
+async function submitLanguageTutorTurn(subject, { responseTimeMs = 0 } = {}) {
+  const language = getSubjectLanguageState(subject);
+  const languageId = language.activeLanguage;
+  const track = language.tracks[languageId];
+  const learnerText = String(track.tutor.draft || "").trim();
+  if (!learnerText) {
+    track.tutor.status = "Say or type a reply first.";
+    render();
+    return;
+  }
+  const learnerTurn = { role: "learner", text: learnerText, at: new Date().toISOString() };
+  track.tutor.turns.push(learnerTurn);
+  track.tutor.draft = "";
+  track.tutor.status = "Your tutor is thinking…";
+  render();
+  try {
+    const payload = await requestApi("/api/languages/tutor", {
+      language: languageId,
+      level: track.course.currentLevel,
+      history: track.tutor.turns.slice(-6),
+      responseTimeMs
+    }, false, { headers: buildAuthHeaders(), timeoutMs: 45_000 });
+    const reply = String(payload?.reply || "").trim();
+    if (!reply) {
+      throw new Error("The tutor did not return a reply.");
+    }
+    track.tutor.turns.push({ role: "tutor", text: reply, at: new Date().toISOString() });
+    track.tutor.turns = track.tutor.turns.slice(-16);
+    track.tutor.status = String(payload?.feedback || "").trim() || "Nice work—keep the conversation going.";
+    track.course.skillScores.conversation = Math.min(100, Math.max(track.course.skillScores.conversation, Number(payload?.conversationScore || 0)));
+    track.course.skillScores.speed = Math.min(100, Math.max(track.course.skillScores.speed, Number(payload?.speedScore || 0)));
+    track.course.updatedAt = new Date().toISOString();
+    persistSubjects();
+    render();
+    playLanguagePrompt(languageId, reply, `language-tutor:${languageId}`);
+  } catch (error) {
+    track.tutor.status = error instanceof Error ? error.message : "The tutor could not respond. Try again shortly.";
+    persistSubjects();
+    render();
+  }
+}
+
+function renderLanguageSubjectLanding(host, subject) {
+  const language = getSubjectLanguageState(subject);
+  const languageId = language.activeLanguage;
+  const track = language.tracks[languageId];
+  const languageMeta = LANGUAGE_TRACKS[languageId];
+  const questions = buildLanguagePlacementQuestions(languageId);
+  const placementComplete = track.placement.status === "complete" && track.placement.result;
+  if (!placementComplete) {
+    if (!track.placement.presentedAt) {
+      track.placement.presentedAt = new Date().toISOString();
+    }
+    const questionIndex = Math.max(0, Math.min(questions.length - 1, track.placement.currentQuestion));
+    const question = questions[questionIndex];
+    const answer = track.placement.responses[question.id]?.value || "";
+    const progress = getLanguagePlacementProgress(track);
+    host.innerHTML = `
+      <section class="language-hub">
+        <header class="language-hub__hero">
+          <div><p class="eyebrow">Languages</p><h1>Find your ${escapeHtml(languageMeta.label)} starting point</h1><p>20 short questions across words, verbs, listening, writing, quick replies, and conversation.</p></div>
+          <div class="language-toggle" role="group" aria-label="Choose a language">
+            ${Object.entries(LANGUAGE_TRACKS).map(([id, item]) => `<button type="button" data-language-toggle="${id}" class="${id === languageId ? "is-active" : ""}">${escapeHtml(item.label)}</button>`).join("")}
+          </div>
+        </header>
+        <section class="language-placement-card">
+          <div class="language-placement-card__meta"><span>Placement check</span><strong>${questionIndex + 1} / ${questions.length}</strong></div>
+          <div class="language-progress"><span style="width:${Math.round((progress / questions.length) * 100)}%"></span></div>
+          <p class="language-skill-pill">${escapeHtml(getLanguageSkillLabel(question.skill))} · ${escapeHtml(question.level)}</p>
+          <h2>${escapeHtml(question.prompt)}</h2>
+          ${question.audio ? `<button type="button" class="language-audio-button" data-language-play="${question.id}">▶ Listen to the AI voice</button>` : ""}
+          ${question.type === "choice" || question.type === "listening"
+            ? `<div class="language-options">${question.options.map((option) => `<button type="button" data-language-answer="${escapeHtml(option)}" class="${answer === option ? "is-selected" : ""}">${escapeHtml(option)}</button>`).join("")}</div>`
+            : `<textarea class="language-response-input" data-language-response rows="4" placeholder="Write or say your answer in ${escapeHtml(languageMeta.label)}…">${escapeHtml(answer)}</textarea>`}
+          <div class="language-placement-card__actions">
+            <button type="button" class="ghost-button" data-language-placement-back ${questionIndex === 0 ? "disabled" : ""}>Back</button>
+            <span>${track.placement.status === "submitting" ? "Reviewing your responses…" : "Your answers are saved as you go."}</span>
+            <button type="button" class="primary-button" data-language-placement-next ${track.placement.status === "submitting" ? "disabled" : ""}>${questionIndex === questions.length - 1 ? "See my level" : "Next"}</button>
+          </div>
+        </section>
+      </section>`;
+    host.querySelectorAll("[data-language-toggle]").forEach((button) => button.addEventListener("click", () => {
+      language.activeLanguage = button.dataset.languageToggle;
+      persistSubjects();
+      render();
+    }));
+    host.querySelector("[data-language-play]")?.addEventListener("click", () => playLanguagePrompt(languageId, question.audio, `language-placement:${languageId}:${question.id}`));
+    host.querySelectorAll("[data-language-answer]").forEach((button) => button.addEventListener("click", () => {
+      recordLanguagePlacementResponse(track, question, button.dataset.languageAnswer);
+      persistSubjects();
+      render();
+    }));
+    host.querySelector("[data-language-response]")?.addEventListener("input", (event) => {
+      recordLanguagePlacementResponse(track, question, event.target.value);
+      persistSubjects();
+    });
+    host.querySelector("[data-language-placement-back]")?.addEventListener("click", () => {
+      track.placement.currentQuestion = Math.max(0, questionIndex - 1);
+      track.placement.presentedAt = new Date().toISOString();
+      persistSubjects();
+      render();
+    });
+    host.querySelector("[data-language-placement-next]")?.addEventListener("click", () => {
+      const typed = host.querySelector("[data-language-response]")?.value;
+      if (typed !== undefined) {
+        recordLanguagePlacementResponse(track, question, typed);
+      }
+      if (!String(track.placement.responses[question.id]?.value || "").trim()) {
+        return;
+      }
+      if (questionIndex === questions.length - 1) {
+        void completeLanguagePlacement(subject);
+        return;
+      }
+      track.placement.currentQuestion = questionIndex + 1;
+      track.placement.presentedAt = new Date().toISOString();
+      persistSubjects();
+      render();
+    });
+    return;
+  }
+  const result = track.placement.result;
+  host.innerHTML = `
+    <section class="language-hub">
+      <header class="language-hub__hero">
+        <div><p class="eyebrow">Languages · ${escapeHtml(languageMeta.label)}</p><h1>${escapeHtml(result.level)} pathway</h1><p>${escapeHtml(result.feedback)}</p></div>
+        <div class="language-toggle" role="group" aria-label="Choose a language">${Object.entries(LANGUAGE_TRACKS).map(([id, item]) => `<button type="button" data-language-toggle="${id}" class="${id === languageId ? "is-active" : ""}">${escapeHtml(item.label)}</button>`).join("")}</div>
+      </header>
+      <section class="language-dashboard-grid">
+        <article class="language-level-card"><span>Current level</span><strong>${escapeHtml(track.course.currentLevel)}</strong><p>${escapeHtml(languageMeta.label)} placement score: ${Math.round(result.score)}%</p><button type="button" class="ghost-button" data-language-retest>Retake placement</button></article>
+        <article class="language-skill-card"><h2>Your skills</h2>${LANGUAGE_SKILLS.map((skill) => `<div class="language-skill-row"><span>${escapeHtml(getLanguageSkillLabel(skill))}</span><div><i style="width:${Math.max(4, Number(track.course.skillScores[skill] || 0))}%"></i></div><b>${Math.round(track.course.skillScores[skill] || 0)}%</b></div>`).join("")}</article>
+      </section>
+      <section class="language-cefr-route"><p class="eyebrow">CEFR route</p>${LANGUAGE_LEVEL_ORDER.map((level) => `<article class="${level === track.course.currentLevel ? "is-current" : track.course.completedLevels.includes(level) ? "is-complete" : ""}"><strong>${level}</strong><span>${escapeHtml(LANGUAGE_LEVEL_DESCRIPTORS[level])}</span></article>`).join("")}</section>
+      <section class="language-practice-grid">
+        ${[
+          ["vocabulary", "Object lab", "Name familiar objects, then recall them later."],
+          ["verbs", "Verb coach", "Use verb forms in complete, meaningful sentences."],
+          ["listening", "Listening studio", "Hear a tutor prompt at natural speed and replay it."],
+          ["writing", "Writing workshop", "Build a message, then revise it with feedback."],
+          ["speed", "Quick response", "Practise replying without overthinking."],
+          ["conversation", "Tutor conversation", "Talk through a real-life scenario with the AI tutor."]
+        ].map(([skill, title, copy]) => `<article class="language-practice-card"><p>${escapeHtml(getLanguageSkillLabel(skill))}</p><h2>${escapeHtml(title)}</h2><span>${escapeHtml(copy)}</span><button type="button" class="ghost-button" data-language-practice="${skill}">Mark practice complete</button></article>`).join("")}
+      </section>
+      <section class="language-tutor-card">
+        <div><p class="eyebrow">AI voice tutor</p><h2>Have a real ${escapeHtml(languageMeta.label)} conversation</h2><p>The tutor speaks aloud, listens to your answer, and gives short, useful feedback. You can always type instead.</p></div>
+        <div class="language-tutor-card__transcript">${track.tutor.turns.length ? track.tutor.turns.map((turn) => `<p class="language-turn language-turn--${turn.role}"><strong>${turn.role === "tutor" ? "Tutor" : "You"}</strong>${escapeHtml(turn.text)}</p>`).join("") : `<p class="language-tutor-card__starter">${escapeHtml(languageMeta.greeting)} ${escapeHtml(languageId === "french" ? "Présente-toi et dis-moi ce que tu aimes faire." : "Preséntate y dime qué te gusta hacer.")}</p>`}</div>
+        <textarea class="language-response-input" data-language-tutor-draft rows="3" placeholder="Type your ${escapeHtml(languageMeta.label)} reply…">${escapeHtml(track.tutor.draft)}</textarea>
+        <div class="language-tutor-card__actions"><button type="button" class="ghost-button" data-language-tutor-mic>🎙 Speak</button><button type="button" class="primary-button" data-language-tutor-send>Send reply</button><span>${escapeHtml(track.tutor.status)}</span></div>
+      </section>
+    </section>`;
+  host.querySelectorAll("[data-language-toggle]").forEach((button) => button.addEventListener("click", () => {
+    language.activeLanguage = button.dataset.languageToggle;
+    persistSubjects();
+    render();
+  }));
+  host.querySelector("[data-language-retest]")?.addEventListener("click", () => {
+    if (!window.confirm(`Retake the ${languageMeta.label} placement test? Your current course progress will stay saved.`)) return;
+    track.placement = createDefaultLanguageTrack().placement;
+    persistSubjects();
+    render();
+  });
+  host.querySelectorAll("[data-language-practice]").forEach((button) => button.addEventListener("click", () => {
+    const skill = button.dataset.languagePractice;
+    const activityId = `${track.course.currentLevel}:${skill}`;
+    track.course.completedActivities = [...new Set([...track.course.completedActivities, activityId])];
+    track.course.skillScores[skill] = Math.min(100, Math.max(10, Number(track.course.skillScores[skill] || 0)) + 8);
+    const completedCurrentLevelSkills = LANGUAGE_SKILLS.filter((candidateSkill) => track.course.completedActivities.includes(`${track.course.currentLevel}:${candidateSkill}`));
+    if (completedCurrentLevelSkills.length === LANGUAGE_SKILLS.length) {
+      const currentIndex = LANGUAGE_LEVEL_ORDER.indexOf(track.course.currentLevel);
+      const nextLevel = LANGUAGE_LEVEL_ORDER[currentIndex + 1];
+      if (nextLevel) {
+        track.course.completedLevels = [...new Set([...track.course.completedLevels, track.course.currentLevel])];
+        track.course.currentLevel = nextLevel;
+        track.tutor.status = `All six ${LANGUAGE_LEVEL_ORDER[currentIndex]} skill stages are complete. ${nextLevel} is now ready.`;
+      } else {
+        track.tutor.status = "All C2 skill stages are complete. Keep returning for advanced conversation practice.";
+      }
+    }
+    track.course.updatedAt = new Date().toISOString();
+    persistSubjects();
+    render();
+  }));
+  host.querySelector("[data-language-tutor-draft]")?.addEventListener("input", (event) => { track.tutor.draft = event.target.value; });
+  host.querySelector("[data-language-tutor-mic]")?.addEventListener("click", () => startLanguageMicrophone(subject));
+  host.querySelector("[data-language-tutor-send]")?.addEventListener("click", () => void submitLanguageTutorTurn(subject));
+}
+
 function renderSubjectLanding() {
   const host = elements.subjectLandingView;
   const workspaceMain = elements.subjectsWorkspaceMain;
@@ -3927,6 +4361,11 @@ function renderSubjectLanding() {
   host.classList.toggle("hidden", !showLanding);
   if (!showLanding || !subject) {
     host.innerHTML = "";
+    return;
+  }
+
+  if (subject.id === "languages") {
+    renderLanguageSubjectLanding(host, subject);
     return;
   }
 
@@ -6550,6 +6989,7 @@ function hydrateStoredSubject(subject, index) {
     grammar: normaliseGrammarState(subject.grammar, resolvedSubjectId),
     spelling: normaliseSpellingState(subject.spelling, resolvedSubjectId, subject.name),
     writing: normaliseWritingState(subject.writing, resolvedSubjectId),
+    language: resolvedSubjectId === "languages" ? normaliseLanguageState(subject.language) : null,
     practice: Array.isArray(subject.practice)
       ? subject.practice
       : structuredClone(subjectSeedEntry?.practice || [])
@@ -7039,6 +7479,50 @@ function recoverResolvedSubjectsForGrammar(subjects = []) {
   return subjects;
 }
 
+function mergeLanguageTracks(primaryTrack, secondaryTrack) {
+  const primary = normaliseLanguageTrack(primaryTrack);
+  const secondary = normaliseLanguageTrack(secondaryTrack);
+  const primaryPlacement = primary.placement.result;
+  const secondaryPlacement = secondary.placement.result;
+  const placement = primaryPlacement && (!secondaryPlacement || Number(primaryPlacement.score || 0) >= Number(secondaryPlacement.score || 0))
+    ? primary.placement
+    : secondaryPlacement
+      ? secondary.placement
+      : Object.keys(primary.placement.responses).length >= Object.keys(secondary.placement.responses).length
+        ? primary.placement
+        : secondary.placement;
+  const recentTurns = [...secondary.tutor.turns, ...primary.tutor.turns]
+    .sort((left, right) => new Date(left.at || 0).getTime() - new Date(right.at || 0).getTime())
+    .filter((turn, index, array) => index === 0 || `${turn.role}:${turn.text}:${turn.at}` !== `${array[index - 1].role}:${array[index - 1].text}:${array[index - 1].at}`)
+    .slice(-16);
+  const newerCourse = new Date(primary.course.updatedAt || 0).getTime() >= new Date(secondary.course.updatedAt || 0).getTime()
+    ? primary.course
+    : secondary.course;
+  return normaliseLanguageTrack({
+    placement,
+    course: {
+      ...newerCourse,
+      completedActivities: [...new Set([...primary.course.completedActivities, ...secondary.course.completedActivities])],
+      completedLevels: [...new Set([...primary.course.completedLevels, ...secondary.course.completedLevels])],
+      skillScores: Object.fromEntries(LANGUAGE_SKILLS.map((skill) => [skill, Math.max(primary.course.skillScores[skill] || 0, secondary.course.skillScores[skill] || 0)]))
+    },
+    tutor: { ...newerCourse.tutor, turns: recentTurns, draft: primary.tutor.draft || secondary.tutor.draft, status: primary.tutor.status || secondary.tutor.status }
+  });
+}
+
+function mergeLanguageStates(primaryLanguage, secondaryLanguage) {
+  const primary = normaliseLanguageState(primaryLanguage);
+  const secondary = normaliseLanguageState(secondaryLanguage);
+  return {
+    version: LANGUAGE_STATE_VERSION,
+    activeLanguage: primary.activeLanguage || secondary.activeLanguage,
+    tracks: {
+      french: mergeLanguageTracks(primary.tracks.french, secondary.tracks.french),
+      spanish: mergeLanguageTracks(primary.tracks.spanish, secondary.tracks.spanish)
+    }
+  };
+}
+
 function mergeStoredSubjectSnapshots(primarySubject, secondarySubject, index) {
   if (!primarySubject) {
     return hydrateStoredSubject(secondarySubject, index);
@@ -7060,7 +7544,10 @@ function mergeStoredSubjectSnapshots(primarySubject, secondarySubject, index) {
     watch: mergeWatchItemsForSubject(preferredSubject, fallbackSubject),
     savedRevisionTests: mergeSavedRevisionTestsForSubject(preferredSubject, fallbackSubject),
     hiddenWatchUrls: [...new Set([...(fallbackSubject.hiddenWatchUrls || []), ...(preferredSubject.hiddenWatchUrls || [])])],
-    grammar: mergeGrammarStates(preferredSubject?.grammar, fallbackSubject?.grammar, preferredSubject?.id || fallbackSubject?.id || "")
+    grammar: mergeGrammarStates(preferredSubject?.grammar, fallbackSubject?.grammar, preferredSubject?.id || fallbackSubject?.id || ""),
+    language: (preferredSubject?.id || fallbackSubject?.id) === "languages"
+      ? mergeLanguageStates(preferredSubject?.language, fallbackSubject?.language)
+      : null
   }, index);
 }
 
@@ -7358,6 +7845,119 @@ function normaliseWritingState(writing, subjectId = "") {
       };
     })
   };
+}
+
+function createDefaultLanguageTrack() {
+  return {
+    placement: {
+      status: "new",
+      currentQuestion: 0,
+      responses: {},
+      presentedAt: "",
+      result: null
+    },
+    course: {
+      currentLevel: "A1",
+      completedActivities: [],
+      completedLevels: [],
+      skillScores: Object.fromEntries(LANGUAGE_SKILLS.map((skill) => [skill, 0])),
+      updatedAt: ""
+    },
+    tutor: {
+      turns: [],
+      draft: "",
+      status: ""
+    }
+  };
+}
+
+function createDefaultLanguageState() {
+  return {
+    version: LANGUAGE_STATE_VERSION,
+    activeLanguage: "french",
+    tracks: {
+      french: createDefaultLanguageTrack(),
+      spanish: createDefaultLanguageTrack()
+    }
+  };
+}
+
+function normaliseLanguageTrack(track) {
+  const base = createDefaultLanguageTrack();
+  const next = track && typeof track === "object" && !Array.isArray(track) ? track : {};
+  const placement = next.placement && typeof next.placement === "object" ? next.placement : {};
+  const course = next.course && typeof next.course === "object" ? next.course : {};
+  const tutor = next.tutor && typeof next.tutor === "object" ? next.tutor : {};
+  const result = placement.result && typeof placement.result === "object" ? placement.result : null;
+  return {
+    placement: {
+      status: ["new", "in-progress", "submitting", "complete"].includes(String(placement.status || "")) ? String(placement.status) : "new",
+      currentQuestion: Math.max(0, Math.min(19, Number(placement.currentQuestion || 0) || 0)),
+      responses: placement.responses && typeof placement.responses === "object" && !Array.isArray(placement.responses)
+        ? Object.fromEntries(Object.entries(placement.responses).map(([id, entry]) => [
+            String(id),
+            {
+              value: String(entry?.value || "").slice(0, 1200),
+              responseTimeMs: Math.max(0, Number(entry?.responseTimeMs || 0) || 0)
+            }
+          ]))
+        : {},
+      presentedAt: String(placement.presentedAt || ""),
+      result: result
+        ? {
+            level: ["A1", "A2", "B1", "B2", "C1", "C2"].includes(String(result.level || "")) ? String(result.level) : "A1",
+            score: Math.max(0, Math.min(100, Number(result.score || 0) || 0)),
+            skills: result.skills && typeof result.skills === "object" ? result.skills : {},
+            feedback: String(result.feedback || "").slice(0, 1200),
+            completedAt: String(result.completedAt || "")
+          }
+        : null
+    },
+    course: {
+      currentLevel: ["A1", "A2", "B1", "B2", "C1", "C2"].includes(String(course.currentLevel || "")) ? String(course.currentLevel) : "A1",
+      completedActivities: Array.isArray(course.completedActivities)
+        ? [...new Set(course.completedActivities.map((value) => String(value || "")).filter(Boolean))].slice(-120)
+        : [],
+      completedLevels: Array.isArray(course.completedLevels)
+        ? [...new Set(course.completedLevels.map((value) => String(value || "")).filter((value) => LANGUAGE_LEVEL_ORDER.includes(value)))]
+        : [],
+      skillScores: Object.fromEntries(LANGUAGE_SKILLS.map((skill) => [
+        skill,
+        Math.max(0, Math.min(100, Number(course.skillScores?.[skill] || 0) || 0))
+      ])),
+      updatedAt: String(course.updatedAt || "")
+    },
+    tutor: {
+      turns: Array.isArray(tutor.turns)
+        ? tutor.turns
+            .map((turn) => ({ role: turn?.role === "tutor" ? "tutor" : "learner", text: String(turn?.text || "").slice(0, 1000), at: String(turn?.at || "") }))
+            .filter((turn) => turn.text)
+            .slice(-16)
+        : [],
+      draft: String(tutor.draft || "").slice(0, 1200),
+      status: String(tutor.status || "").slice(0, 240)
+    }
+  };
+}
+
+function normaliseLanguageState(language) {
+  const next = language && typeof language === "object" && !Array.isArray(language) ? language : {};
+  return {
+    version: LANGUAGE_STATE_VERSION,
+    activeLanguage: ["french", "spanish"].includes(String(next.activeLanguage || "")) ? String(next.activeLanguage) : "french",
+    tracks: {
+      french: normaliseLanguageTrack(next.tracks?.french),
+      spanish: normaliseLanguageTrack(next.tracks?.spanish)
+    }
+  };
+}
+
+function getSubjectLanguageState(subject) {
+  if (!subject || subject.id !== "languages") {
+    return createDefaultLanguageState();
+  }
+  subject.language = normaliseLanguageState(subject.language);
+  return subject.language;
 }
 
 function createDefaultSpellingState(subjectId = "", subjectName = "") {
@@ -13338,7 +13938,35 @@ function restoreSubjectsForAccount(account, subjectsOverride = null, { skipRemot
   hydratePreviewImages();
 }
 
-function applyAuthenticatedAccount(account, { token = "", subjects = null, settings = null, skipRemoteSync = false } = {}) {
+function migrateLegacyLanguagesState(cloudLanguages) {
+  const next = cloudLanguages && typeof cloudLanguages === "object"
+    ? structuredClone(cloudLanguages)
+    : createDefaultLanguagesState();
+  if (next.active || next.profiles?.fr?.placementDone || next.profiles?.es?.placementDone) {
+    return next;
+  }
+  const legacy = state.subjects.find((subject) => subject.id === "languages")?.language;
+  if (!legacy?.tracks) {
+    return next;
+  }
+  next.active = legacy.activeLanguage === "spanish" ? "es" : "fr";
+  [["fr", "french"], ["es", "spanish"]].forEach(([lang, legacyId]) => {
+    const legacyTrack = legacy.tracks?.[legacyId];
+    if (!legacyTrack || legacyTrack.placement?.status !== "complete") {
+      return;
+    }
+    const levelName = String(legacyTrack.course?.currentLevel || legacyTrack.placement?.result?.level || "A1");
+    const levelIndex = Math.max(0, LANGUAGE_CEFR_LEVELS.findIndex((level) => level.name === levelName));
+    next.profiles[lang].placementDone = true;
+    next.profiles[lang].placementAt = String(legacyTrack.placement?.result?.completedAt || new Date().toISOString());
+    Object.keys(next.profiles[lang].sections).forEach((sectionId) => {
+      next.profiles[lang].sections[sectionId].level = levelIndex;
+    });
+  });
+  return next;
+}
+
+function applyAuthenticatedAccount(account, { token = "", subjects = null, settings = null, languages = null, skipRemoteSync = false } = {}) {
   state.studentName = String(account?.name || "").trim();
   state.currentUserEmail = normaliseAccountKey(account?.email);
   state.studentGrade = normaliseGrade(account?.grade);
@@ -13348,6 +13976,8 @@ function applyAuthenticatedAccount(account, { token = "", subjects = null, setti
   applyCloudAccountSettings(settings);
   persistSession(state.currentUserEmail, state.authToken);
   restoreSubjectsForAccount(account, subjects, { skipRemoteSync });
+  state.languages = migrateLegacyLanguagesState(languages);
+  languagesRuntime.setData(state.languages);
   persistSettings({ skipRemoteSync });
   applyOneTimeAccountProgressReset();
 }
@@ -13376,6 +14006,7 @@ async function restoreSessionUser() {
         token: savedToken,
         subjects: mergedSubjects,
         settings: session.settings,
+        languages: session.languages,
         skipRemoteSync: true
       });
       openDashboard("home");
@@ -13428,6 +14059,7 @@ async function restoreSessionUser() {
       token: payload.token || "",
       subjects: durableLegacySubjects || getStoredSubjectsForAccount(account),
       settings: payload.settings,
+      languages: payload.languages,
       skipRemoteSync: false
     });
     openDashboard("home");
@@ -13442,6 +14074,8 @@ async function restoreSessionUser() {
   state.currentUserPoints = Math.max(0, Number(account.points || 0) || 0);
   state.authToken = "";
   restoreSubjectsForAccount(account, getStoredSubjectsForAccount(account), { skipRemoteSync: true });
+  state.languages = migrateLegacyLanguagesState(null);
+  languagesRuntime.setData(state.languages);
   openDashboard("home");
 }
 
@@ -14067,7 +14701,9 @@ function renderCurrentView() {
     "hidden",
     state.authViewOpen || state.currentView === "task" || state.currentView === "revision"
   );
+  elements.appShell.classList.toggle("languages-open", state.currentView === "languages");
   elements.homeView.classList.toggle("hidden", state.currentView !== "home");
+  elements.languagesView?.classList.toggle("hidden", state.currentView !== "languages");
   elements.settingsView.classList.toggle("hidden", state.currentView !== "settings");
   elements.subjectsView.classList.toggle("hidden", state.currentView !== "subjects");
   elements.taskView.classList.toggle("hidden", state.currentView !== "task");
@@ -14077,7 +14713,7 @@ function renderCurrentView() {
 
 function syncTopbarNavigationState() {
   elements.navHomeButton.classList.toggle("is-active", state.currentView === "home");
-  elements.navSubjectsButton.classList.toggle("is-active", state.currentView === "subjects");
+  elements.navSubjectsButton.classList.toggle("is-active", state.currentView === "subjects" || state.currentView === "languages");
   elements.navCalendarButton?.classList.toggle("is-active", state.upcomingModalOpen && state.upcomingModalMode === "all");
   elements.navSettingsButton.classList.toggle("is-active", state.currentView === "settings");
 }
@@ -22917,6 +23553,7 @@ async function saveAccountSettings() {
     applyAuthenticatedAccount(payload.account, {
       token: state.authToken,
       subjects: state.subjects,
+      languages: state.languages,
       skipRemoteSync: true
     });
     elements.welcomeHeading.textContent = "";
@@ -23000,6 +23637,10 @@ function render() {
   renderPractice();
   renderWatchList();
   renderDockContext();
+  if (state.currentView === "languages") {
+    languagesRuntime.setData(state.languages);
+    languagesRuntime.render();
+  }
   if (state.attachmentModalOpen) {
     renderAttachNotesModal();
   }
@@ -23083,6 +23724,7 @@ async function handleDashboardOpen() {
           token: payload.token || "",
           subjects: mergedSubjects,
           settings: payload.settings,
+          languages: payload.languages,
           skipRemoteSync: true
         });
         openDashboard("home");
@@ -23114,6 +23756,7 @@ async function handleDashboardOpen() {
               token: payload.token || "",
               subjects: legacySubjects || getStoredSubjectsForAccount(existingLegacyAccount),
               settings: payload.settings,
+              languages: payload.languages,
               skipRemoteSync: false
             });
             openDashboard("home");
@@ -23155,6 +23798,7 @@ async function handleDashboardOpen() {
         name: studentName
       }),
       settings: payload.settings,
+      languages: payload.languages,
       skipRemoteSync: false
     });
     openDashboard("home");
@@ -23501,6 +24145,8 @@ elements.signoutButton.addEventListener("click", () => {
   state.studentName = "";
   state.currentUserEmail = "";
   state.studentGrade = defaultGrade;
+  state.languages = createDefaultLanguagesState();
+  languagesRuntime.setData(state.languages);
   state.subjects = createBaseSubjects();
   showLanding();
 });
