@@ -1930,6 +1930,21 @@ const languagesRuntime = createLanguagesRuntime({
   root: elements.langRoot,
   apiGet: (path) => requestApiGet(path, { headers: buildAuthHeaders() }),
   apiPost: (path, body) => requestApi(path, body, false, { headers: buildAuthHeaders(), timeoutMs: 45_000 }),
+  playAiSpeech: async ({ text, language, pace }) => {
+    stopListening();
+    await ensureAiSpeechPlaybackReady();
+    const speechBlob = await requestApi("/api/speak", { text, language, pace }, true, {
+      headers: buildAuthHeaders(),
+      timeoutMs: 45_000,
+      timeoutMessage: "The AI language voice took too long to respond."
+    });
+    await playSpeechBlobThroughAudioElement(speechBlob, {
+      playbackRate: pace === "slow" ? 0.78 : 1,
+      waitForEnd: false,
+      statusMessages: { error: "The AI language voice could not play." }
+    });
+  },
+  stopAiSpeech: () => stopListening(),
   getStudentName: () => state.studentName,
   onExit: () => {
     state.currentView = "home";
@@ -15809,7 +15824,13 @@ async function primeAiSpeechPlaybackElement() {
   aiSpeechPlaybackPrimed = true;
 }
 
-async function playSpeechBlobThroughAudioElement(speechBlob, { statusMessages = {}, onStatusChange = null, statusElement = null } = {}) {
+async function playSpeechBlobThroughAudioElement(speechBlob, {
+  statusMessages = {},
+  onStatusChange = null,
+  statusElement = null,
+  playbackRate = aiSpeechPlaybackRate,
+  waitForEnd = true
+} = {}) {
   const playbackElement = ensureAiSpeechPlaybackElement();
   if (currentAudioObjectUrl) {
     URL.revokeObjectURL(currentAudioObjectUrl);
@@ -15819,8 +15840,9 @@ async function playSpeechBlobThroughAudioElement(speechBlob, { statusMessages = 
   playbackElement.onended = null;
   playbackElement.onerror = null;
   playbackElement.src = currentAudioObjectUrl;
-  playbackElement.defaultPlaybackRate = aiSpeechPlaybackRate;
-  playbackElement.playbackRate = aiSpeechPlaybackRate;
+  const safePlaybackRate = Math.min(2, Math.max(0.5, Number(playbackRate) || aiSpeechPlaybackRate));
+  playbackElement.defaultPlaybackRate = safePlaybackRate;
+  playbackElement.playbackRate = safePlaybackRate;
   currentAudioPlaybackMode = "audio-element";
   playbackElement.load();
 
@@ -15853,6 +15875,10 @@ async function playSpeechBlobThroughAudioElement(speechBlob, { statusMessages = 
   }
   if (typeof onStatusChange === "function") {
     onStatusChange("playing", statusMessages.playing || "Reading...");
+  }
+
+  if (!waitForEnd) {
+    return;
   }
 
   await new Promise((resolve, reject) => {

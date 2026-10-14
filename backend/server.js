@@ -1797,19 +1797,29 @@ app.post("/api/ask", async (request, response) => {
 
 app.post("/api/speak", async (request, response) => {
   try {
-    const text = String(request.body?.text || "").trim();
+    const text = clipText(request.body?.text, 4000);
     if (!text) {
       response.status(400).json({ error: "text is required." });
       return;
     }
+
+    const language = ["french", "spanish"].includes(String(request.body?.language || "").toLowerCase())
+      ? String(request.body.language).toLowerCase()
+      : "";
+    const pace = request.body?.pace === "slow" ? "slow" : "normal";
+    const languageInstruction = language
+      ? `Speak only the supplied text in fluent ${language}, with authentic pronunciation and natural phrasing. Do not translate, explain, add, or remove any words.`
+      : "Speak the supplied text exactly as written.";
+    const paceInstruction = pace === "slow"
+      ? "Speak noticeably slowly for a language learner, with clear word boundaries, while keeping the pronunciation natural."
+      : "Use a natural conversational pace with clear articulation.";
 
     const speech = await callOpenAiSpeech({
       model: "gpt-4o-mini-tts",
       voice: "marin",
       response_format: "wav",
       input: text,
-      instructions:
-        "Speak as a warm, fluent female tutor for an Australian Year 7 high school student. Sound like a great teacher: calm, clear, grounded, and easy to follow. Use natural pauses, clear emphasis, and calm expressive delivery. If the script contains a horse-related comparison, deliver it naturally as normal teaching language, not as a joke or gimmick."
+      instructions: `${languageInstruction} ${paceInstruction} Speak as a warm, fluent female tutor for an Australian high school student.`
     });
 
     response.setHeader("Content-Type", speech.contentType);

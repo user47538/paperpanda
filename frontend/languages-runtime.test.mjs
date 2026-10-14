@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createDefaultLanguagesState, normalizeLanguageAnswer } from "./languages-runtime.js";
+import { createDefaultLanguagesState, normalizeLanguageAnswer, resolveVocabularyAdvance } from "./languages-runtime.js";
 import { LANGUAGE_CONTENT } from "./languages-content.js";
 
 test("typed language matching keeps accents significant but normalizes apostrophes", () => {
@@ -20,4 +20,20 @@ test("starter conjugation content omits the nonexistent standard pouvoir imperat
   assert.ok(pouvoir);
   assert.equal(pouvoir.tenses.some((tense) => tense.id === "imperative"), false);
   assert.equal(LANGUAGE_CONTENT.es.verbs.length, 7);
+});
+
+test("vocabulary sessions advance once, review missed words once, and then complete", () => {
+  assert.deepEqual(resolveVocabularyAdvance({ wordIndex: 2, targetCount: 6, reviewMode: false, incorrectCount: 1 }), {
+    phase: "advance",
+    wordIndex: 3
+  });
+  assert.deepEqual(resolveVocabularyAdvance({ wordIndex: 5, targetCount: 6, reviewMode: false, incorrectCount: 2 }), {
+    phase: "review",
+    wordIndex: 0
+  });
+  assert.deepEqual(resolveVocabularyAdvance({ wordIndex: 1, targetCount: 2, reviewMode: true, incorrectCount: 2 }), {
+    phase: "complete",
+    wordIndex: 1
+  });
+  assert.equal(resolveVocabularyAdvance({ wordIndex: 5, targetCount: 6, reviewMode: false, incorrectCount: 0 }).phase, "complete");
 });
