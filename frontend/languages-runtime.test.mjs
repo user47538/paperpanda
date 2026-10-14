@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createDefaultLanguagesState, normalizeLanguageAnswer, resolveVocabularyAdvance } from "./languages-runtime.js";
+import { readFileSync } from "node:fs";
+import { createDefaultLanguagesState, LANGUAGE_VOCABULARY_COUNTS, normalizeLanguageAnswer, resolveVocabularyAdvance } from "./languages-runtime.js";
 import { LANGUAGE_CONTENT } from "./languages-content.js";
 
 test("typed language matching keeps accents significant but normalizes apostrophes", () => {
@@ -12,7 +13,19 @@ test("frontend language defaults expose six independent section tracks", () => {
   const languages = createDefaultLanguagesState();
   assert.equal(Object.keys(languages.profiles.fr.sections).length, 6);
   assert.equal(languages.profiles.fr.sections.watch.lessonsToNext, 8);
+  assert.equal(languages.profiles.fr.sections.vocab.lessonsToNext, 496);
+  assert.equal(languages.profiles.es.sections.vocab.lessonsToNext, 454);
   assert.equal(languages.profiles.es.placementDone, false);
+});
+
+test("MindDory vocabulary assets match every declared CEFR count with unique terms", () => {
+  for (const [lang, levels] of Object.entries(LANGUAGE_VOCABULARY_COUNTS)) {
+    for (const [level, expectedCount] of Object.entries(levels)) {
+      const payload = JSON.parse(readFileSync(new URL(`./public/language-vocabulary/${lang}/${level.toLowerCase()}.json`, import.meta.url), "utf8"));
+      assert.equal(payload.entries.length, expectedCount, `${lang} ${level} count`);
+      assert.equal(new Set(payload.entries.map(([word]) => word)).size, expectedCount, `${lang} ${level} unique terms`);
+    }
+  }
 });
 
 test("starter conjugation content omits the nonexistent standard pouvoir imperative", () => {

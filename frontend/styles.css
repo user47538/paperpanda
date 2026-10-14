@@ -6903,6 +6903,21 @@ input[type="date"] {
   font: 800 26px var(--font-display);
 }
 
+.lang-vocab-context {
+  width: 100%;
+  margin: 0;
+  padding: 20px;
+  border-radius: 18px;
+  background: #f7f3ed;
+  font: 750 21px/1.55 var(--font-display);
+}
+
+.lang-feedback small {
+  display: block;
+  margin-top: 6px;
+  color: var(--lang-muted);
+}
+
 .lang-input,
 .lang-select {
   width: 100%;
@@ -7165,6 +7180,8 @@ input[type="date"] {
 
 .lang-lesson-rail button.is-active { background: #f2eee8; }
 .lang-lesson-rail button small { color: var(--lang-muted); }
+.lang-lesson-rail > p { margin: 5px 0; color: var(--lang-muted); }
+.lang-lesson-rail > a { margin-top: auto; color: var(--lang-muted); font-size: 12px; font-weight: 750; }
 .lang-big-number { font: 800 44px var(--font-display); }
 
 .lang-topic-grid {

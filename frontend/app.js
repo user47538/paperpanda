@@ -1930,6 +1930,11 @@ const languagesRuntime = createLanguagesRuntime({
   root: elements.langRoot,
   apiGet: (path) => requestApiGet(path, { headers: buildAuthHeaders() }),
   apiPost: (path, body) => requestApi(path, body, false, { headers: buildAuthHeaders(), timeoutMs: 45_000 }),
+  loadVocabulary: async (lang, level) => {
+    const response = await fetch(`/language-vocabulary/${encodeURIComponent(lang)}/${encodeURIComponent(String(level).toLowerCase())}.json`, { cache: "force-cache" });
+    if (!response.ok) throw new Error("This vocabulary level could not be loaded.");
+    return response.json();
+  },
   playAiSpeech: async ({ text, language, pace }) => {
     stopListening();
     await ensureAiSpeechPlaybackReady();

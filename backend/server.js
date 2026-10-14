@@ -21,6 +21,7 @@ import { availableRevisionGrades, getRevisionCatalogueForGrade, getRevisionEntry
 import {
   applyLanguageProgress,
   applyPlacementResult,
+  applyVocabularySession,
   LANGUAGE_IDS,
   LANGUAGE_SECTION_IDS,
   normalizeLanguagesState,
@@ -1925,6 +1926,30 @@ app.post("/api/languages/vocab/topics", async (request, response) => {
     response.json({ languages: await updateAccountLanguages(session.token, languages) });
   } catch (error) {
     response.status(error?.status || 500).json({ error: error instanceof Error ? error.message : "Vocabulary topics could not be saved." });
+  }
+});
+
+app.post("/api/languages/vocab/session", async (request, response) => {
+  try {
+    const session = await requireSession(request, response);
+    if (!session) return;
+    const lang = String(request.body?.lang || "").trim().toLowerCase();
+    const level = String(request.body?.level || "").trim().toUpperCase();
+    const result = applyVocabularySession(session.languages, {
+      lang,
+      level,
+      results: request.body?.results,
+      activityDate: request.body?.activityDate
+    });
+    const languages = await updateAccountLanguages(session.token, result.languages);
+    response.json({
+      languages,
+      progress: result.progress,
+      levelledUp: result.levelledUp,
+      pandaAwarded: result.pandaAwarded
+    });
+  } catch (error) {
+    response.status(error?.status || 500).json({ error: error instanceof Error ? error.message : "Vocabulary session could not be saved." });
   }
 });
 

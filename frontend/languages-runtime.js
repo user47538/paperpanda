@@ -9,6 +9,11 @@ export const LANGUAGE_LEVELS = [
   { name: "C2", label: "Mastery" }
 ];
 
+export const LANGUAGE_VOCABULARY_COUNTS = {
+  fr: { A1: 496, A2: 1303, B1: 1713, B2: 2039, C1: 3259, C2: 398 },
+  es: { A1: 454, A2: 1318, B1: 1725, B2: 2104, C1: 2601, C2: 292 }
+};
+
 const SECTIONS = [
   { id: "vocab", label: "Vocabulary", icon: "🧺", tone: "peach" },
   { id: "grammar", label: "Grammar", icon: "🧩", tone: "lilac" },
@@ -71,12 +76,18 @@ function createDefaultSection(id) {
   return { level: 0, lessonsDone: 0, lessonsToNext: id === "watch" ? 8 : 10 };
 }
 
-function createDefaultProfile() {
+function createDefaultVocabularyProgress() {
+  return Object.fromEntries(LANGUAGE_LEVELS.map(({ name }) => [name, { introduced: [], mastered: [], review: [] }]));
+}
+
+function createDefaultProfile(lang = "fr") {
+  const sections = Object.fromEntries(SECTION_IDS.map((id) => [id, createDefaultSection(id)]));
+  sections.vocab.lessonsToNext = LANGUAGE_VOCABULARY_COUNTS[lang].A1;
   return {
     placementDone: false,
     placementAt: "",
-    sections: Object.fromEntries(SECTION_IDS.map((id) => [id, createDefaultSection(id)])),
-    vocab: { thousandLearned: [], topics: [], review: [] },
+    sections,
+    vocab: { thousandLearned: [], topics: [], review: [], source: "minddory", levelProgress: createDefaultVocabularyProgress() },
     verbsMastered: {},
     peppaWatched: [],
     completedLessons: {}
@@ -85,9 +96,9 @@ function createDefaultProfile() {
 
 export function createDefaultLanguagesState() {
   return {
-    version: 2,
+    version: 3,
     active: "",
-    profiles: { fr: createDefaultProfile(), es: createDefaultProfile() },
+    profiles: { fr: createDefaultProfile("fr"), es: createDefaultProfile("es") },
     rewards: { pandas: [], streakDays: 0, lastActiveDate: "" }
   };
 }
@@ -125,7 +136,7 @@ function getPrimaryTextForScreen(ui, content) {
   return `${content.name} language practice`;
 }
 
-export function createLanguagesRuntime({ root, apiGet, apiPost, playAiSpeech, stopAiSpeech, getStudentName, onExit, onStateChange }) {
+export function createLanguagesRuntime({ root, apiGet, apiPost, loadVocabulary, playAiSpeech, stopAiSpeech, getStudentName, onExit, onStateChange }) {
   let languages = createDefaultLanguagesState();
   let recognition = null;
   const ui = {
@@ -138,7 +149,6 @@ export function createLanguagesRuntime({ root, apiGet, apiPost, playAiSpeech, st
     placementDraft: "",
     placementPicked: null,
     placementResultFresh: false,
-    vocabScene: 0,
     vocabWord: 0,
     vocabPicked: "",
     vocabChecked: false,
@@ -152,7 +162,12 @@ export function createLanguagesRuntime({ root, apiGet, apiPost, playAiSpeech, st
     vocabSessionComplete: false,
     vocabFirstPassCorrect: 0,
     vocabAnswerCorrect: null,
-    topicDraft: [],
+    vocabBank: [],
+    vocabBankLevel: "",
+    vocabLoading: false,
+    vocabSaving: false,
+    vocabSessionResults: {},
+    vocabLevelledUp: false,
     grammarIndex: 0,
     grammarPicked: null,
     verbIndex: 0,
@@ -190,7 +205,7 @@ export function createLanguagesRuntime({ root, apiGet, apiPost, playAiSpeech, st
   }
 
   function profile() {
-    return languages.profiles?.[activeLang()] || createDefaultProfile();
+    return languages.profiles?.[activeLang()] || createDefaultProfile(activeLang());
   }
 
   function mergeLanguages(next) {
@@ -235,7 +250,6 @@ export function createLanguagesRuntime({ root, apiGet, apiPost, playAiSpeech, st
       placementDraft: "",
       placementPicked: null,
       placementResultFresh: false,
-      vocabScene: 0,
       vocabWord: 0,
       vocabTyped: "",
       vocabTarget: null,
@@ -247,7 +261,12 @@ export function createLanguagesRuntime({ root, apiGet, apiPost, playAiSpeech, st
       vocabSessionComplete: false,
       vocabFirstPassCorrect: 0,
       vocabAnswerCorrect: null,
-      topicDraft: [],
+      vocabBank: [],
+      vocabBankLevel: "",
+      vocabLoading: false,
+      vocabSaving: false,
+      vocabSessionResults: {},
+      vocabLevelledUp: false,
       grammarIndex: 0,
       verbIndex: 0,
       tenseIndex: 0,
@@ -451,20 +470,80 @@ export function createLanguagesRuntime({ root, apiGet, apiPost, playAiSpeech, st
 
   function renderHome() {
     const firstName = (getStudentName?.() || "learner").split(/\s+/)[0];
-    root.innerHTML = `<div class="lang-shell">${renderTopbar()}<main class="lang-home"><header class="lang-home__header"><div><p class="eyebrow">${content().flag} ${content().name}</p><h1>${content().hello} ${escapeHtml(firstName)}!</h1><p>Pick a section. Each one moves up at its own pace.</p></div>${rewardStrip(languages)}</header><button type="button" class="lang-resume" data-lang-open="watch"><span>📺</span><span><small>Pick up where you left off</small><strong>Peppa · ${escapeHtml(content().episode.title)}</strong></span><b>→</b></button><section class="lang-section-grid">${SECTIONS.map((section) => { const progress = profile().sections[section.id]; const next = LANGUAGE_LEVELS[Math.min(LANGUAGE_LEVELS.length - 1, progress.level + 1)].name; return `<button type="button" class="lang-section-card lang-tone--${section.tone}" data-lang-open="${section.id}"><span class="lang-section-card__icon">${section.icon}</span><strong>${section.label}</strong>${levelBadge(progress.level)}<small>${progress.level >= LANGUAGE_LEVELS.length - 1 ? "C2 mastery practice" : `${progress.lessonsDone}/${progress.lessonsToNext} lessons to ${next}`}</small><i><b style="width:${Math.round((progress.lessonsDone / progress.lessonsToNext) * 100)}%"></b></i></button>`; }).join("")}</section></main></div>`;
+    root.innerHTML = `<div class="lang-shell">${renderTopbar()}<main class="lang-home"><header class="lang-home__header"><div><p class="eyebrow">${content().flag} ${content().name}</p><h1>${content().hello} ${escapeHtml(firstName)}!</h1><p>Pick a section. Each one moves up at its own pace.</p></div>${rewardStrip(languages)}</header><button type="button" class="lang-resume" data-lang-open="watch"><span>📺</span><span><small>Pick up where you left off</small><strong>Peppa · ${escapeHtml(content().episode.title)}</strong></span><b>→</b></button><section class="lang-section-grid">${SECTIONS.map((section) => {
+      const progress = profile().sections[section.id];
+      const next = LANGUAGE_LEVELS[Math.min(LANGUAGE_LEVELS.length - 1, progress.level + 1)].name;
+      const levelName = LANGUAGE_LEVELS[progress.level].name;
+      const vocabularyProgress = profile().vocab.levelProgress?.[levelName];
+      const detail = section.id === "vocab"
+        ? `${vocabularyProgress?.mastered?.length || 0}/${LANGUAGE_VOCABULARY_COUNTS[activeLang()][levelName]} words mastered`
+        : progress.level >= LANGUAGE_LEVELS.length - 1 ? "C2 mastery practice" : `${progress.lessonsDone}/${progress.lessonsToNext} lessons to ${next}`;
+      const percent = section.id === "vocab"
+        ? Math.round(((vocabularyProgress?.mastered?.length || 0) / LANGUAGE_VOCABULARY_COUNTS[activeLang()][levelName]) * 100)
+        : Math.round((progress.lessonsDone / progress.lessonsToNext) * 100);
+      return `<button type="button" class="lang-section-card lang-tone--${section.tone}" data-lang-open="${section.id}"><span class="lang-section-card__icon">${section.icon}</span><strong>${section.label}</strong>${levelBadge(progress.level)}<small>${detail}</small><i><b style="width:${percent}%"></b></i></button>`;
+    }).join("")}</section></main></div>`;
   }
 
   function vocabTargetKey(target) {
-    return `${target?.mode || ""}:${target?.sceneId || target?.topic || ""}:${target?.word || ""}`;
+    return String(target?.index ?? "");
   }
 
-  function getBaseVocabTargets() {
-    const currentProfile = profile();
-    if (isHigherLevel(currentProfile.sections.vocab.level)) {
-      return currentProfile.vocab.topics.flatMap((topicName) => (content().topics[topicName]?.[1] || []).map((entry) => ({ emoji: entry[0], word: entry[1], topic: topicName, mode: "topics" })));
+  function currentVocabularyLevelName() {
+    return LANGUAGE_LEVELS[profile().sections.vocab.level]?.name || "A1";
+  }
+
+  function getVocabularyProgress(level = currentVocabularyLevelName()) {
+    return profile().vocab.levelProgress?.[level] || { introduced: [], mastered: [], review: [] };
+  }
+
+  function makeVocabularyTarget(index) {
+    const entry = ui.vocabBank[index];
+    return entry ? { index, word: entry[0], example: entry[1] || "", mode: "curriculum" } : null;
+  }
+
+  function selectVocabularySessionTargets() {
+    const progress = getVocabularyProgress(ui.vocabBankLevel);
+    const introduced = new Set(progress.introduced || []);
+    const mastered = new Set(progress.mastered || []);
+    const selected = [];
+    const add = (index) => {
+      if (Number.isInteger(index) && ui.vocabBank[index] && !selected.includes(index) && selected.length < 10) selected.push(index);
+    };
+    (progress.review || []).slice(0, 3).forEach(add);
+    ui.vocabBank.forEach((_, index) => { if (!introduced.has(index)) add(index); });
+    (progress.review || []).forEach(add);
+    (progress.introduced || []).forEach((index) => { if (!mastered.has(index)) add(index); });
+    const practiceOffset = (progress.introduced?.length || 0) % Math.max(1, ui.vocabBank.length);
+    for (let step = 0; step < ui.vocabBank.length && selected.length < 10; step += 1) add((practiceOffset + step) % ui.vocabBank.length);
+    return selected.map(makeVocabularyTarget).filter(Boolean);
+  }
+
+  async function ensureVocabularyBank({ restart = false } = {}) {
+    const level = currentVocabularyLevelName();
+    if (!restart && ui.vocabBankLevel === level && ui.vocabBank.length) return;
+    if (typeof loadVocabulary !== "function") {
+      setStatus("The vocabulary curriculum could not be loaded.");
+      return;
     }
-    const scene = content().scenes[ui.vocabScene % content().scenes.length];
-    return scene[3].map((entry) => ({ emoji: entry[0], word: entry[1], gloss: entry[2], topic: scene[2], sceneId: scene[0], options: scene[3], mode: "thousand" }));
+    ui.vocabLoading = true;
+    ui.vocabBank = [];
+    ui.vocabBankLevel = level;
+    render();
+    try {
+      const payload = await loadVocabulary(activeLang(), level);
+      const expectedCount = LANGUAGE_VOCABULARY_COUNTS[activeLang()][level];
+      if (!Array.isArray(payload?.entries) || payload.entries.length !== expectedCount) {
+        throw new Error(`Expected ${expectedCount} ${level} words but received ${payload?.entries?.length || 0}.`);
+      }
+      ui.vocabBank = payload.entries;
+      startVocabSession();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "The vocabulary curriculum could not be loaded.");
+    } finally {
+      ui.vocabLoading = false;
+      render();
+    }
   }
 
   function getVocabSessionTargets() {
@@ -486,12 +565,14 @@ export function createLanguagesRuntime({ root, apiGet, apiPost, playAiSpeech, st
   function startVocabSession() {
     ui.vocabWord = 0;
     ui.vocabIncorrect = [];
-    ui.vocabSessionTargets = getBaseVocabTargets();
+    ui.vocabSessionTargets = selectVocabularySessionTargets();
     ui.vocabReviewTargets = [];
     ui.vocabReviewIncorrect = [];
     ui.vocabReviewMode = false;
     ui.vocabSessionComplete = false;
     ui.vocabFirstPassCorrect = 0;
+    ui.vocabSessionResults = {};
+    ui.vocabLevelledUp = false;
     resetVocabAnswer();
     setStatus("");
   }
@@ -503,9 +584,23 @@ export function createLanguagesRuntime({ root, apiGet, apiPost, playAiSpeech, st
     if (!list.some((item) => vocabTargetKey(item) === key)) list.push(target);
   }
 
+  function recordVocabularyAnswer(correct) {
+    if (!ui.vocabTarget) return;
+    if (!ui.vocabReviewMode) {
+      ui.vocabSessionResults[ui.vocabTarget.index] = Boolean(correct);
+      if (correct) ui.vocabFirstPassCorrect += 1;
+      else rememberIncorrectVocab(ui.vocabTarget);
+      return;
+    }
+    if (!correct) rememberIncorrectVocab(ui.vocabTarget);
+  }
+
   function advanceVocabSession() {
     const targets = getVocabSessionTargets();
-    if (!ui.vocabChecked) rememberIncorrectVocab(ui.vocabTarget);
+    if (!ui.vocabChecked) {
+      rememberIncorrectVocab(ui.vocabTarget);
+      if (!ui.vocabReviewMode && ui.vocabTarget) ui.vocabSessionResults[ui.vocabTarget.index] = false;
+    }
     const next = resolveVocabularyAdvance({
       wordIndex: ui.vocabWord,
       targetCount: targets.length,
@@ -531,47 +626,82 @@ export function createLanguagesRuntime({ root, apiGet, apiPost, playAiSpeech, st
     setStatus("");
   }
 
-  function renderTopicPicker() {
-    const selected = new Set(ui.topicDraft.length ? ui.topicDraft : profile().vocab.topics);
-    return `<section class="lang-card lang-topic-picker"><p class="eyebrow">B1+ · My topics</p><h2>What are you interested in?</h2><p>Choose at least two. Your vocabulary practice will use these themes.</p><div class="lang-topic-grid">${Object.entries(content().topics).map(([name, [emoji]]) => `<button type="button" data-lang-topic="${escapeHtml(name)}" class="${selected.has(name) ? "is-selected" : ""}"><span>${emoji}</span>${escapeHtml(name)}</button>`).join("")}</div><button type="button" class="lang-btn" data-lang-action="topics-save">Save my topics</button></section>`;
+  async function saveVocabularySession() {
+    if (ui.vocabSaving || !Object.keys(ui.vocabSessionResults).length) return;
+    ui.vocabSaving = true;
+    render();
+    try {
+      const payload = await apiPost("/api/languages/vocab/session", {
+        lang: activeLang(),
+        level: ui.vocabBankLevel,
+        activityDate: localActivityDate(),
+        results: Object.entries(ui.vocabSessionResults).map(([index, correct]) => ({ index: Number(index), correct }))
+      });
+      mergeLanguages(payload?.languages);
+      ui.vocabLevelledUp = Boolean(payload?.levelledUp);
+      if (payload?.pandaAwarded) setStatus("A new panda joined your reward collection!");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Vocabulary progress could not be saved.");
+    } finally {
+      ui.vocabSaving = false;
+      render();
+    }
+  }
+
+  function vocabularyCloze(target) {
+    const example = String(target?.example || "");
+    const word = String(target?.word || "");
+    const index = example.toLocaleLowerCase().indexOf(word.toLocaleLowerCase());
+    return index >= 0 ? `${example.slice(0, index)}_____ ${example.slice(index + word.length)}`.replace(/_____\s+([,.!?;:])/g, "_____$1") : "";
+  }
+
+  function vocabularyOptions(target) {
+    const indices = [target.index];
+    const offsets = [17, 43, 89, 131, 211];
+    offsets.forEach((offset) => {
+      const index = (target.index + offset) % ui.vocabBank.length;
+      if (!indices.includes(index) && ui.vocabBank[index]?.[0] !== target.word && indices.length < 4) indices.push(index);
+    });
+    const answerPosition = ui.vocabWord % indices.length;
+    const answerIndex = indices.shift();
+    indices.splice(answerPosition, 0, answerIndex);
+    return indices.map((index) => ui.vocabBank[index][0]);
   }
 
   function renderVocab() {
     const currentProfile = profile();
-    const higher = isHigherLevel(currentProfile.sections.vocab.level);
-    if (higher && !currentProfile.vocab.topics.length) {
-      root.innerHTML = `<div class="lang-shell">${renderTopbar("Vocabulary")}<main class="lang-center">${renderTopicPicker()}</main>${renderDock("Read instructions", "Choose topics you enjoy, then name each picture in the target language.")}</div>`;
+    const higher = isHigherLevel(LANGUAGE_LEVELS.findIndex(({ name }) => name === ui.vocabBankLevel));
+    if (ui.vocabLoading) {
+      root.innerHTML = `<div class="lang-shell">${renderTopbar("Vocabulary")}<main class="lang-center"><section class="lang-card"><p class="eyebrow">${escapeHtml(ui.vocabBankLevel)} vocabulary</p><h1>Loading your word bank…</h1><p>Preparing the next ten words.</p></section></main></div>`;
       return;
     }
     const baseTargets = ui.vocabSessionTargets;
     if (ui.vocabSessionComplete) {
       const reviewed = ui.vocabReviewTargets.length;
       const remaining = ui.vocabReviewIncorrect.length;
-      root.innerHTML = `<div class="lang-shell">${renderTopbar("Vocabulary")}<main class="lang-center"><section class="lang-card lang-vocab-complete"><span class="lang-vocab-hero">${remaining ? "📝" : "🎉"}</span><p class="eyebrow">Session complete</p><h1>${ui.vocabFirstPassCorrect}/${baseTargets.length} correct first time</h1><p>${reviewed ? `You reviewed ${reviewed} missed word${reviewed === 1 ? "" : "s"}.` : "You completed every word in this set."}${remaining ? ` ${remaining} can return in your next session.` : reviewed ? " Great recovery." : " Great work."}</p><div class="lang-row"><button type="button" class="lang-btn lang-btn--secondary" data-lang-action="home">Language home</button><button type="button" class="lang-btn lang-btn--primary" data-lang-action="vocab-restart">Start another session</button></div></section></main></div>`;
+      const savedProgress = getVocabularyProgress(ui.vocabBankLevel);
+      const total = LANGUAGE_VOCABULARY_COUNTS[activeLang()][ui.vocabBankLevel];
+      root.innerHTML = `<div class="lang-shell">${renderTopbar("Vocabulary")}<main class="lang-center"><section class="lang-card lang-vocab-complete"><span class="lang-vocab-hero">${remaining ? "📝" : "🎉"}</span><p class="eyebrow">${ui.vocabBankLevel} session complete</p><h1>${ui.vocabFirstPassCorrect}/${baseTargets.length} correct first time</h1><p>${ui.vocabSaving ? "Saving your mastery progress…" : ui.vocabLevelledUp ? `Excellent — ${currentVocabularyLevelName()} vocabulary is now unlocked.` : `${savedProgress.mastered.length}/${total} ${ui.vocabBankLevel} words mastered.`}</p><p>${reviewed ? `You reviewed ${reviewed} missed word${reviewed === 1 ? "" : "s"}.` : "You completed every word in this set."}${remaining ? ` ${remaining} will return in a later session.` : reviewed ? " Great recovery." : " Great work."}</p><div class="lang-row"><button type="button" class="lang-btn lang-btn--secondary" data-lang-action="home" ${ui.vocabSaving ? "disabled" : ""}>Language home</button><button type="button" class="lang-btn lang-btn--primary" data-lang-action="vocab-restart" ${ui.vocabSaving ? "disabled" : ""}>Start another session</button></div></section></main></div>`;
       return;
     }
     const target = getVocabTarget();
     if (!target) {
-      root.innerHTML = `<div class="lang-shell">${renderTopbar("Vocabulary")}<main class="lang-center"><section class="lang-card"><h1>No vocabulary set is available yet</h1><p>Choose your topics to begin a new session.</p><button type="button" class="lang-btn" data-lang-action="topics-edit">Choose topics</button></section></main></div>`;
+      root.innerHTML = `<div class="lang-shell">${renderTopbar("Vocabulary")}<main class="lang-center"><section class="lang-card"><h1>Vocabulary is unavailable</h1><p>${escapeHtml(ui.status || "This level’s word bank could not be loaded.")}</p><button type="button" class="lang-btn" data-lang-action="vocab-reload">Try again</button></section></main></div>`;
       return;
     }
     ui.vocabTarget = target;
     const sessionTargets = getVocabSessionTargets();
     const nextLabel = ui.vocabWord < sessionTargets.length - 1 ? "Next word →" : !ui.vocabReviewMode && ui.vocabIncorrect.length ? "Review missed words →" : "Finish session →";
     const sessionLabel = ui.vocabReviewMode ? `Review ${ui.vocabWord + 1} of ${sessionTargets.length}` : `Word ${ui.vocabWord + 1} of ${sessionTargets.length}`;
-    const learned = currentProfile.vocab.thousandLearned.length;
-    const beginnerOptions = higher ? [] : (() => {
-      const alternatives = target.options.filter((entry) => entry[1] !== target.word).slice(0, 3);
-      const answerPosition = ui.vocabWord % 4;
-      alternatives.splice(answerPosition, 0, target.options.find((entry) => entry[1] === target.word));
-      return alternatives;
-    })();
-    const rail = higher
-      ? `<aside class="lang-lesson-rail"><p class="eyebrow">Your topics</p>${currentProfile.vocab.topics.map((topic) => `<button class="is-active">${content().topics[topic]?.[0] || "✦"} ${escapeHtml(topic)}</button>`).join("")}<button data-lang-action="topics-edit">+ Edit topics</button></aside>`
-      : `<aside class="lang-lesson-rail"><p class="eyebrow">First 1,000 words</p><strong class="lang-big-number">${learned}</strong><small>of 1,000 learned</small>${content().scenes.map((scene, index) => `<button data-vocab-scene="${index}" class="${index === ui.vocabScene ? "is-active" : ""}">${scene[1]} ${escapeHtml(scene[2])}<small>${scene[3].filter((entry) => currentProfile.vocab.thousandLearned.includes(entry[1])).length}/${scene[3].length}</small></button>`).join("")}</aside>`;
+    const levelProgress = getVocabularyProgress(ui.vocabBankLevel);
+    const total = LANGUAGE_VOCABULARY_COUNTS[activeLang()][ui.vocabBankLevel];
+    const accuracy = Math.round((levelProgress.mastered.length / total) * 100);
+    const cloze = vocabularyCloze(target);
+    const prompt = cloze ? `<p class="lang-vocab-context">${escapeHtml(cloze)}</p>` : `<button type="button" class="lang-hear" data-lang-speak="${escapeHtml(target.word)}">▶ Play the word</button>`;
+    const rail = `<aside class="lang-lesson-rail"><p class="eyebrow">${ui.vocabBankLevel} word bank</p><strong class="lang-big-number">${levelProgress.mastered.length}</strong><small>of ${total} mastered · ${accuracy}%</small><p><strong>${levelProgress.introduced.length}</strong> introduced</p><p><strong>${levelProgress.review.length}</strong> due for review</p><small>Promotion requires every word introduced and over 95% mastered.</small><a href="https://minddory.com/${activeLang() === "fr" ? "french" : "spanish"}-vocabulary-list/${ui.vocabBankLevel.toLowerCase()}" target="_blank" rel="noreferrer">Source: MindDory ↗</a></aside>`;
     const exercise = higher
-      ? `<div class="lang-vocab-prompt"><p class="eyebrow">${sessionLabel}</p><span class="lang-vocab-hero">${target.emoji}</span><h2>Name this picture</h2><input class="lang-input" data-vocab-typed value="${escapeHtml(ui.vocabTyped)}" placeholder="Type the ${content().name} word" /><button type="button" class="lang-mic ${ui.recording ? "is-recording" : ""}" data-lang-action="vocab-mic">🎙</button><div class="lang-row"><button type="button" class="lang-link" data-lang-action="vocab-show">I don’t know — show me</button><button type="button" class="lang-btn" data-lang-action="vocab-check">Check</button></div>${ui.vocabChecked ? `<div class="lang-feedback ${ui.vocabAnswerCorrect ? "is-correct" : "is-wrong"}"><strong>${ui.vocabAnswerCorrect ? "Correct" : "Not quite"} · ${escapeHtml(target.word)}</strong></div>` : ""}<button type="button" class="lang-btn lang-btn--primary" data-lang-action="vocab-next">${nextLabel}</button></div>`
-      : `<div class="lang-vocab-prompt"><p class="eyebrow">${escapeHtml(target.topic)} · ${sessionLabel}</p><h2>Find: ${escapeHtml(target.word)}</h2><button type="button" class="lang-hear" data-lang-speak="${escapeHtml(target.word)}">▶ Hear it</button><div class="lang-picture-options">${beginnerOptions.map((entry) => `<button type="button" data-vocab-answer="${escapeHtml(entry[1])}" class="${ui.vocabPicked === entry[1] ? (entry[1] === target.word ? "is-correct" : "is-wrong") : ""}"><span>${entry[0]}</span></button>`).join("")}</div>${ui.vocabChecked ? `<div class="lang-feedback ${ui.vocabAnswerCorrect ? "is-correct" : "is-wrong"}"><strong>${ui.vocabAnswerCorrect ? "Correct" : `Not quite · ${escapeHtml(target.word)} means ${escapeHtml(target.gloss)}`}</strong></div>` : ""}<button type="button" class="lang-btn" data-lang-action="vocab-next">${nextLabel}</button></div>`;
+      ? `<div class="lang-vocab-prompt"><p class="eyebrow">${sessionLabel}</p><h2>${cloze ? "Type the missing word or phrase" : "Type the word you hear"}</h2>${prompt}<input class="lang-input" data-vocab-typed value="${escapeHtml(ui.vocabTyped)}" placeholder="Type in ${content().native}" ${ui.vocabChecked ? "disabled" : ""} /><button type="button" class="lang-mic ${ui.recording ? "is-recording" : ""}" data-lang-action="vocab-mic" ${ui.vocabChecked ? "disabled" : ""}>🎙</button><div class="lang-row"><button type="button" class="lang-link" data-lang-action="vocab-show" ${ui.vocabChecked ? "disabled" : ""}>I don’t know — show me</button><button type="button" class="lang-btn" data-lang-action="vocab-check" ${ui.vocabChecked ? "disabled" : ""}>Check</button></div>${ui.vocabChecked ? `<div class="lang-feedback ${ui.vocabAnswerCorrect ? "is-correct" : "is-wrong"}"><strong>${ui.vocabAnswerCorrect ? "Correct" : "Not quite"} · ${escapeHtml(target.word)}</strong>${target.example ? `<small>${escapeHtml(target.example)}</small>` : ""}</div>` : ""}<button type="button" class="lang-btn lang-btn--primary" data-lang-action="vocab-next">${nextLabel}</button></div>`
+      : `<div class="lang-vocab-prompt"><p class="eyebrow">${sessionLabel}</p><h2>${cloze ? "Choose the missing word or phrase" : "Listen and choose the word"}</h2>${prompt}<div class="lang-choice-grid">${vocabularyOptions(target).map((word) => `<button type="button" data-vocab-answer="${escapeHtml(word)}" class="${ui.vocabPicked === word ? (word === target.word ? "is-correct" : "is-wrong") : ""}">${escapeHtml(word)}</button>`).join("")}</div>${ui.vocabChecked ? `<div class="lang-feedback ${ui.vocabAnswerCorrect ? "is-correct" : "is-wrong"}"><strong>${ui.vocabAnswerCorrect ? "Correct" : `Not quite · the answer is ${escapeHtml(target.word)}`}</strong>${target.example ? `<small>${escapeHtml(target.example)}</small>` : ""}</div>` : ""}<button type="button" class="lang-btn" data-lang-action="vocab-next">${nextLabel}</button></div>`;
     root.innerHTML = `<div class="lang-shell">${renderTopbar("Vocabulary")}<main class="lang-lesson"><div class="lang-lesson__heading">${levelBadge(currentProfile.sections.vocab.level)}<h1>Vocabulary</h1></div><div class="lang-split">${rail}<section class="lang-card">${exercise}</section></div></main>${renderDock("Hear the word", target.word)}</div>`;
   }
 
@@ -771,18 +901,15 @@ export function createLanguagesRuntime({ root, apiGet, apiPost, playAiSpeech, st
       stopAiSpeech?.();
       ui.screen = { watch: "peppa", speak: "speaking", listen: "listening" }[target.dataset.langOpen] || target.dataset.langOpen;
       resetLessonUi();
-      if (target.dataset.langOpen === "vocab") startVocabSession();
+      if (target.dataset.langOpen === "vocab") {
+        if (ui.vocabBankLevel === currentVocabularyLevelName() && ui.vocabBank.length) startVocabSession();
+        else await ensureVocabularyBank();
+      }
       render();
       return;
     }
     if (target.dataset.placementOption !== undefined) {
       ui.placementPicked = Number(target.dataset.placementOption);
-      render();
-      return;
-    }
-    if (target.dataset.vocabScene !== undefined) {
-      ui.vocabScene = Number(target.dataset.vocabScene);
-      startVocabSession();
       render();
       return;
     }
@@ -792,19 +919,7 @@ export function createLanguagesRuntime({ root, apiGet, apiPost, playAiSpeech, st
       const right = normalizeLanguageAnswer(ui.vocabPicked) === normalizeLanguageAnswer(ui.vocabTarget.word);
       ui.vocabChecked = true;
       ui.vocabAnswerCorrect = right;
-      if (!ui.vocabReviewMode && right) ui.vocabFirstPassCorrect += 1;
-      if (!right) rememberIncorrectVocab(ui.vocabTarget);
-      render();
-      if (right) await postProgress("vocab", `${activeLang()}:vocab:L${profile().sections.vocab.level}:${ui.vocabTarget.sceneId}:${ui.vocabTarget.word}`, { correct: 1, total: 1, vocabWord: ui.vocabTarget.word });
-      else await postProgress("vocab", `${activeLang()}:vocab-review:L${profile().sections.vocab.level}:${ui.vocabTarget.sceneId}:${ui.vocabTarget.word}`, { correct: 0, total: 1, reviewWord: ui.vocabTarget.word, complete: false });
-      render();
-      return;
-    }
-    if (target.dataset.langTopic) {
-      const topic = target.dataset.langTopic;
-      const selected = new Set(ui.topicDraft.length ? ui.topicDraft : profile().vocab.topics);
-      selected.has(topic) ? selected.delete(topic) : selected.add(topic);
-      ui.topicDraft = [...selected];
+      recordVocabularyAnswer(right);
       render();
       return;
     }
@@ -862,23 +977,26 @@ export function createLanguagesRuntime({ root, apiGet, apiPost, playAiSpeech, st
     if (action === "placement-next") { await advancePlacement(false); return; }
     if (action === "placement-skip") { await advancePlacement(true); return; }
     if (action === "placement-mic") { startRecognition((text) => { ui.placementDraft = text; setStatus(`I heard: “${text}”`); render(); }); return; }
-    if (action === "topics-edit") { profile().vocab.topics = []; ui.topicDraft = []; startVocabSession(); render(); return; }
-    if (action === "topics-save") {
-      if (ui.topicDraft.length < 2) { setStatus("Choose at least two topics."); render(); return; }
-      try { const payload = await apiPost("/api/languages/vocab/topics", { lang: activeLang(), topics: ui.topicDraft }); mergeLanguages(payload?.languages); startVocabSession(); setStatus("Topics saved."); } catch (error) { setStatus(error.message); }
-      render(); return;
+    if (action === "vocab-next") {
+      advanceVocabSession();
+      render();
+      if (ui.vocabSessionComplete) await saveVocabularySession();
+      return;
     }
-    if (action === "vocab-next") { advanceVocabSession(); render(); return; }
-    if (action === "vocab-restart") { startVocabSession(); render(); return; }
+    if (action === "vocab-restart") {
+      if (ui.vocabBankLevel !== currentVocabularyLevelName()) await ensureVocabularyBank({ restart: true });
+      else { startVocabSession(); render(); }
+      return;
+    }
+    if (action === "vocab-reload") { await ensureVocabularyBank({ restart: true }); return; }
     if (action === "vocab-mic") { startRecognition((text) => { ui.vocabTyped = text; ui.vocabChecked = false; ui.vocabAnswerCorrect = null; render(); }); return; }
     if (action === "vocab-show") {
       if (ui.vocabChecked) return;
       ui.vocabTyped = ui.vocabTarget.word;
       ui.vocabChecked = true;
       ui.vocabAnswerCorrect = false;
-      rememberIncorrectVocab(ui.vocabTarget);
+      recordVocabularyAnswer(false);
       render();
-      void postProgress("vocab", `${activeLang()}:vocab-review:L${profile().sections.vocab.level}:${ui.vocabTarget.word}`, { reviewWord: ui.vocabTarget.word, complete: false }).then(() => render());
       return;
     }
     if (action === "vocab-check") {
@@ -886,11 +1004,8 @@ export function createLanguagesRuntime({ root, apiGet, apiPost, playAiSpeech, st
       ui.vocabChecked = true;
       const correct = normalizeLanguageAnswer(ui.vocabTyped) === normalizeLanguageAnswer(ui.vocabTarget.word);
       ui.vocabAnswerCorrect = correct;
-      if (!ui.vocabReviewMode && correct) ui.vocabFirstPassCorrect += 1;
-      if (!correct) rememberIncorrectVocab(ui.vocabTarget);
-      const lessonNumber = profile().sections.vocab.lessonsDone + 1;
+      recordVocabularyAnswer(correct);
       render();
-      void postProgress("vocab", `${activeLang()}:vocab-topic:L${profile().sections.vocab.level}:${lessonNumber}:${ui.vocabTarget.topic}:${ui.vocabTarget.word}`, { correct: correct ? 1 : 0, total: 1, complete: correct, ...(correct ? { vocabWord: ui.vocabTarget.word } : { reviewWord: ui.vocabTarget.word }) }).then(() => render());
       return;
     }
     if (action === "verbs-check") {
