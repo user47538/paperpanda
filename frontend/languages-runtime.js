@@ -402,6 +402,29 @@ export function createLanguagesRuntime({ root, apiGet, apiPost, loadVocabulary, 
     render();
   }
 
+  async function resetLevels() {
+    if (ui.busy) return;
+    const confirmed = window.confirm("Reset French and Spanish levels and retake the starting quiz? Unit completions and vocabulary mastery will restart. Language rewards, streak and chosen topics will stay saved.");
+    if (!confirmed) return;
+    stopAiSpeech?.();
+    ui.busy = true;
+    setStatus("Resetting language levels…");
+    render();
+    try {
+      const payload = await apiPost("/api/languages/reset-levels", {});
+      mergeLanguages(payload?.languages);
+      resetLanguageTransientUi();
+      ui.screen = chooseStartScreen();
+      if (ui.screen === "placement") buildPlacementQueue();
+      setStatus("Your language levels are reset. Start the level check when you are ready.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Language levels could not be reset.");
+    } finally {
+      ui.busy = false;
+      render();
+    }
+  }
+
   async function speak(text, rate = 0.9) {
     const cleanText = String(text || "").trim();
     if (!cleanText) return;
@@ -571,7 +594,7 @@ export function createLanguagesRuntime({ root, apiGet, apiPost, loadVocabulary, 
         ? Math.round(((vocabularyProgress?.mastered?.length || 0) / LANGUAGE_VOCABULARY_COUNTS[activeLang()][levelName]) * 100)
         : Math.round((progress.lessonsDone / progress.lessonsToNext) * 100);
       return `<button type="button" class="lang-section-card lang-tone--${section.tone}" data-lang-open="${section.id}"><span class="lang-section-card__icon">${section.icon}</span><strong>${section.label}</strong>${levelBadge(progress.level)}<small>${detail}</small><i><b style="width:${percent}%"></b></i></button>`;
-    }).join("")}</section></main></div>`;
+    }).join("")}</section><section class="lang-reset-levels"><div><strong>Need a fresh starting point?</strong><span>Reset both language pathways and retake the level check. Rewards, streak and chosen topics stay saved.</span></div><button type="button" class="lang-btn lang-btn--secondary" data-lang-action="reset-levels">Reset levels and retake quiz</button></section></main></div>`;
   }
 
   function vocabTargetKey(target) {
@@ -1148,6 +1171,7 @@ export function createLanguagesRuntime({ root, apiGet, apiPost, loadVocabulary, 
     if (action === "exit") { stopAiSpeech?.(); onExit?.(); return; }
     if (action === "begin") { await chooseLanguage(languages.active || "fr", { begin: true }); return; }
     if (action === "home") { stopAiSpeech?.(); ui.screen = "home"; resetLessonUi(); render(); return; }
+    if (action === "reset-levels") { await resetLevels(); return; }
     if (action === "placement-next") { await advancePlacement(false); return; }
     if (action === "placement-skip") { await advancePlacement(true); return; }
     if (action === "placement-back") { backPlacement(); return; }

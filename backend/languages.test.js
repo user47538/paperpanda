@@ -8,6 +8,7 @@ import {
   LANGUAGE_CURRICULUM_UNITS_PER_LEVEL,
   LANGUAGE_VOCABULARY_COUNTS,
   normalizeLanguagesState,
+  resetLanguageLevels,
   setLanguageTopics
 } from "./languages.js";
 
@@ -198,4 +199,33 @@ test("legacy lesson counters restart at unit one for the new comprehensive curri
   assert.equal(migrated.profiles.fr.sections.listen.lessonsDone, 0);
   assert.equal(migrated.profiles.fr.sections.vocab.lessonsDone, 190);
   assert.equal(migrated.profiles.fr.curriculumVersion, 1);
+});
+
+test("level reset clears both language pathways while preserving rewards, streak and chosen topics", () => {
+  const languages = createDefaultLanguagesState();
+  languages.active = "fr";
+  languages.rewards = { pandas: ["happy", "smart"], streakDays: 7, lastActiveDate: "2026-10-15" };
+  languages.profiles.fr.placementDone = true;
+  languages.profiles.fr.placementAt = "2026-10-15T01:00:00.000Z";
+  languages.profiles.fr.sections.grammar = { level: 2, lessonsDone: 9, lessonsToNext: 24 };
+  languages.profiles.fr.vocab.topics = ["Sport", "Voyage"];
+  languages.profiles.fr.vocab.levelProgress.A1 = { introduced: [0, 1], mastered: [0], review: [1] };
+  languages.profiles.fr.completedLessons["fr:grammar:a1-01"] = "2026-10-15T01:00:00.000Z";
+  languages.profiles.fr.verbsMastered["être:present"] = true;
+  languages.profiles.es.placementDone = true;
+  languages.profiles.es.sections.listen = { level: 1, lessonsDone: 4, lessonsToNext: 24 };
+
+  const reset = resetLanguageLevels(languages);
+  assert.equal(reset.active, "fr");
+  assert.deepEqual(reset.rewards, languages.rewards);
+  assert.deepEqual(reset.profiles.fr.vocab.topics, ["Sport", "Voyage"]);
+  assert.equal(reset.profiles.fr.placementDone, false);
+  assert.equal(reset.profiles.es.placementDone, false);
+  assert.equal(reset.profiles.fr.sections.grammar.level, 0);
+  assert.equal(reset.profiles.fr.sections.grammar.lessonsDone, 0);
+  assert.equal(reset.profiles.es.sections.listen.level, 0);
+  assert.equal(reset.profiles.es.sections.listen.lessonsDone, 0);
+  assert.deepEqual(reset.profiles.fr.vocab.levelProgress.A1.mastered, []);
+  assert.deepEqual(reset.profiles.fr.completedLessons, {});
+  assert.deepEqual(reset.profiles.fr.verbsMastered, {});
 });

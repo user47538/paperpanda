@@ -25,6 +25,7 @@ import {
   LANGUAGE_IDS,
   LANGUAGE_SECTION_IDS,
   normalizeLanguagesState,
+  resetLanguageLevels,
   setLanguageTopics
 } from "./languages.js";
 
@@ -1856,6 +1857,17 @@ app.post("/api/languages/active", async (request, response) => {
     response.json({ languages: await updateAccountLanguages(session.token, languages) });
   } catch (error) {
     response.status(error?.status || 500).json({ error: error instanceof Error ? error.message : "Language selection failed." });
+  }
+});
+
+app.post("/api/languages/reset-levels", async (request, response) => {
+  try {
+    const session = await requireSession(request, response);
+    if (!session) return;
+    const languages = resetLanguageLevels(session.languages);
+    response.json({ languages: await updateAccountLanguages(session.token, languages) });
+  } catch (error) {
+    response.status(error?.status || 500).json({ error: error instanceof Error ? error.message : "Language levels could not be reset." });
   }
 });
 

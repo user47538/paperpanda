@@ -185,6 +185,17 @@ export function normalizeLanguagesState(value) {
   };
 }
 
+export function resetLanguageLevels(value) {
+  const current = normalizeLanguagesState(value);
+  const reset = createDefaultLanguagesState();
+  reset.active = current.active;
+  reset.rewards = current.rewards;
+  for (const lang of LANGUAGE_IDS) {
+    reset.profiles[lang].vocab.topics = current.profiles[lang].vocab.topics;
+  }
+  return reset;
+}
+
 function awardNextPanda(languages) {
   const next = PANDA_REWARDS.find((pandaId) => !languages.rewards.pandas.includes(pandaId));
   if (next) {

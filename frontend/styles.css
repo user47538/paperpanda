@@ -6788,6 +6788,32 @@ input[type="date"] {
   font-weight: 700;
 }
 
+.lang-reset-levels {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-top: 24px;
+  padding: 20px 22px;
+  border: 1px solid #e3ddd4;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.lang-reset-levels div {
+  display: grid;
+  gap: 4px;
+}
+
+.lang-reset-levels span {
+  color: var(--lang-muted);
+  font-size: 14px;
+}
+
+.lang-reset-levels .lang-btn {
+  flex: 0 0 auto;
+}
+
 .lang-segmented-progress {
   height: 9px;
   margin: 14px 0 20px;
@@ -7518,6 +7544,7 @@ input[type="date"] {
   .lang-placement__actions,
   .lang-result__footer { align-items: stretch; flex-direction: column; }
   .lang-placement__skill { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .lang-reset-levels { align-items: stretch; flex-direction: column; }
   .lang-dock { position: static; margin: 0 auto; padding: 0 14px 14px; transform: none; }
   .lang-dock__bar .lang-btn { padding: 10px 14px; }
 }
