@@ -1904,10 +1904,10 @@ app.post("/api/languages/progress", async (request, response) => {
     const peppaId = clipText(String(request.body?.peppaId || "").trim(), 120);
     if (vocabWord && !profile.vocab.thousandLearned.includes(vocabWord)) profile.vocab.thousandLearned.push(vocabWord);
     if (reviewWord && !profile.vocab.review.includes(reviewWord)) profile.vocab.review.push(reviewWord);
-    if (verbKey) profile.verbsMastered[verbKey] = true;
-    if (peppaId && !profile.peppaWatched.includes(peppaId)) profile.peppaWatched.push(peppaId);
+    if (result.masteryMet && verbKey) profile.verbsMastered[verbKey] = true;
+    if (result.masteryMet && peppaId && !profile.peppaWatched.includes(peppaId)) profile.peppaWatched.push(peppaId);
     const languages = await updateAccountLanguages(session.token, result.languages);
-    response.json({ languages, alreadyCompleted: result.alreadyCompleted, levelledUp: result.levelledUp, pandaAwarded: result.pandaAwarded });
+    response.json({ languages, alreadyCompleted: result.alreadyCompleted, levelledUp: result.levelledUp, pandaAwarded: result.pandaAwarded, masteryMet: result.masteryMet, accuracy: result.accuracy });
   } catch (error) {
     response.status(error?.status || 500).json({ error: error instanceof Error ? error.message : "Language progress update failed." });
   }

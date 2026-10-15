@@ -1,6 +1,10 @@
 export const LANGUAGE_LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"];
 export const LANGUAGE_SECTION_IDS = ["vocab", "grammar", "verbs", "speak", "listen", "watch"];
 export const LANGUAGE_IDS = ["fr", "es"];
+export const LANGUAGE_CURRICULUM_UNITS_PER_LEVEL = 24;
+export const LANGUAGE_CURRICULUM_MAX_LEVEL = 2;
+export const LANGUAGE_LESSON_MASTERY = 0.85;
+export const LANGUAGE_CURRICULUM_VERSION = 1;
 export const LANGUAGE_VOCABULARY_COUNTS = {
   fr: { A1: 496, A2: 1303, B1: 1713, B2: 2039, C1: 3259, C2: 398 },
   es: { A1: 454, A2: 1318, B1: 1725, B2: 2104, C1: 2601, C2: 292 }
@@ -28,24 +32,40 @@ function createDefaultVocabularyProgress() {
   return Object.fromEntries(LANGUAGE_LEVELS.map((level) => [level, { introduced: [], mastered: [], review: [] }]));
 }
 
-function isPlausibleTargetLanguage(value, lang) {
+function isPlausibleTargetLanguage(value, lang, level = 0, questionId = "") {
   const normalized = String(value || "").trim().toLocaleLowerCase().replaceAll("’", "'");
   const words = normalized.match(/[a-zà-ÿñ']+/g) || [];
-  if (words.length < 3) return false;
+  const minimumWords = [3, 4, 7][clampInteger(level, 0, 2)];
+  if (words.length < minimumWords) return false;
   const markers = lang === "fr"
-    ? ["je", "j'", "me", "m'", "appelle", "ai", "suis", "et", "le", "la", "un", "une", "tu", "que", "aime", "faire", "jouer", "au", "avec", "mes", "amis"]
-    : ["me", "llamo", "tengo", "soy", "y", "el", "la", "un", "una", "qué", "que", "te", "gusta", "hacer", "mi", "jugar", "al", "con", "mis", "amigos"];
-  const englishMarkers = new Set(["and", "my", "friends", "play", "with", "like", "name", "years", "old", "the", "to"]);
+    ? ["je", "j'", "me", "m'", "mon", "ma", "mes", "appelle", "habite", "vis", "ai", "suis", "est", "était", "et", "mais", "le", "la", "les", "un", "une", "des", "du", "de", "dans", "à", "au", "avec", "pour", "que", "aime", "adore", "faire", "jouer", "hier", "parce", "car", "avis", "pense", "crois", "voudrais", "pourriez", "excusez", "plaît"]
+    : ["me", "mi", "mis", "llamo", "vivo", "tengo", "soy", "está", "estaba", "y", "pero", "el", "la", "los", "las", "un", "una", "de", "en", "al", "con", "para", "que", "qué", "te", "gusta", "encanta", "hacer", "jugar", "ayer", "porque", "opinión", "pienso", "creo", "quisiera", "podría", "disculpe", "favor"];
+  const englishMarkers = new Set(["and", "my", "friends", "play", "with", "like", "name", "years", "old", "the", "to", "because", "think", "would", "please", "live", "yesterday", "food", "cold"]);
   const markerHits = markers.filter((marker) => words.includes(marker) || (marker.endsWith("'") && normalized.includes(marker))).length;
   const englishHits = words.filter((word) => englishMarkers.has(word)).length;
-  return markerHits >= 2 && englishHits <= Math.max(1, Math.floor(words.length / 4));
+  if (markerHits < 2 || englishHits > Math.max(1, Math.floor(words.length / 4))) return false;
+
+  const id = String(questionId || "");
+  if (id.includes("speak-a2-1")) {
+    return lang === "fr" ? /\b(aime|adore|préfère|jouer|faire)\b/.test(normalized) : /\b(gusta|encanta|prefiero|jugar|hacer)\b/.test(normalized);
+  }
+  if (id.includes("speak-a2-2")) {
+    return lang === "fr" ? /\b(hier|ai|suis|étais|avons|sommes)\b/.test(normalized) : /\b(ayer|fui|hice|estuve|he|hemos)\b/.test(normalized);
+  }
+  if (id.includes("speak-b1-1")) {
+    return lang === "fr" ? /\b(parce|car|avis|pense|crois)\b/.test(normalized) : /\b(porque|opinión|pienso|creo)\b/.test(normalized);
+  }
+  if (id.includes("speak-b1-2")) {
+    return lang === "fr" ? /\b(voudrais|pourriez|excusez|plaît)\b/.test(normalized) : /\b(quisiera|podría|disculpe|favor)\b/.test(normalized);
+  }
+  return true;
 }
 
 function createDefaultSection(sectionId) {
   return {
     level: 0,
     lessonsDone: 0,
-    lessonsToNext: sectionId === "watch" ? 8 : 10
+    lessonsToNext: LANGUAGE_CURRICULUM_UNITS_PER_LEVEL
   };
 }
 
@@ -54,6 +74,7 @@ export function createDefaultLanguageProfile(lang = "fr") {
   const sections = Object.fromEntries(LANGUAGE_SECTION_IDS.map((sectionId) => [sectionId, createDefaultSection(sectionId)]));
   sections.vocab.lessonsToNext = firstVocabularyCount;
   return {
+    curriculumVersion: LANGUAGE_CURRICULUM_VERSION,
     placementDone: false,
     placementAt: "",
     sections,
@@ -72,7 +93,7 @@ export function createDefaultLanguageProfile(lang = "fr") {
 
 export function createDefaultLanguagesState() {
   return {
-    version: 3,
+    version: 4,
     active: "",
     profiles: {
       fr: createDefaultLanguageProfile("fr"),
@@ -89,6 +110,7 @@ export function createDefaultLanguagesState() {
 function normalizeLanguageProfile(value, lang) {
   const base = createDefaultLanguageProfile(lang);
   const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const hasCurrentCurriculum = Number(source.curriculumVersion) === LANGUAGE_CURRICULUM_VERSION;
   const vocab = source.vocab && typeof source.vocab === "object" && !Array.isArray(source.vocab) ? source.vocab : {};
   const completedLessons = source.completedLessons && typeof source.completedLessons === "object" && !Array.isArray(source.completedLessons)
     ? Object.fromEntries(
@@ -101,14 +123,14 @@ function normalizeLanguageProfile(value, lang) {
 
   const normalizedSections = Object.fromEntries(LANGUAGE_SECTION_IDS.map((sectionId) => {
     const section = source.sections?.[sectionId] || {};
-    const level = clampInteger(section.level, 0, LANGUAGE_LEVELS.length - 1);
+    const level = clampInteger(section.level, 0, sectionId === "vocab" ? LANGUAGE_LEVELS.length - 1 : LANGUAGE_CURRICULUM_MAX_LEVEL);
     const vocabularyCount = LANGUAGE_VOCABULARY_COUNTS[lang]?.[LANGUAGE_LEVELS[level]] || 1;
     const lessonsToNext = sectionId === "vocab"
       ? vocabularyCount
-      : clampInteger(section.lessonsToNext || base.sections[sectionId].lessonsToNext, 1, 100);
+      : LANGUAGE_CURRICULUM_UNITS_PER_LEVEL;
     return [sectionId, {
       level,
-      lessonsDone: clampInteger(section.lessonsDone, 0, lessonsToNext),
+      lessonsDone: sectionId === "vocab" || hasCurrentCurriculum ? clampInteger(section.lessonsDone, 0, lessonsToNext) : 0,
       lessonsToNext
     }];
   }));
@@ -126,6 +148,7 @@ function normalizeLanguageProfile(value, lang) {
   normalizedSections.vocab.lessonsDone = levelProgress[currentVocabularyLevel].mastered.length;
 
   return {
+    curriculumVersion: LANGUAGE_CURRICULUM_VERSION,
     placementDone: Boolean(source.placementDone),
     placementAt: String(source.placementAt || "").slice(0, 40),
     sections: normalizedSections,
@@ -148,7 +171,7 @@ export function normalizeLanguagesState(value) {
   const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
   const rewards = source.rewards && typeof source.rewards === "object" && !Array.isArray(source.rewards) ? source.rewards : {};
   return {
-    version: 3,
+    version: 4,
     active: LANGUAGE_IDS.includes(String(source.active || "")) ? String(source.active) : "",
     profiles: {
       fr: normalizeLanguageProfile(source.profiles?.fr, "fr"),
@@ -200,31 +223,37 @@ export function applyPlacementResult(value, lang, answers) {
   }
   const profile = languages.profiles[lang];
   const grouped = Object.fromEntries(LANGUAGE_SECTION_IDS.map((sectionId) => [sectionId, []]));
-  (Array.isArray(answers) ? answers : []).slice(0, 40).forEach((answer) => {
+  const seenIds = new Set();
+  (Array.isArray(answers) ? answers : []).slice(0, 72).forEach((answer) => {
     const section = String(answer?.section || "");
-    if (!grouped[section]) {
+    const id = String(answer?.id || "").slice(0, 80);
+    if (!grouped[section] || !id || seenIds.has(id)) {
       return;
     }
+    seenIds.add(id);
     const skipped = Boolean(answer?.skipped);
     grouped[section].push({
+      id,
       skipped,
-      correct: !skipped && (section === "speak" ? isPlausibleTargetLanguage(answer?.response, lang) : Boolean(answer?.correct)),
-      level: clampInteger(answer?.level, 0, 3)
+      correct: !skipped && (section === "speak" ? isPlausibleTargetLanguage(answer?.response, lang, answer?.level, id) : Boolean(answer?.correct)),
+      level: clampInteger(answer?.level, 0, LANGUAGE_CURRICULUM_MAX_LEVEL)
     });
   });
 
   const levels = {};
   LANGUAGE_SECTION_IDS.forEach((sectionId) => {
-    const attempted = grouped[sectionId].filter((answer) => !answer.skipped);
-    const correct = attempted.filter((answer) => answer.correct);
-    const accuracy = attempted.length ? correct.length / attempted.length : 0;
-    const hardestCorrect = correct.reduce((highest, answer) => Math.max(highest, answer.level), 0);
+    const sectionAnswers = grouped[sectionId];
+    const correctByLevel = [0, 1, 2].map((levelIndex) => sectionAnswers.filter((answer) => answer.level === levelIndex && answer.correct).length);
+    const submittedByLevel = [0, 1, 2].map((levelIndex) => sectionAnswers.filter((answer) => answer.level === levelIndex).length);
+    const totalCorrect = correctByLevel.reduce((sum, count) => sum + count, 0);
     let level = 0;
-    if (attempted.length && accuracy >= 0.85) {
-      level = Math.min(3, Math.max(1, hardestCorrect + 1));
-    } else if (attempted.length && accuracy >= 0.55) {
-      level = Math.min(2, hardestCorrect);
-    }
+    const completeDiagnostic = submittedByLevel.every((count) => count >= 2);
+    const b1Evidence = completeDiagnostic && totalCorrect >= 4 && correctByLevel.every((count) => count >= 1);
+    const a2Evidence = submittedByLevel[0] >= 2 && submittedByLevel[1] >= 2
+      && correctByLevel[0] >= 1 && correctByLevel[1] >= 1
+      && correctByLevel[0] + correctByLevel[1] >= 3;
+    if (b1Evidence) level = 2;
+    else if (a2Evidence) level = 1;
     profile.sections[sectionId].level = level;
     profile.sections[sectionId].lessonsDone = 0;
     if (sectionId === "vocab") profile.sections[sectionId].lessonsToNext = LANGUAGE_VOCABULARY_COUNTS[lang][LANGUAGE_LEVELS[level]];
@@ -248,6 +277,10 @@ export function applyLanguageProgress(value, { lang, section, lessonId, correct 
   const profile = languages.profiles[lang];
   const sectionProgress = profile.sections[section];
   const alreadyCompleted = Boolean(profile.completedLessons[cleanLessonId]);
+  const cleanCorrect = Math.max(0, Number(correct) || 0);
+  const cleanTotal = Math.max(0, Number(total) || 0);
+  const accuracy = cleanTotal > 0 ? Math.min(1, cleanCorrect / cleanTotal) : 0;
+  const masteryMet = accuracy >= LANGUAGE_LESSON_MASTERY;
   let levelledUp = false;
   let pandaAwarded = "";
 
@@ -255,16 +288,16 @@ export function applyLanguageProgress(value, { lang, section, lessonId, correct 
     return { languages, alreadyCompleted: true, levelledUp, pandaAwarded };
   }
 
-  if (!alreadyCompleted && complete !== false) {
+  if (!alreadyCompleted && complete !== false && masteryMet) {
     profile.completedLessons[cleanLessonId] = new Date().toISOString();
     sectionProgress.lessonsDone += 1;
-    if (sectionProgress.lessonsDone >= sectionProgress.lessonsToNext && sectionProgress.level < LANGUAGE_LEVELS.length - 1) {
+    if (sectionProgress.lessonsDone >= sectionProgress.lessonsToNext && sectionProgress.level < LANGUAGE_CURRICULUM_MAX_LEVEL) {
       sectionProgress.level += 1;
       sectionProgress.lessonsDone = 0;
       levelledUp = true;
       pandaAwarded = awardNextPanda(languages);
     }
-    if (section === "watch" && Number(total) > 0 && Number(correct) / Number(total) >= 0.8 && !pandaAwarded) {
+    if (section === "watch" && !pandaAwarded) {
       pandaAwarded = awardNextPanda(languages);
     }
     if (updateStreak(languages, activityDate) && !pandaAwarded) {
@@ -272,7 +305,7 @@ export function applyLanguageProgress(value, { lang, section, lessonId, correct 
     }
   }
 
-  return { languages, alreadyCompleted, levelledUp, pandaAwarded };
+  return { languages, alreadyCompleted, levelledUp, pandaAwarded, masteryMet, accuracy };
 }
 
 export function applyVocabularySession(value, { lang, level, results, activityDate = "" }) {

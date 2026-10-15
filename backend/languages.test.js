@@ -5,6 +5,7 @@ import {
   applyPlacementResult,
   applyVocabularySession,
   createDefaultLanguagesState,
+  LANGUAGE_CURRICULUM_UNITS_PER_LEVEL,
   LANGUAGE_VOCABULARY_COUNTS,
   normalizeLanguagesState,
   setLanguageTopics
@@ -14,59 +15,98 @@ test("language defaults create independent French and Spanish section progress",
   const languages = createDefaultLanguagesState();
   languages.profiles.fr.sections.vocab.lessonsDone = 3;
   assert.equal(languages.profiles.es.sections.vocab.lessonsDone, 0);
-  assert.equal(languages.profiles.fr.sections.watch.lessonsToNext, 8);
+  assert.equal(languages.profiles.fr.sections.watch.lessonsToNext, LANGUAGE_CURRICULUM_UNITS_PER_LEVEL);
   assert.equal(languages.profiles.fr.sections.vocab.lessonsToNext, 496);
   assert.equal(languages.profiles.es.sections.vocab.lessonsToNext, 454);
 });
 
-test("placement scores every section independently and awards the first panda", () => {
-  const answers = ["vocab", "grammar", "verbs", "speak", "listen", "watch"].flatMap((section) => [
-    { section, level: 0, correct: true },
-    { section, level: 2, correct: section !== "verbs" }
-  ]);
+function placementAnswers(section, correctness, responses = []) {
+  return correctness.map((correct, index) => ({
+    id: `fr-${section}-${["a1-1", "a1-2", "a2-1", "a2-2", "b1-1", "b1-2"][index]}`,
+    section,
+    level: Math.floor(index / 2),
+    correct,
+    response: responses[index] || ""
+  }));
+}
+
+const validFrenchSpeaking = [
+  "Je m'appelle Amy.",
+  "J'habite à Sydney.",
+  "J'aime jouer au tennis.",
+  "Hier, je suis allée au parc.",
+  "À mon avis, ils sont utiles parce que je révise mieux.",
+  "Excusez-moi, mon repas est froid; pourriez-vous le remplacer, s'il vous plaît ?"
+];
+
+test("placement requires evidence across bands, scores skills independently and awards the first panda", () => {
+  const answers = ["vocab", "grammar", "listen", "watch"].flatMap((section) => placementAnswers(section, [true, true, true, false, true, false]));
+  answers.push(...placementAnswers("verbs", [true, true, true, false, false, false]));
+  answers.push(...placementAnswers("speak", [true, true, true, true, true, true], validFrenchSpeaking));
   const result = applyPlacementResult(createDefaultLanguagesState(), "fr", answers);
   assert.equal(result.languages.profiles.fr.placementDone, true);
   assert.equal(result.languages.profiles.es.placementDone, false);
-  assert.equal(result.levels.vocab, 3);
-  assert.equal(result.languages.profiles.fr.sections.vocab.lessonsToNext, LANGUAGE_VOCABULARY_COUNTS.fr.B2);
-  assert.equal(result.levels.verbs, 0);
+  assert.equal(result.levels.vocab, 2);
+  assert.equal(result.languages.profiles.fr.sections.vocab.lessonsToNext, LANGUAGE_VOCABULARY_COUNTS.fr.B1);
+  assert.equal(result.levels.verbs, 1);
+  assert.equal(result.levels.speak, 2);
   assert.equal(result.pandaAwarded, "happy");
 });
 
-test("placement rejects non-target-language speaking text", () => {
-  const result = applyPlacementResult(createDefaultLanguagesState(), "fr", [
-    { section: "speak", level: 1, correct: true, response: "this is only an English answer" }
-  ]);
-  assert.equal(result.levels.speak, 0);
-
-  const accepted = applyPlacementResult(createDefaultLanguagesState(), "es", [
-    { section: "speak", level: 1, correct: true, response: "Me gusta jugar al fútbol" }
-  ]);
-  assert.ok(accepted.levels.speak >= 1);
-
-  const conciseFrench = applyPlacementResult(createDefaultLanguagesState(), "fr", [
-    { section: "speak", level: 1, correct: true, response: "Jouer au football avec mes amis" }
-  ]);
-  assert.ok(conciseFrench.levels.speak >= 1);
-
-  const markerMixedWithEnglish = applyPlacementResult(createDefaultLanguagesState(), "es", [
-    { section: "speak", level: 1, correct: true, response: "me and my friends play football" }
-  ]);
-  assert.equal(markerMixedWithEnglish.levels.speak, 0);
+test("one lucky difficult answer cannot place a learner above A1", () => {
+  const result = applyPlacementResult(createDefaultLanguagesState(), "fr", placementAnswers("grammar", [false, false, false, false, true, false]));
+  assert.equal(result.levels.grammar, 0);
 });
 
-test("progress is idempotent and levels up at the saved threshold", () => {
+test("placement rejects non-target-language speaking and checks the requested language feature", () => {
+  const result = applyPlacementResult(createDefaultLanguagesState(), "fr", placementAnswers(
+    "speak",
+    [true, true, true, true, true, true],
+    Array(6).fill("this is only an English answer")
+  ));
+  assert.equal(result.levels.speak, 0);
+
+  const incompleteFeature = [...validFrenchSpeaking];
+  incompleteFeature[4] = "Les devoirs sont utiles tous les jours pour les élèves.";
+  incompleteFeature[5] = "Mon repas est froid et je ne suis pas contente du tout.";
+  const featureResult = applyPlacementResult(createDefaultLanguagesState(), "fr", placementAnswers("speak", [true, true, true, true, true, true], incompleteFeature));
+  assert.equal(featureResult.levels.speak, 1);
+});
+
+test("progress is idempotent and levels up after 24 mastered units", () => {
   let languages = createDefaultLanguagesState();
-  languages.profiles.fr.sections.grammar.lessonsToNext = 2;
-  let result = applyLanguageProgress(languages, { lang: "fr", section: "grammar", lessonId: "g-1", correct: 1, total: 1, activityDate: "2026-10-14" });
+  let result = applyLanguageProgress(languages, { lang: "fr", section: "grammar", lessonId: "g-1", correct: 9, total: 10, activityDate: "2026-10-14" });
   languages = result.languages;
-  result = applyLanguageProgress(languages, { lang: "fr", section: "grammar", lessonId: "g-1", correct: 1, total: 1, activityDate: "2026-10-14" });
+  result = applyLanguageProgress(languages, { lang: "fr", section: "grammar", lessonId: "g-1", correct: 9, total: 10, activityDate: "2026-10-14" });
   assert.equal(result.alreadyCompleted, true);
   assert.equal(result.languages.profiles.fr.sections.grammar.lessonsDone, 1);
-  result = applyLanguageProgress(result.languages, { lang: "fr", section: "grammar", lessonId: "g-2", correct: 1, total: 1, activityDate: "2026-10-15" });
+  for (let unit = 2; unit <= LANGUAGE_CURRICULUM_UNITS_PER_LEVEL; unit += 1) {
+    result = applyLanguageProgress(result.languages, { lang: "fr", section: "grammar", lessonId: `g-${unit}`, correct: 9, total: 10, activityDate: "2026-10-15" });
+  }
   assert.equal(result.levelledUp, true);
   assert.equal(result.languages.profiles.fr.sections.grammar.level, 1);
   assert.equal(result.languages.profiles.fr.sections.grammar.lessonsDone, 0);
+});
+
+test("a lesson below 85 percent is review practice and cannot advance", () => {
+  const result = applyLanguageProgress(createDefaultLanguagesState(), {
+    lang: "es", section: "listen", lessonId: "es-listen-a1-01", correct: 8, total: 10
+  });
+  assert.equal(result.masteryMet, false);
+  assert.equal(result.languages.profiles.es.sections.listen.lessonsDone, 0);
+  assert.equal(result.languages.profiles.es.completedLessons["es-listen-a1-01"], undefined);
+});
+
+test("completed B1 curriculum stays at B1 until the later programme is published", () => {
+  let languages = createDefaultLanguagesState();
+  languages.profiles.fr.sections.speak.level = 2;
+  languages.profiles.fr.sections.speak.lessonsDone = LANGUAGE_CURRICULUM_UNITS_PER_LEVEL - 1;
+  const result = applyLanguageProgress(languages, {
+    lang: "fr", section: "speak", lessonId: "fr-speak-b1-24", correct: 6, total: 6
+  });
+  assert.equal(result.levelledUp, false);
+  assert.equal(result.languages.profiles.fr.sections.speak.level, 2);
+  assert.equal(result.languages.profiles.fr.sections.speak.lessonsDone, LANGUAGE_CURRICULUM_UNITS_PER_LEVEL);
 });
 
 test("review-only activity is saved without advancing lesson progress", () => {
@@ -133,12 +173,29 @@ test("vocabulary stays at the current level below the mastery threshold and requ
   assert.deepEqual(result.languages.profiles.fr.vocab.levelProgress.A1.review, [0]);
 });
 
-test("normalization caps levels at C2 and topic updates preserve other progress", () => {
+test("normalization keeps vocabulary through C2 but caps published lesson tracks at B1", () => {
   const languages = createDefaultLanguagesState();
   languages.profiles.es.sections.listen.level = 99;
+  languages.profiles.es.sections.vocab.level = 99;
   const normalized = normalizeLanguagesState(languages);
-  assert.equal(normalized.profiles.es.sections.listen.level, 5);
+  assert.equal(normalized.profiles.es.sections.listen.level, 2);
+  assert.equal(normalized.profiles.es.sections.vocab.level, 5);
   const withTopics = setLanguageTopics(normalized, "es", ["Música", "Viajes", "Música"]);
   assert.deepEqual(withTopics.profiles.es.vocab.topics, ["Música", "Viajes"]);
-  assert.equal(withTopics.profiles.es.sections.listen.level, 5);
+  assert.equal(withTopics.profiles.es.sections.listen.level, 2);
+});
+
+test("legacy lesson counters restart at unit one for the new comprehensive curriculum", () => {
+  const legacy = createDefaultLanguagesState();
+  delete legacy.profiles.fr.curriculumVersion;
+  legacy.profiles.fr.sections.grammar.lessonsDone = 10;
+  legacy.profiles.fr.sections.listen.lessonsDone = 7;
+  legacy.profiles.fr.sections.vocab.lessonsDone = 200;
+  legacy.profiles.fr.vocab.levelProgress.A1.introduced = Array.from({ length: 200 }, (_, index) => index);
+  legacy.profiles.fr.vocab.levelProgress.A1.mastered = Array.from({ length: 190 }, (_, index) => index);
+  const migrated = normalizeLanguagesState(legacy);
+  assert.equal(migrated.profiles.fr.sections.grammar.lessonsDone, 0);
+  assert.equal(migrated.profiles.fr.sections.listen.lessonsDone, 0);
+  assert.equal(migrated.profiles.fr.sections.vocab.lessonsDone, 190);
+  assert.equal(migrated.profiles.fr.curriculumVersion, 1);
 });

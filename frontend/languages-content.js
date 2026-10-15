@@ -1,3 +1,5 @@
+import { COMPREHENSIVE_PLACEMENT } from "./languages-placement.js";
+
 const FR_PRONOUNS = ["je", "tu", "il / elle", "nous", "vous", "ils / elles"];
 const ES_PRONOUNS = ["yo", "tú", "él / ella", "nosotros", "vosotros", "ellos / ellas"];
 
@@ -176,36 +178,6 @@ const SHARED_TOPICS = {
   }
 };
 
-const FR_PLACEMENT = [
-  { id: "fr-vocab-a1", section: "vocab", level: 0, kind: "vocab", prompt: "Which picture is “le chat” ?", options: [["🐶", "dog"], ["🐱", "cat"], ["🐟", "fish"], ["🐦", "bird"]], answer: 1 },
-  { id: "fr-vocab-a2", section: "vocab", level: 1, kind: "vocab", prompt: "Which picture is “la fenêtre” ?", options: [["🚪", "door"], ["🪟", "window"], ["🪑", "chair"], ["🛏️", "bed"]], answer: 1 },
-  { id: "fr-grammar-a1", section: "grammar", level: 0, kind: "grammar", prompt: "C’est ___ maison.", options: ["le", "la", "les", "un"], answer: 1 },
-  { id: "fr-grammar-a2", section: "grammar", level: 1, kind: "grammar", prompt: "Nous allons ___ école.", options: ["à la", "au", "aux", "du"], answer: 0 },
-  { id: "fr-verbs-a1", section: "verbs", level: 0, kind: "verbs", prompt: "Nous ___ contents. (être)", options: ["sommes", "êtes", "sont", "suis"], answer: 0 },
-  { id: "fr-verbs-b1", section: "verbs", level: 2, kind: "verbs", prompt: "Demain, je ___ prêt. (être)", options: ["serai", "suis", "étais", "serais"], answer: 0 },
-  { id: "fr-speak-a1", section: "speak", level: 0, kind: "speak", prompt: "Say this out loud", phrase: "Je m’appelle Maddie et j’ai douze ans.", meaning: "My name is Maddie and I am twelve." },
-  { id: "fr-speak-a2", section: "speak", level: 1, kind: "speak", prompt: "Answer out loud", phrase: "Qu’est-ce que tu aimes faire ?", meaning: "What do you like doing?" },
-  { id: "fr-listen-a1", section: "listen", level: 0, kind: "listen", prompt: "Listen. What did Panda say?", audio: "J’ai deux frères.", options: ["I have two sisters", "I have two brothers", "I am two years old", "I like my brother"], answer: 1 },
-  { id: "fr-listen-a2", section: "listen", level: 1, kind: "listen", prompt: "Listen. Where are they going?", audio: "Nous allons à la bibliothèque après l’école.", options: ["the library", "the park", "home", "the station"], answer: 0 },
-  { id: "fr-watch-a1", section: "watch", level: 0, kind: "read", prompt: "Read, then answer", passage: "Léa va au parc avec son chien. Il fait beau.", question: "What is the weather like?", options: ["Rainy", "Sunny", "Snowy", "Windy"], answer: 1 },
-  { id: "fr-watch-b1", section: "watch", level: 2, kind: "read", prompt: "Read, then answer", passage: "Même s’il pleut, Lucas décide de sortir parce qu’il doit acheter du pain.", question: "Why does Lucas go out?", options: ["To exercise", "To buy bread", "To meet a friend", "To walk the dog"], answer: 1 }
-];
-
-const ES_PLACEMENT = [
-  { id: "es-vocab-a1", section: "vocab", level: 0, kind: "vocab", prompt: "Which picture is “el gato” ?", options: [["🐶", "dog"], ["🐱", "cat"], ["🐟", "fish"], ["🐦", "bird"]], answer: 1 },
-  { id: "es-vocab-a2", section: "vocab", level: 1, kind: "vocab", prompt: "Which picture is “la ventana” ?", options: [["🚪", "door"], ["🪟", "window"], ["🪑", "chair"], ["🛏️", "bed"]], answer: 1 },
-  { id: "es-grammar-a1", section: "grammar", level: 0, kind: "grammar", prompt: "Es ___ casa.", options: ["el", "la", "los", "un"], answer: 1 },
-  { id: "es-grammar-a2", section: "grammar", level: 1, kind: "grammar", prompt: "Vamos ___ colegio.", options: ["al", "a la", "del", "por"], answer: 0 },
-  { id: "es-verbs-a1", section: "verbs", level: 0, kind: "verbs", prompt: "Nosotros ___ amigos. (ser)", options: ["somos", "sois", "son", "soy"], answer: 0 },
-  { id: "es-verbs-b1", section: "verbs", level: 2, kind: "verbs", prompt: "Mañana yo ___ en casa. (estar)", options: ["estaré", "estoy", "estaba", "estaría"], answer: 0 },
-  { id: "es-speak-a1", section: "speak", level: 0, kind: "speak", prompt: "Say this out loud", phrase: "Me llamo Maddie y tengo doce años.", meaning: "My name is Maddie and I am twelve." },
-  { id: "es-speak-a2", section: "speak", level: 1, kind: "speak", prompt: "Answer out loud", phrase: "¿Qué te gusta hacer?", meaning: "What do you like doing?" },
-  { id: "es-listen-a1", section: "listen", level: 0, kind: "listen", prompt: "Listen. What did Panda say?", audio: "Tengo dos hermanos.", options: ["I have two sisters", "I have two brothers", "I am two years old", "I like my brother"], answer: 1 },
-  { id: "es-listen-a2", section: "listen", level: 1, kind: "listen", prompt: "Listen. Where are they going?", audio: "Vamos a la biblioteca después del colegio.", options: ["the library", "the park", "home", "the station"], answer: 0 },
-  { id: "es-watch-a1", section: "watch", level: 0, kind: "read", prompt: "Read, then answer", passage: "Lucía va al parque con su perro. Hace sol.", question: "What is the weather like?", options: ["Rainy", "Sunny", "Snowy", "Windy"], answer: 1 },
-  { id: "es-watch-b1", section: "watch", level: 2, kind: "read", prompt: "Read, then answer", passage: "Aunque llueve, Lucas decide salir porque tiene que comprar pan.", question: "Why does Lucas go out?", options: ["To exercise", "To buy bread", "To meet a friend", "To walk the dog"], answer: 1 }
-];
-
 const LISTENING = {
   fr: {
     id: "fr-bookshop-1", title: "À la librairie", topic: "Hésiter, ne pas savoir", duration: "1:24",
@@ -237,7 +209,7 @@ const LISTENING = {
 
 export const LANGUAGE_CONTENT = {
   fr: {
-    id: "fr", name: "French", native: "Français", flag: "🇫🇷", locale: "fr-FR", hello: "Bonjour", placement: FR_PLACEMENT,
+    id: "fr", name: "French", native: "Français", flag: "🇫🇷", locale: "fr-FR", hello: "Bonjour", placement: COMPREHENSIVE_PLACEMENT.fr,
     verbs: FR_VERBS, scenes: FR_SCENES, topics: SHARED_TOPICS.fr,
     grammar: [
       { level: "A1", topic: "Le, la, les — ‘the’", rule: "French nouns are masculine or feminine. Use le for masculine, la for feminine and les for plural.", examples: [["le chien", "the dog"], ["la table", "the table"], ["les livres", "the books"]], check: { noun: "fenêtre", en: "window", options: ["le", "la", "les"], answer: 1 } },
@@ -248,15 +220,15 @@ export const LANGUAGE_CONTENT = {
     listening: LISTENING.fr,
     episode: { id: "fr-official-compilation-1", videoId: "CtLYeZP7GBk", channelVideoId: "CtLYeZP7GBk", title: "Compilation 1 · premier extrait", en: "Official compilation · first clip", length: "5-minute lesson clip", season: "Chaîne officielle", clipStart: 0, clipEnd: 305, captionsAvailable: false, captionLanguage: "fr" },
     episodeQs: [
-      { type: "Multiple choice", q: "Qui est le petit frère de Peppa ?", en: "Who is Peppa’s little brother?", options: ["George", "Pedro", "Danny", "Edmond"], answer: 0 },
-      { type: "Pick the word", q: "Quel mot signifie ‘family’ ?", en: "Which word means ‘family’?", options: ["famille", "maison", "école", "voiture"], answer: 0 },
-      { type: "Pick the word", q: "Quel mot signifie ‘pig’ ?", en: "Which word means ‘pig’?", options: ["chien", "chat", "cochon", "lapin"], answer: 2 },
-      { type: "Pick the phrase", q: "Comment dit-on ‘I am watching Peppa’ ?", en: "How do you say ‘I am watching Peppa’?", options: ["Je regarde Peppa", "J’écoute Peppa", "Je cherche Peppa", "J’appelle Peppa"], answer: 0 },
-      { type: "Multiple choice", q: "Que veut dire ‘J’aime cette histoire’ ?", en: "What does ‘J’aime cette histoire’ mean?", options: ["I like this story", "I know this story", "I write this story", "I forget this story"], answer: 0 }
+      { type: "Episode detail", q: "Qu’est-ce que Peppa et George aiment faire après la pluie ?", en: "What do Peppa and George like doing after the rain?", options: ["Sauter dans les flaques de boue", "Faire du vélo", "Construire un château", "Prendre le train"], answer: 0 },
+      { type: "Sequence", q: "Que doivent-ils mettre avant de sortir ?", en: "What must they put on before going outside?", options: ["Leurs bottes", "Leurs pyjamas", "Leurs chapeaux de fête", "Leurs patins"], answer: 0 },
+      { type: "Episode detail", q: "Pourquoi George commence-t-il à pleurer ?", en: "Why does George begin to cry?", options: ["Il est couvert de boue", "Il perd son dinosaure", "Il a faim", "Il veut rentrer"], answer: 0 },
+      { type: "Inference", q: "Comment Peppa rassure-t-elle George ?", en: "How does Peppa reassure George?", options: ["Elle explique que ce n’est que de la boue", "Elle lui donne un cadeau", "Elle appelle Madame Gazelle", "Elle quitte le jardin"], answer: 0 },
+      { type: "Ending", q: "Que fait la famille à la fin de l’histoire ?", en: "What does the family do at the end?", options: ["Elle saute ensemble dans la boue", "Elle prend le déjeuner", "Elle va à l’école", "Elle nettoie la voiture"], answer: 0 }
     ]
   },
   es: {
-    id: "es", name: "Spanish", native: "Español", flag: "🇪🇸", locale: "es-ES", hello: "¡Hola!", placement: ES_PLACEMENT,
+    id: "es", name: "Spanish", native: "Español", flag: "🇪🇸", locale: "es-ES", hello: "¡Hola!", placement: COMPREHENSIVE_PLACEMENT.es,
     verbs: ES_VERBS, scenes: ES_SCENES, topics: SHARED_TOPICS.es,
     grammar: [
       { level: "A1", topic: "El, la, los, las — ‘the’", rule: "Spanish nouns are masculine or feminine. Use el or los for masculine and la or las for feminine.", examples: [["el perro", "the dog"], ["la mesa", "the table"], ["los libros", "the books"]], check: { noun: "ventana", en: "window", options: ["el", "la", "los"], answer: 1 } },
@@ -267,11 +239,11 @@ export const LANGUAGE_CONTENT = {
     listening: LISTENING.es,
     episode: { id: "es-official-transport", videoId: "Ybk3o_7oWIA", channelVideoId: "Ybk3o_7oWIA", title: "Trenes, aviones y coches · primer extracto", en: "Trains, planes and cars · first clip", length: "5-minute lesson clip", season: "Canal oficial", clipStart: 0, clipEnd: 305, captionsAvailable: false, captionLanguage: "es" },
     episodeQs: [
-      { type: "Multiple choice", q: "¿Qué transportes aparecen en el título?", en: "Which kinds of transport are in the title?", options: ["Trenes, aviones y coches", "Barcos, bicis y motos", "Autobuses y taxis", "Cohetes y barcos"], answer: 0 },
-      { type: "Pick the word", q: "¿Qué palabra significa ‘train’?", en: "Which word means ‘train’?", options: ["tren", "avión", "coche", "barco"], answer: 0 },
-      { type: "Pick the word", q: "¿Qué palabra significa ‘plane’?", en: "Which word means ‘plane’?", options: ["coche", "tren", "avión", "bici"], answer: 2 },
-      { type: "Pick the word", q: "¿Qué palabra significa ‘car’?", en: "Which word means ‘car’?", options: ["barco", "coche", "tren", "avión"], answer: 1 },
-      { type: "Multiple choice", q: "¿Cómo dices ‘I travel by train’?", en: "How do you say ‘I travel by train’?", options: ["Viajo en tren", "Vuelo en coche", "Camino en avión", "Nado en tren"], answer: 0 }
+      { type: "Detalle del episodio", q: "¿Adónde va la clase de Madame Gazelle?", en: "Where does Madame Gazelle’s class go?", options: ["De viaje en tren", "A la piscina", "Al supermercado", "En barco"], answer: 0 },
+      { type: "Secuencia", q: "¿Qué necesitan los niños para el viaje?", en: "What do the children need for the journey?", options: ["Un billete", "Un pasaporte", "Una bicicleta", "Un paraguas"], answer: 0 },
+      { type: "Detalle del episodio", q: "¿Quién tiene problemas para encontrar su billete?", en: "Who has trouble finding a ticket?", options: ["Pedro Pony", "Peppa", "Suzy Sheep", "Rebecca Rabbit"], answer: 0 },
+      { type: "Comprensión", q: "¿Qué hacen los niños durante el trayecto?", en: "What do the children do during the journey?", options: ["Buscan cosas desde la ventana", "Duermen todo el tiempo", "Conducen el tren", "Preparan la comida"], answer: 0 },
+      { type: "Final", q: "¿Por dónde pasa el tren durante la excursión?", en: "What does the train pass through during the outing?", options: ["Un túnel", "Un aeropuerto", "Un estadio", "Una granja submarina"], answer: 0 }
     ]
   }
 };
