@@ -1612,6 +1612,7 @@ const state = {
   askLatestSubjectId: "",
   askLatestQuestion: "",
   askLatestAnswer: "",
+  askAnswerSourceKeys: {},
   listeningDocumentId: null,
   selectedDocumentIds: [],
   googleDocsAccessToken: "",
@@ -13839,17 +13840,24 @@ function normaliseSavedRevisionTest(testRecord) {
   };
 }
 
-function normaliseWorksheetQuestionNumber(value) {
-  const raw = String(value || "")
-    .trim()
-    .toUpperCase()
-    .replace(/^QUESTION\s*/i, "")
-    .replace(/^Q\s*/i, "")
-    .replace(/\s+/g, "");
-  if (!/^\d{1,3}[A-Z]?$/.test(raw)) {
-    return "";
+function extractWorksheetQuestionReferences(text) {
+  const source = String(text || "");
+  const references = new Set();
+  const pattern = /\b(?:q(?:uestion)?s?|item|number)\s*#?\s*(\d{1,3})(?:\s*\(\s*([a-z])\s*\)|\s+part\s+([a-z])\b|([a-z])\b)?/gi;
+  for (const match of source.matchAll(pattern)) {
+    references.add(normaliseWorksheetQuestionNumber(`${match[1]}${match[2] || match[3] || match[4] || ""}`));
   }
-  return `Q${raw}`;
+  // Also accept a short, unambiguous request such as "7(a)".
+  if (!references.size && /^\s*\d{1,3}(?:\s*\([a-z]\)|[a-z])?\s*[?.]?\s*$/i.test(source)) {
+    references.add(normaliseWorksheetQuestionNumber(source.replace(/\?$/, "")));
+  }
+  return [...references].filter(Boolean);
+}
+
+function normaliseWorksheetQuestionNumber(value) {
+  const raw = String(value || "").trim().replace(/^(?:question|q)\s*/i, "");
+  const match = raw.match(/^(\d{1,3})(?:\s*\(\s*([a-z])\s*\)|\s*([a-z]))?[.):\s]*$/i);
+  return match ? `Q${Number(match[1])}${(match[2] || match[3] || "").toUpperCase()}` : "";
 }
 
 function normaliseQuestionBlock(block, index = 0) {
@@ -15011,13 +15019,12 @@ async function requestAskAnswer(question, subject, document) {
     .slice(-4)
     .map((entry) => ({ question: entry.question, answer: entry.answer }));
   const nextAssessment = getNextSubjectAssessment(subject);
-  const pageVisualOptions = document?.pageVisualOptions && typeof document.pageVisualOptions === "object"
-    ? document.pageVisualOptions
-    : {};
+  const pageVisualOptions = getAskPageVisualOptions(document, question);
   const pageVisuals = document
     ? await buildDocumentVisionPages(document, {
-        maxPages: 2,
-        maxTextPerPage: 120,
+        maxPages: 4,
+        maxTextPerPage: 6000,
+        includeTextPages: true,
         ...pageVisualOptions
       })
     : [];
@@ -15037,6 +15044,7 @@ async function requestAskAnswer(question, subject, document) {
           title: document.title,
           type: document.type,
           content: clipText(document.content || "Preview text is not available for this document.", contentLimit),
+          preferredPageNumber: pageVisualOptions.preferredPageNumber,
           pageVisuals
         }
       : null
@@ -15048,6 +15056,47 @@ async function requestAskAnswer(question, subject, document) {
   }
 
   return answer;
+}
+
+function getAskPageVisualOptions(documentRecord, question) {
+  const pages = getDocumentPages(documentRecord);
+  const references = extractWorksheetQuestionReferences(question);
+  const explicitPage = String(question || "").match(/\bpage\s+(\d+)\b/i);
+  const preferredPageNumber = Number(explicitPage?.[1])
+    || Number(documentRecord?.pageVisualOptions?.prioritizedPageNumbers?.[0])
+    || pages[getCurrentDocumentPageIndex(documentRecord)]?.pageNumber || 0;
+  if (!references.length && !explicitPage) {
+    return {
+      maxPages: 2,
+      prioritizedPageNumbers: preferredPageNumber ? [preferredPageNumber] : [],
+      ...(documentRecord?.pageVisualOptions || {}),
+      maxTextPerPage: 6000,
+      preferredPageNumber
+    };
+  }
+  const matches = pages.filter((page) => {
+    const blocks = buildWorksheetQuestionBlocksFromText(page.text, page.pageNumber);
+    const candidates = blocks.length ? blocks : page.questionBlocks || [];
+    return candidates.some((block) => references.some((reference) =>
+      block.questionNumber === reference || block.questionNumber === reference.replace(/[A-Z]$/, "")
+    ));
+  });
+  const matchedNumbers = matches.map((page) => page.pageNumber);
+  // An explicit page constrains the search; otherwise an exact question can be on any page.
+  const prioritizedPageNumbers = explicitPage
+    ? [preferredPageNumber]
+    : [...new Set([
+        ...(matchedNumbers.includes(preferredPageNumber) || !matches.length ? [preferredPageNumber] : []),
+        ...matchedNumbers,
+        preferredPageNumber
+      ])].filter(Boolean);
+  return {
+    maxPages: explicitPage ? 1 : 4,
+    maxTextPerPage: 6000,
+    preferredPageNumber,
+    prioritizedPageNumbers,
+    restrictToPrioritizedPages: Boolean(explicitPage)
+  };
 }
 
 function getLandingAskContextLabel(documentRecord) {
@@ -15261,7 +15310,9 @@ async function buildDocumentVisionPages(documentRecord, {
   maxPages = 4,
   maxTextPerPage = 220,
   sparseThreshold = 140,
-  prioritizedPageNumbers = []
+  prioritizedPageNumbers = [],
+  includeTextPages = false,
+  restrictToPrioritizedPages = false
 } = {}) {
   await hydrateDocumentPreviewImages(documentRecord);
   const pages = getDocumentPages(documentRecord);
@@ -15273,6 +15324,10 @@ async function buildDocumentVisionPages(documentRecord, {
     .map((page, index) => ({
       pageNumber: Number(page?.pageNumber || index + 1) || index + 1,
       text: clipText(getDocumentPageText(page), maxTextPerPage),
+      questionBlocks: (() => {
+        const rebuilt = buildWorksheetQuestionBlocksFromText(page.text, page.pageNumber || index + 1);
+        return rebuilt.length ? rebuilt : (page.questionBlocks || []);
+      })(),
       imageUrl: String(page?.imageUrl || "").trim(),
       askImageUrl: String(page?.askImageUrl || page?.imageUrl || "").trim(),
       isSparse: shouldUseBackendOcrForPdfPage(page) || getMeaningfulPdfText(page?.text).length < sparseThreshold
@@ -15283,14 +15338,15 @@ async function buildDocumentVisionPages(documentRecord, {
       .map((pageNumber) => Number(pageNumber) || 0)
       .filter((pageNumber) => pageNumber > 0)
   );
-  const prioritizedPages = candidatePages.filter((page) => prioritizedSet.has(page.pageNumber) && (page.askImageUrl || page.imageUrl));
+  const usablePages = candidatePages.filter((page) => page.askImageUrl || page.imageUrl || (includeTextPages && page.text));
+  const prioritizedPages = [...prioritizedSet].flatMap((pageNumber) => usablePages.filter((page) => page.pageNumber === pageNumber));
   const sparsePages = candidatePages.filter((page) => (page.askImageUrl || page.imageUrl) && page.isSparse);
   const fallbackPages =
     !sparsePages.length && getMeaningfulPdfText(documentRecord?.content).length < 220
       ? candidatePages.filter((page) => page.askImageUrl || page.imageUrl)
       : [];
-  const selectedPages = [...prioritizedPages];
-  const fillPages = sparsePages.length ? sparsePages : fallbackPages;
+  const selectedPages = prioritizedPages.slice(0, maxPages);
+  const fillPages = restrictToPrioritizedPages ? [] : includeTextPages ? usablePages : sparsePages.length ? sparsePages : fallbackPages;
   fillPages.forEach((page) => {
     if (selectedPages.length >= maxPages) {
       return;
@@ -15364,7 +15420,19 @@ function setAskSurfaceStatus(surface, message) {
   state.askStatus = nextMessage;
 }
 
-function storeAskAnswerForSurface(surface, question, answer) {
+function getAskSourceKey(surface) {
+  const documentRecord = getActiveAskDocument(surface);
+  return JSON.stringify([
+    getSelectedSubject()?.id || "",
+    documentRecord?.id || "",
+    getCurrentDocumentPageIndex(documentRecord),
+    surface?.kind === "landing" ? state.subjectLandingView : "reader",
+    surface?.kind === "landing" ? state.subjectLandingPieceIndex : documentRecord?.currentSectionIndex || 0
+  ]);
+}
+
+function storeAskAnswerForSurface(surface, question, answer, sourceKey = getAskSourceKey(surface)) {
+  state.askAnswerSourceKeys = { ...state.askAnswerSourceKeys, [surface?.kind || "dock"]: sourceKey };
   const trimmedQuestion = String(question || "").trim();
   const trimmedAnswer = String(answer || "").trim();
   if (surface?.kind === "landing") {
@@ -15384,6 +15452,9 @@ function canReplayStoredAskAnswer(surface, question) {
   const trimmedQuestion = String(question || "").trim();
   const storedAnswer = getStoredAskAnswer(surface);
   if (!storedAnswer) {
+    return false;
+  }
+  if (state.askAnswerSourceKeys?.[surface?.kind || "dock"] !== getAskSourceKey(surface)) {
     return false;
   }
   if (!trimmedQuestion) {
@@ -21701,6 +21772,7 @@ function playAskResponseForSurface(activeSurface, answerToPlay) {
 async function handleAsk({ autoPlayResponse = false } = {}) {
   const subject = getSelectedSubject();
   const activeSurface = getActiveAskSurface();
+  const sourceKey = getAskSourceKey(activeSurface);
   if (!subject) {
     return;
   }
@@ -21732,6 +21804,7 @@ async function handleAsk({ autoPlayResponse = false } = {}) {
     answer
   });
   persistSubjects();
+  state.askAnswerSourceKeys = { ...state.askAnswerSourceKeys, [activeSurface?.kind || "dock"]: sourceKey };
   setAskSurfaceStatus(activeSurface, answer);
   if (activeSurface?.input) {
     activeSurface.input.value = "";
@@ -21762,6 +21835,7 @@ function handleAskMicToggle() {
 
 function handleAskListen() {
   const activeSurface = getActiveAskSurface();
+  const sourceKey = getAskSourceKey(activeSurface);
   if (state.askResponseSpeaking && !state.askResponsePaused) {
     return;
   }
@@ -21801,7 +21875,7 @@ function handleAskListen() {
         answer
       });
       persistSubjects();
-      storeAskAnswerForSurface(activeSurface, question, answer);
+      storeAskAnswerForSurface(activeSurface, question, answer, sourceKey);
       playAskResponseForSurface(activeSurface, answer);
     })
     .catch((error) => {
@@ -22336,31 +22410,23 @@ function splitWorksheetTextIntoLines(text) {
 
 function getWorksheetQuestionLineMatch(line) {
   const source = String(line || "").trim();
-  if (!source) {
-    return null;
-  }
-
+  const label = "([0-9]{1,3}(?:\\s*\\([a-z]\\)|[a-z])?)";
   const patterns = [
-    /^(?:question|q)\s*([0-9]{1,3}[a-z]?)\b[\s:.)-]*(.*)$/i,
-    /^([0-9]{1,3}[a-z]?)\s*[\])}.:-]\s*(.+)$/i,
-    /^([0-9]{1,3}[a-z]?)\s+(?=[A-Z(])(.+)$/i
+    new RegExp(`^(?:question|q)\\s*${label}(?=\\s|[.):\\]-]|$)[\\s:.)-]*(.*)$`, "i"),
+    new RegExp(`^${label}\\s*[\\])}:.-](?!\\d)\\s*(.*)$`, "i"),
+    new RegExp(`^${label}\\s+([A-Za-z]{2,}\\b.*|\\([a-z]\\).*)$`, "i"),
+    new RegExp(`^${label}$`, "i"),
+    /^(\d{1,3}\s*\([a-z]\))\s*(.+)$/i
   ];
-
   for (const pattern of patterns) {
     const match = source.match(pattern);
-    if (!match) {
-      continue;
+    if (match) {
+      const questionNumber = normaliseWorksheetQuestionNumber(match[1]);
+      if (questionNumber) {
+        return { questionNumber, remainder: String(match[2] || "").trim() };
+      }
     }
-    const questionNumber = normaliseWorksheetQuestionNumber(match[1]);
-    if (!questionNumber) {
-      continue;
-    }
-    return {
-      questionNumber,
-      remainder: String(match[2] || "").trim()
-    };
   }
-
   return null;
 }
 
@@ -22368,39 +22434,51 @@ function buildWorksheetQuestionBlocksFromText(text, pageNumber = 0) {
   const lines = splitWorksheetTextIntoLines(text);
   const blocks = [];
   let currentBlock = null;
-
-  lines.forEach((line) => {
+  for (const line of lines) {
     const questionLine = getWorksheetQuestionLineMatch(line);
     if (questionLine) {
-      if (currentBlock?.textLines?.length) {
-        blocks.push(currentBlock);
-      }
       currentBlock = {
         questionNumber: questionLine.questionNumber,
-        pageNumber: Math.max(1, Number(pageNumber || 0) || 0),
-        order: blocks.length,
-        textLines: [line]
+        pageNumber: Math.max(1, Number(pageNumber) || 1),
+        textLines: [line],
+        remainder: questionLine.remainder
       };
-      return;
-    }
-
-    if (currentBlock) {
+      blocks.push(currentBlock);
+    } else if (currentBlock) {
       currentBlock.textLines.push(line);
     }
-  });
-
-  if (currentBlock?.textLines?.length) {
-    blocks.push(currentBlock);
   }
-
-  return blocks
-    .map((block) => normaliseQuestionBlock({
+  return blocks.flatMap((block) => {
+    // A page footer containing only a number is not a question.
+    if (!block.remainder && block.textLines.length === 1) {
+      return [];
+    }
+    const result = [{
       questionNumber: block.questionNumber,
       pageNumber: block.pageNumber,
-      order: block.order,
       text: block.textLines.join("\n").trim()
-    }))
-    .filter((block) => block.questionNumber && block.text);
+    }];
+    if (/^Q\d+$/.test(block.questionNumber)) {
+      const instructions = [];
+      let part = null;
+      for (const line of block.textLines) {
+        const match = line.match(/^(?:\(([a-z])\)|([a-z])[.)])\s*(.*)$/i);
+        if (match) {
+          part = {
+            questionNumber: `${block.questionNumber}${(match[1] || match[2]).toUpperCase()}`,
+            pageNumber: block.pageNumber,
+            text: [...instructions, line].join("\n")
+          };
+          result.push(part);
+        } else if (part) {
+          part.text += `\n${line}`;
+        } else {
+          instructions.push(line);
+        }
+      }
+    }
+    return result;
+  }).map((block, order) => ({ ...block, order }));
 }
 
 function getPdfTextSignal(text) {

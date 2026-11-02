@@ -237,7 +237,7 @@ function cleanDocumentStudyPageExcerpts(pageExcerpts) {
     .slice(0, 90);
 }
 
-function cleanDocumentVisionPages(pageVisuals, { pageLimit = 6, textLimit = 260 } = {}) {
+function cleanDocumentVisionPages(pageVisuals, { pageLimit = 6, textLimit = 260, includeTextPages = false } = {}) {
   if (!Array.isArray(pageVisuals)) {
     return [];
   }
@@ -248,15 +248,19 @@ function cleanDocumentVisionPages(pageVisuals, { pageLimit = 6, textLimit = 260 
       const askImageUrl = String(page?.askImageUrl || imageUrl).trim();
       return {
         pageNumber: Math.max(1, Number(page?.pageNumber || index + 1) || index + 1),
-        text: clipText(String(page?.text || "").replace(/\s+/g, " ").trim(), textLimit),
+        text: String(page?.text || "").trim().slice(0, textLimit),
         imageUrl,
         askImageUrl,
-        questionBlocks: cleanDocumentQuestionBlocks(page?.questionBlocks)
+        questionBlocks: cleanDocumentQuestionBlocks(page?.questionBlocks).map((block) => ({
+          ...block,
+          pageNumber: Math.max(1, Number(page?.pageNumber || index + 1) || index + 1)
+        }))
       };
     })
     .filter((page) => {
       const sourceImageUrl = page.askImageUrl || page.imageUrl;
-      return sourceImageUrl && (/^data:image\//i.test(sourceImageUrl) || /^https?:\/\//i.test(sourceImageUrl));
+      return (sourceImageUrl && (/^data:image\//i.test(sourceImageUrl) || /^https?:\/\//i.test(sourceImageUrl)))
+        || (includeTextPages && (page.text || page.questionBlocks.length));
     })
     .slice(0, pageLimit);
 }
@@ -270,7 +274,7 @@ function cleanDocumentQuestionBlocks(blocks) {
     .map((block, index) => ({
       questionNumber: normaliseWorksheetQuestionNumber(block?.questionNumber || block?.id || ""),
       pageNumber: Math.max(1, Number(block?.pageNumber || 0) || 0),
-      text: clipText(String(block?.text || "").replace(/\s+\n/g, "\n").trim(), 2600),
+      text: String(block?.text || "").replace(/\s+\n/g, "\n").trim().slice(0, 6000),
       order: Math.max(0, Number(block?.order || index) || index)
     }))
     .filter((block) => block.questionNumber && block.text);
@@ -306,8 +310,9 @@ function buildAskDocumentContext(document, { compact = false } = {}) {
   }
 
   const pageVisuals = cleanDocumentVisionPages(document.pageVisuals, {
-    pageLimit: compact ? 1 : 2,
-    textLimit: compact ? 160 : 320
+    pageLimit: 4,
+    textLimit: compact ? 3000 : 6000,
+    includeTextPages: true
   });
   const cleanedContent = cleanDocumentStudyText(document.content);
   const contentLimit = pageVisuals.length
@@ -318,6 +323,7 @@ function buildAskDocumentContext(document, { compact = false } = {}) {
     title: clipText(String(document.title || "").trim(), 180),
     type: clipText(String(document.type || "").trim(), 120),
     content: clipText(cleanedContent, contentLimit),
+    preferredPageNumber: Number(document.preferredPageNumber) || 0,
     pageVisuals
   };
 }
@@ -335,34 +341,21 @@ function isContextWindowError(error) {
 function extractWorksheetQuestionReferences(text) {
   const source = String(text || "");
   const references = new Set();
-  const patterns = [
-    /\bq(?:uestion)?\s*([0-9]{1,3}[a-z]?)\b/gi,
-    /\bitem\s*([0-9]{1,3}[a-z]?)\b/gi,
-    /\bnumber\s*([0-9]{1,3}[a-z]?)\b/gi
-  ];
-
-  patterns.forEach((pattern) => {
-    let match = pattern.exec(source);
-    while (match) {
-      references.add(`Q${String(match[1] || "").toUpperCase()}`);
-      match = pattern.exec(source);
-    }
-  });
-
-  return [...references].slice(0, 4);
+  const pattern = /\b(?:q(?:uestion)?s?|item|number)\s*#?\s*(\d{1,3})(?:\s*\(\s*([a-z])\s*\)|\s+part\s+([a-z])\b|([a-z])\b)?/gi;
+  for (const match of source.matchAll(pattern)) {
+    references.add(normaliseWorksheetQuestionNumber(`${match[1]}${match[2] || match[3] || match[4] || ""}`));
+  }
+  // Also accept a short, unambiguous request such as "7(a)".
+  if (!references.size && /^\s*\d{1,3}(?:\s*\([a-z]\)|[a-z])?\s*[?.]?\s*$/i.test(source)) {
+    references.add(normaliseWorksheetQuestionNumber(source.replace(/\?$/, "")));
+  }
+  return [...references].filter(Boolean);
 }
 
 function normaliseWorksheetQuestionNumber(value) {
-  const raw = String(value || "")
-    .trim()
-    .toUpperCase()
-    .replace(/^QUESTION\s*/i, "")
-    .replace(/^Q\s*/i, "")
-    .replace(/\s+/g, "");
-  if (!/^\d{1,3}[A-Z]?$/.test(raw)) {
-    return "";
-  }
-  return `Q${raw}`;
+  const raw = String(value || "").trim().replace(/^(?:question|q)\s*/i, "");
+  const match = raw.match(/^(\d{1,3})(?:\s*\(\s*([a-z])\s*\)|\s*([a-z]))?[.):\s]*$/i);
+  return match ? `Q${Number(match[1])}${(match[2] || match[3] || "").toUpperCase()}` : "";
 }
 
 function splitWorksheetTextIntoLines(text) {
@@ -375,31 +368,23 @@ function splitWorksheetTextIntoLines(text) {
 
 function getWorksheetQuestionLineMatch(line) {
   const source = String(line || "").trim();
-  if (!source) {
-    return null;
-  }
-
+  const label = "([0-9]{1,3}(?:\\s*\\([a-z]\\)|[a-z])?)";
   const patterns = [
-    /^(?:question|q)\s*([0-9]{1,3}[a-z]?)\b[\s:.)-]*(.*)$/i,
-    /^([0-9]{1,3}[a-z]?)\s*[\])}.:-]\s*(.+)$/i,
-    /^([0-9]{1,3}[a-z]?)\s+(?=[A-Z(])(.+)$/i
+    new RegExp(`^(?:question|q)\\s*${label}(?=\\s|[.):\\]-]|$)[\\s:.)-]*(.*)$`, "i"),
+    new RegExp(`^${label}\\s*[\\])}:.-](?!\\d)\\s*(.*)$`, "i"),
+    new RegExp(`^${label}\\s+([A-Za-z]{2,}\\b.*|\\([a-z]\\).*)$`, "i"),
+    new RegExp(`^${label}$`, "i"),
+    /^(\d{1,3}\s*\([a-z]\))\s*(.+)$/i
   ];
-
   for (const pattern of patterns) {
     const match = source.match(pattern);
-    if (!match) {
-      continue;
+    if (match) {
+      const questionNumber = normaliseWorksheetQuestionNumber(match[1]);
+      if (questionNumber) {
+        return { questionNumber, remainder: String(match[2] || "").trim() };
+      }
     }
-    const questionNumber = normaliseWorksheetQuestionNumber(match[1]);
-    if (!questionNumber) {
-      continue;
-    }
-    return {
-      questionNumber,
-      remainder: String(match[2] || "").trim()
-    };
   }
-
   return null;
 }
 
@@ -407,42 +392,54 @@ function buildWorksheetQuestionBlocks(text, pageNumber = 0) {
   const lines = splitWorksheetTextIntoLines(text);
   const blocks = [];
   let currentBlock = null;
-
-  lines.forEach((line) => {
+  for (const line of lines) {
     const questionLine = getWorksheetQuestionLineMatch(line);
     if (questionLine) {
-      if (currentBlock?.textLines?.length) {
-        blocks.push(currentBlock);
-      }
       currentBlock = {
         questionNumber: questionLine.questionNumber,
-        pageNumber: Math.max(1, Number(pageNumber || 0) || 0),
+        pageNumber: Math.max(1, Number(pageNumber) || 1),
         textLines: [line],
-        order: blocks.length
+        remainder: questionLine.remainder
       };
-      return;
-    }
-
-    if (currentBlock) {
+      blocks.push(currentBlock);
+    } else if (currentBlock) {
       currentBlock.textLines.push(line);
     }
-  });
-
-  if (currentBlock?.textLines?.length) {
-    blocks.push(currentBlock);
   }
-
-  return blocks
-    .map((block) => ({
+  return blocks.flatMap((block) => {
+    // A page footer containing only a number is not a question.
+    if (!block.remainder && block.textLines.length === 1) {
+      return [];
+    }
+    const result = [{
       questionNumber: block.questionNumber,
       pageNumber: block.pageNumber,
-      order: block.order,
-      text: clipText(block.textLines.join("\n").trim(), 2600)
-    }))
-    .filter((block) => block.questionNumber && block.text);
+      text: block.textLines.join("\n").trim()
+    }];
+    if (/^Q\d+$/.test(block.questionNumber)) {
+      const instructions = [];
+      let part = null;
+      for (const line of block.textLines) {
+        const match = line.match(/^(?:\(([a-z])\)|([a-z])[.)])\s*(.*)$/i);
+        if (match) {
+          part = {
+            questionNumber: `${block.questionNumber}${(match[1] || match[2]).toUpperCase()}`,
+            pageNumber: block.pageNumber,
+            text: [...instructions, line].join("\n")
+          };
+          result.push(part);
+        } else if (part) {
+          part.text += `\n${line}`;
+        } else {
+          instructions.push(line);
+        }
+      }
+    }
+    return result;
+  }).map((block, order) => ({ ...block, order }));
 }
 
-function findStructuredWorksheetQuestion({ references = [], pageVisuals = [] } = {}) {
+function findStructuredWorksheetQuestion({ references = [], pageVisuals = [], preferredPageNumber = 0 } = {}) {
   const normalizedReferences = new Set(
     (Array.isArray(references) ? references : [])
       .map((value) => normaliseWorksheetQuestionNumber(value))
@@ -452,22 +449,24 @@ function findStructuredWorksheetQuestion({ references = [], pageVisuals = [] } =
     return null;
   }
 
+  const matches = [];
   for (const page of Array.isArray(pageVisuals) ? pageVisuals : []) {
     const candidateBlocks = cleanDocumentQuestionBlocks(page?.questionBlocks).length
       ? cleanDocumentQuestionBlocks(page?.questionBlocks)
       : buildWorksheetQuestionBlocks(page?.text, page?.pageNumber);
-    const match = candidateBlocks.find((block) => normalizedReferences.has(block.questionNumber));
-    if (match) {
-      return {
+    for (const match of candidateBlocks.filter((block) => normalizedReferences.has(block.questionNumber))) {
+      matches.push({
         found: true,
         matchedQuestionNumber: match.questionNumber,
         extractedText: match.text,
-        pageNumber: match.pageNumber
-      };
+        pageNumber: page.pageNumber
+      });
     }
   }
-
-  return null;
+  const preferredMatches = matches.filter((match) => match.pageNumber === preferredPageNumber);
+  const candidates = preferredMatches.length ? preferredMatches : matches;
+  return candidates.length === 1 ? candidates[0]
+    : candidates.length > 1 ? { found: false, ambiguous: true } : null;
 }
 
 async function extractFocusedWorksheetQuestion({
@@ -476,7 +475,7 @@ async function extractFocusedWorksheetQuestion({
   documentContext = null
 } = {}) {
   const references = Array.isArray(worksheetQuestionReferences)
-    ? worksheetQuestionReferences.map((value) => String(value || "").trim()).filter(Boolean).slice(0, 4)
+    ? worksheetQuestionReferences.map(normaliseWorksheetQuestionNumber).filter(Boolean).slice(0, 4)
     : [];
   const pageVisuals = Array.isArray(documentContext?.pageVisuals) ? documentContext.pageVisuals : [];
   if (!references.length || !pageVisuals.length) {
@@ -485,10 +484,19 @@ async function extractFocusedWorksheetQuestion({
 
   const structuredMatch = findStructuredWorksheetQuestion({
     references,
-    pageVisuals
+    pageVisuals,
+    preferredPageNumber: documentContext?.preferredPageNumber
   });
-  if (structuredMatch?.found) {
+  if (structuredMatch?.ambiguous) {
     return structuredMatch;
+  }
+  const candidatePages = structuredMatch?.found
+    ? pageVisuals.filter((page) => page.pageNumber === structuredMatch.pageNumber)
+    : pageVisuals;
+  // Text extraction can confuse columns, equation numbers, and answer choices.
+  // When the original page is available, verify the label and wording visually.
+  if (!candidatePages.some((page) => page.askImageUrl || page.imageUrl)) {
+    return structuredMatch || { found: false };
   }
 
   const responsePayload = await callOpenAiJson("responses", {
@@ -500,7 +508,7 @@ async function extractFocusedWorksheetQuestion({
           {
             type: "input_text",
             text:
-              "You locate exact worksheet questions in school page images. Return only JSON. Do not solve the question. Match only the exact requested question number. Ignore nearby questions with different numbers."
+              "You locate exact worksheet questions in school page images. Return only JSON. Do not solve the question. Match only the exact requested question number, including any lettered part. The original image is authoritative over extracted text and candidate blocks. Distinguish question labels from page numbers, equation values, and answer options. Read columns separately. Include instructions, equations, units, options, and relevant diagram labels. Never substitute a nearby question. If the item is unreadable or ambiguous, return found: false."
           }
         ]
       },
@@ -512,11 +520,13 @@ async function extractFocusedWorksheetQuestion({
             text: JSON.stringify({
               requestedQuestion: String(question || "").trim(),
               targetQuestionNumbers: references,
-              instructions: "Find the exact requested worksheet item. Return the matched question number, page number, and a faithful transcription of that question only."
+              preferredPageNumber: documentContext?.preferredPageNumber || null,
+              candidateQuestion: structuredMatch?.found ? structuredMatch : null,
+              instructions: "Find the exact requested worksheet item. Prefer the current page if the number repeats and no other page is requested. Return {found: boolean, matchedQuestionNumber: string, pageNumber: number, extractedText: string}. Use the supplied PDF page number. Transcribe only the requested item with its shared instructions and diagram information. Return found: false if you cannot verify it."
             })
           },
-          ...pageVisuals.flatMap((page) => {
-            const content = [];
+          ...candidatePages.flatMap((page) => {
+            const content = [{ type: "input_text", text: `PDF page ${page.pageNumber}` }];
             if (page?.text) {
               content.push({
                 type: "input_text",
@@ -544,12 +554,13 @@ async function extractFocusedWorksheetQuestion({
   });
 
   const parsed = extractResponseJson(responsePayload);
-  const matchedQuestionNumber = String(parsed?.matchedQuestionNumber || "").trim().toUpperCase();
+  const matchedQuestionNumber = normaliseWorksheetQuestionNumber(parsed?.matchedQuestionNumber);
   const extractedText = String(parsed?.extractedText || parsed?.questionText || "").trim();
-  const pageNumber = Math.max(1, Number(parsed?.pageNumber || 0) || 0);
-  const found = Boolean(parsed?.found) || (matchedQuestionNumber && extractedText);
+  const pageNumber = Number(parsed?.pageNumber) || 0;
+  const found = parsed?.found === true;
   const normalizedReferences = new Set(references.map((value) => String(value || "").trim().toUpperCase()));
-  if (!found || !matchedQuestionNumber || !normalizedReferences.has(matchedQuestionNumber) || !extractedText) {
+  if (!found || !matchedQuestionNumber || !normalizedReferences.has(matchedQuestionNumber) || !extractedText
+    || !candidatePages.some((page) => page.pageNumber === pageNumber)) {
     return {
       found: false,
       matchedQuestionNumber,
@@ -561,7 +572,7 @@ async function extractFocusedWorksheetQuestion({
   return {
     found: true,
     matchedQuestionNumber,
-    extractedText: clipText(extractedText, 2400),
+    extractedText: extractedText.slice(0, 6000),
     pageNumber
   };
 }
@@ -1340,13 +1351,8 @@ async function parsePdfBuffer(buffer) {
 async function parsePdfBufferWithOcrFallback(buffer) {
   const pdfData = await parsePdfBuffer(buffer);
   const sparsePages = pdfData.pages.filter((page) => shouldOcrPdfPage(page)).length;
-  const needsOcrFallback =
-    sparsePages > 0 &&
-    (
-      sparsePages === pdfData.pages.length ||
-      sparsePages >= Math.ceil(pdfData.pages.length / 2) ||
-      getMeaningfulPdfText(pdfData.fullText).length < pdfData.pages.length * 30
-    );
+  // A single scanned worksheet page still needs OCR in an otherwise searchable PDF.
+  const needsOcrFallback = sparsePages > 0;
 
   if (!needsOcrFallback) {
     return {
@@ -1601,6 +1607,9 @@ async function requestAskModelAnswer({
   documentContext = null
 } = {}) {
   const worksheetQuestionReferences = extractWorksheetQuestionReferences(question);
+  if (worksheetQuestionReferences.length > 1) {
+    return "Please ask about one numbered question at a time so I can match it accurately to your PDF.";
+  }
   const focusedWorksheetQuestion = worksheetQuestionReferences.length
     ? await extractFocusedWorksheetQuestion({
         question,
@@ -1608,6 +1617,11 @@ async function requestAskModelAnswer({
         documentContext
       })
     : null;
+  if (worksheetQuestionReferences.length && !focusedWorksheetQuestion?.found) {
+    return focusedWorksheetQuestion?.ambiguous
+      ? `I found more than one ${worksheetQuestionReferences[0]} in the supplied pages. Please include the PDF page number.`
+      : `I couldn't verify ${worksheetQuestionReferences[0]} in the supplied PDF pages. Open the page containing it and include its page number, or paste the exact question.`;
+  }
   const effectiveDocumentContext =
     focusedWorksheetQuestion?.found && documentContext
       ? {
@@ -1615,8 +1629,7 @@ async function requestAskModelAnswer({
           content: [
             `Exact worksheet item: ${focusedWorksheetQuestion.matchedQuestionNumber}`,
             focusedWorksheetQuestion.pageNumber ? `Page: ${focusedWorksheetQuestion.pageNumber}` : "",
-            `Transcribed question:\n${focusedWorksheetQuestion.extractedText}`,
-            documentContext.content || ""
+            `Transcribed question:\n${focusedWorksheetQuestion.extractedText}`
           ].filter(Boolean).join("\n\n"),
           pageVisuals: Array.isArray(documentContext.pageVisuals)
             ? documentContext.pageVisuals.filter((page) => Number(page?.pageNumber || 0) === focusedWorksheetQuestion.pageNumber)
@@ -1655,7 +1668,7 @@ async function requestAskModelAnswer({
       ? `If the student refers to a numbered worksheet question such as ${worksheetQuestionReferences.join(", ")}, first locate that exact question number in the supplied page images or extracted text. Answer only from that exact numbered item. Ignore nearby questions with different numbers. If the exact question number is not visible, say so clearly instead of answering a different question.`
       : "";
   const extractedWorksheetInstruction = focusedWorksheetQuestion?.found
-    ? `Use the extracted worksheet item ${focusedWorksheetQuestion.matchedQuestionNumber} below as the primary source. Do not switch to a different nearby question.`
+    ? `Use the verified worksheet item ${focusedWorksheetQuestion.matchedQuestionNumber} below as the primary source. Start by naming ${focusedWorksheetQuestion.matchedQuestionNumber} and PDF page ${focusedWorksheetQuestion.pageNumber}, then briefly restate the question so the student can check the match. Do not switch to a different nearby question. Previous chat answers are not source evidence.`
     : "";
   const responsePayload = await callOpenAiJson("responses", {
     model: "gpt-4o-mini",
@@ -1691,7 +1704,7 @@ async function requestAskModelAnswer({
                 subjectName,
                 question: clipText(String(question || "").trim(), 800),
                 worksheetQuestionReferences,
-                recentHistory,
+                recentHistory: focusedWorksheetQuestion?.found ? [] : recentHistory,
                 nextAssessment,
                 focusedWorksheetQuestion: focusedWorksheetQuestion?.found
                   ? {
@@ -1718,7 +1731,7 @@ async function requestAskModelAnswer({
             ? [
                 {
                   type: "input_text",
-                  text: `Focus on worksheet item(s): ${worksheetQuestionReferences.join(", ")}. Ignore nearby question numbers unless the exact item is unclear in the source.`
+                  text: `Focus only on worksheet item: ${worksheetQuestionReferences.join(", ")}. Never substitute a nearby question.`
                 }
               ]
             : []),
